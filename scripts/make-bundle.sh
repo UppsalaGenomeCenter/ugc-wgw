@@ -41,7 +41,7 @@ while [ $# -gt 0 ]; do
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
-[ -n "$ref" ] && [ -n "$out" ] || { echo "--version <git ref> and --out <dir> are required" >&2; exit 2; }
+if [ -z "$ref" ] || [ -z "$out" ]; then echo "--version <git ref> and --out <dir> are required" >&2; exit 2; fi
 case "$images" in all|ugc-wgw|data|none) ;; *) echo "--images must be all, ugc-wgw, data or none" >&2; exit 2 ;; esac
 [ -n "$pyver" ] || pyver=$(python3 -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')
 out=$(mkdir -p "$out" && cd "$out" && pwd)

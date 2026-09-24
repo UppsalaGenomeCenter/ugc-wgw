@@ -77,7 +77,7 @@ cmd_init() {
       *) die "init: unknown option $1" ;;
     esac
   done
-  [ -f "$smoke/data/samples.tsv" ] && [ -f "$smoke/data/cohort.txt" ] || die "no smoke data under $smoke/data; run tests/smoke/prepare.sh"
+  if [ ! -f "$smoke/data/samples.tsv" ] || [ ! -f "$smoke/data/cohort.txt" ]; then die "no smoke data under $smoke/data; run tests/smoke/prepare.sh"; fi
   # default runs in flight: two, except a GPU flavour without SLURM, where every task sees every GPU and two
   # call_variants processes on one card end in CUDA_ERROR_OUT_OF_MEMORY (SLURM confines devices per job)
   if [ -z "$inflight" ]; then

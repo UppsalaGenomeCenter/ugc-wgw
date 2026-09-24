@@ -42,7 +42,7 @@ while [ $# -gt 0 ]; do
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
-[ -n "$bundle" ] && [ -n "$prefix" ] || { echo "--bundle <tar> and --prefix <root> are required" >&2; exit 2; }
+if [ -z "$bundle" ] || [ -z "$prefix" ]; then echo "--bundle <tar> and --prefix <root> are required" >&2; exit 2; fi
 [ -f "$bundle" ] || { echo "bundle not found: $bundle" >&2; exit 1; }
 python_exe=${python_exe:-python3}
 command -v "$python_exe" >/dev/null || { echo "python not found: $python_exe" >&2; exit 1; }
@@ -66,7 +66,7 @@ rm -rf "$staging"
 mkdir -p "$staging"
 tar -C "$staging" -xf "$bundle"
 name=$(ls "$staging")
-[ -n "$name" ] && [ -d "$staging/$name" ] || die "unexpected bundle layout"
+if [ -z "$name" ] || [ ! -d "$staging/$name" ]; then die "unexpected bundle layout"; fi
 src="$staging/$name"
 [ -f "$src/manifest.json" ] || die "manifest.json missing"
 log "   verifying every file in manifest.json"

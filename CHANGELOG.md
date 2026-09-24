@@ -3,6 +3,11 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.4.1
+
+Patch release: the shell scripts pass shellcheck 0.9.0, which the CI runs.
+No workflow or driver change; a 0.4.0 bundle stays valid.
+
 ## 0.4.0
 
 First public release. Built on PacBio HiFi-human-WGS-WDL v4.0.0

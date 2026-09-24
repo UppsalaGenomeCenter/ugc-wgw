@@ -1,0 +1,21 @@
+# ugc-wgw-miniwdl: the miniwdl task plugin that applies the site's per-task resource policy.
+# Built into a wheel by scripts/make-bundle.sh (dev machine, network for setuptools) and
+# installed into the bundle's venv by scripts/install-bundle.sh (offline). Bump `version`
+# whenever the plugin's code changes; the bundle version is separate.
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ugc-wgw-miniwdl"
+version = "0.2.0"
+description = "miniwdl task plugin: per-task CPU, memory, wall time, partition and constraint from a site policy file"
+requires-python = ">=3.9"
+dependencies = []
+license = {text = "MIT"}
+
+[project.entry-points."miniwdl.plugin.task"]
+ugc_wgw_resources = "ugc_wgw_miniwdl.resources:task"
+
+[tool.setuptools.packages.find]
+include = ["ugc_wgw_miniwdl*"]

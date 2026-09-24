@@ -1,0 +1,9 @@
+# Expected outputs of ugc_wgw_cohort_freq in every mode, one glob per line relative to out/.
+# The small-variant files need a joint VCF: cohort_call (joint) or cohort_merge with run_glnexus (standalone default).
+small_variant_freq_vcf/*.freq.*.small_variants.vcf.gz
+small_variant_freq_vcf_index/*.freq.*.small_variants.vcf.gz.tbi
+sv_freq_vcf/*.freq.*.structural_variants.vcf.gz
+sv_freq_vcf_index/*.freq.*.structural_variants.vcf.gz.tbi
+freq_summary/*.freq.*.summary.tsv
+freq_samples/*.freq.*.samples.tsv
+ugc_wgw_manifest/*.cohort_freq.ugc_wgw_manifest.json

@@ -1,0 +1,6 @@
+# Engine shipped in the code bundle (docs/DESIGN.md §14). Exact pins; installed on the HPC with
+# `pip install --no-index --find-links wheels/`. Upstream requires miniwdl >= 1.9.0.
+# Wheels are downloaded for the Python minor version recorded in the bundle manifest
+# (make-bundle.sh --python-version); the HPC python3 must match it.
+miniwdl==1.15.0
+miniwdl-slurm==0.4.0

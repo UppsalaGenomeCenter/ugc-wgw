@@ -1,0 +1,14 @@
+{
+  "ugc_wgw_singleton.ugc_wgw_version": "<ugc_wgw_version>",
+  "ugc_wgw_singleton.sample_id": "String",
+  "ugc_wgw_singleton.hifi_reads": [
+    "File"
+  ],
+  "ugc_wgw_singleton.fail_reads": "Array[File]? (optional)",
+  "ugc_wgw_singleton.use_alignment_chunking": true,
+  "ugc_wgw_singleton.use_gpu": false,
+  "ugc_wgw_singleton.use_parabricks_deepvariant": false,
+  "ugc_wgw_singleton.ref_map_file": "<local_path_prefix>/ugc_wgw_ref_map.GRCh38_GIABv3.tsv",
+  "ugc_wgw_singleton.backend": "HPC",
+  "ugc_wgw_singleton.preemptible": true
+}

@@ -1,0 +1,27 @@
+# Site values for scripts/install-bundle.sh --site <file>. KEY=VALUE lines, no shell expansion.
+# Every key is optional; defaults are shown. <prefix> is replaced by the install root.
+# miniwdl [scheduler] task_concurrency, per miniwdl process
+TASK_CONCURRENCY=50
+# shared call cache across versions (safe: keys include the task's digest)
+CALL_CACHE_DIR=<prefix>/call_cache
+# SLURM partition and account for every task job (sbatch --partition/--account); a row in the
+# resource policy can move single tasks to another partition. Empty = sbatch's own defaults.
+SLURM_PARTITION=core
+SLURM_ACCOUNT=<account>
+# GPU tasks (config.json deepvariant = gpu | parabricks): their partition and account (sbatch
+# --partition/--account of the jobs that carry --gres gpu:...), and SINGULARITY_NV=1 to add "--nv"
+# to every Apptainer call so the containers see the node's GPUs. Leave empty/0 on a cluster without GPUs.
+SLURM_PARTITION_GPU=
+SLURM_ACCOUNT_GPU=
+SINGULARITY_NV=0
+# other sbatch arguments appended to every task job: qos, reservation, ... Never the partition or
+# account: sbatch keeps the last --partition it sees, which would defeat per-task rows.
+SLURM_EXTRA_ARGS=
+# default wall time for tasks that set none (minutes); 3 days
+TASK_TIME_MINUTES=4320
+# caps on any task's request, from the node shape of the partition (miniwdl rounds larger
+# requests down): cores, and memory with a binary unit (375G = 384000 MB nodes). 0 = no cap.
+TASK_CPU_MAX=0
+TASK_MEMORY_MAX=0
+# the per-task resource policy (created from backends/hpc/resources.tsv.example when absent)
+TASK_RESOURCES=<prefix>/resources.tsv

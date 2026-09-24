@@ -1,0 +1,3 @@
+# Standalone mode only: run_glnexus defaults to true there (joint mode gets the cohort VCF from cohort_call).
+cohort_small_variant_vcf/*.merged.*.small_variants.vcf.gz
+cohort_small_variant_vcf_index/*.merged.*.small_variants.vcf.gz.tbi

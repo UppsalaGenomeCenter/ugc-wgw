@@ -1,0 +1,18 @@
+{
+  "ugc_wgw_assembly.ugc_wgw_version": "<ugc_wgw_version>",
+  "ugc_wgw_assembly.sample_id": "String",
+  "ugc_wgw_assembly.hifi_reads": [
+    "File"
+  ],
+  "ugc_wgw_assembly.father_id": "String? (optional, trio: set with father_hifi_reads)",
+  "ugc_wgw_assembly.mother_id": "String? (optional, trio: set with mother_hifi_reads)",
+  "ugc_wgw_assembly.father_hifi_reads": "Array[File]? (optional, trio)",
+  "ugc_wgw_assembly.mother_hifi_reads": "Array[File]? (optional, trio)",
+  "ugc_wgw_assembly.hifiasm_extra_params": "String? (optional)",
+  "ugc_wgw_assembly.hifiasm_threads": 48,
+  "ugc_wgw_assembly.hifiasm_mem_gb": 288,
+  "ugc_wgw_assembly.ref_map_file": "<local_path_prefix>/ugc_wgw_ref_map.GRCh38_GIABv3.tsv",
+  "ugc_wgw_assembly.ugc_wgw_container_registry": "<ugc_wgw_container_registry>",
+  "ugc_wgw_assembly.backend": "HPC",
+  "ugc_wgw_assembly.preemptible": true
+}

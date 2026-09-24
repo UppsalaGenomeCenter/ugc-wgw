@@ -1,0 +1,21 @@
+#!/usr/bin/env python3
+"""ugc-wgw — driver for ugc-pacbio-wgw (docs/DESIGN.md §8).
+
+Usage:
+  ugc-wgw init <project_dir> --install <dir> --ref-map F
+  ugc-wgw samples add <samples.tsv>
+  ugc-wgw cohort freeze <cohort_id> --samples <ids.txt>
+  ugc-wgw submit --mode standalone [--cohort <id>] [--max-inflight N] [--dry-run]
+  ugc-wgw status | ugc-wgw logs <subject> --stage S | ugc-wgw inputs <subject> --stage S | ugc-wgw retry --stage S
+
+Requires: python3 >= 3.9 (stdlib only). See bin/README.md.
+"""
+import pathlib
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+from ugc_wgw.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(main())

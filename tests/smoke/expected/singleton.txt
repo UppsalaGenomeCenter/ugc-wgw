@@ -1,0 +1,33 @@
+# Expected outputs of ugc_wgw_singleton, one glob per line relative to the run's out/ (miniwdl layout out/<output>/<file>).
+# Presence and non-emptiness only. kivvi (KIV-2 on chr6, D4Z4 on chr4) sees no reads in chr20 data and still writes its
+# JSON (call_status failed_due_to_no_reads), VCF and BAM; only the allele plots are absent. All six are File? because the
+# task tolerates a kivvi failure on low coverage (a msg line instead of outputs).
+stats_file/*.stats.txt
+msg_file/*.messages.txt
+read_quality_plot/*
+sv_stats_plot/*
+merged_haplotagged_bam/*.haplotagged.bam
+merged_haplotagged_bam_index/*.haplotagged.bam.bai
+mosdepth_summary/*
+phase_stats/*
+phased_sv_vcf/*.vcf.gz
+phased_sv_vcf_index/*.tbi
+sv_supporting_reads/*
+sv_copynum_bedgraph/*
+phased_small_variant_vcf/*.vcf.gz
+phased_small_variant_vcf_index/*.tbi
+small_variant_gvcf/*.g.vcf.gz
+small_variant_gvcf_index/*.tbi
+small_variant_stats/*
+phased_trgt_vcf/*.vcf.gz
+phased_trgt_vcf_index/*.tbi
+trgt_spanning_reads/*.bam
+trgt_coverage_dropouts/*
+cpg_pileup_bed/*
+kivvi_kiv2_json/*.kivvi.kiv2.json
+kivvi_kiv2_vcf/*.kivvi.kiv2.vcf.gz
+kivvi_d4z4_json/*.kivvi.d4z4.json
+kivvi_d4z4_vcf/*.kivvi.d4z4.vcf.gz
+mitorsaw_vcf/*.vcf.gz
+pbstarphase_summary/*
+ugc_wgw_manifest/*.singleton.ugc_wgw_manifest.json

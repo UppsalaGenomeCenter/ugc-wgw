@@ -1,0 +1,18 @@
+# Expected outputs of ugc_wgw_upstream with defaults (run_sawfish_call=true), one glob per line relative to out/.
+aligned_hifi_reads/*.bam
+aligned_hifi_reads_index/*.bam.bai
+mosdepth_summary/*
+discover_tar/*.tar
+sv_vcf/*.structural_variants.vcf.gz
+sv_vcf_index/*.tbi
+sv_copynum_bedgraph/*
+small_variant_vcf/*.vcf.gz
+small_variant_vcf_index/*.tbi
+small_variant_gvcf/*.g.vcf.gz
+small_variant_gvcf_index/*.tbi
+mitorsaw_vcf/*.vcf.gz
+kivvi_kiv2_json/*.kivvi.kiv2.json
+kivvi_kiv2_vcf/*.kivvi.kiv2.vcf.gz
+kivvi_d4z4_json/*.kivvi.d4z4.json
+kivvi_d4z4_vcf/*.kivvi.d4z4.vcf.gz
+ugc_wgw_manifest/*.upstream.ugc_wgw_manifest.json

@@ -1,0 +1,19 @@
+# miniwdl / runs
+_LAST
+*.miniwdl_run/
+work/
+# bundles and caches are never committed
+bundle/out/
+*.sif
+*.tar
+*.tar.gz
+wheels/
+# driver state
+.ugc-wgw/
+*.sqlite
+# python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+plugins/ugc_wgw_miniwdl/build/

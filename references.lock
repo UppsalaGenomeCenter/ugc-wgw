@@ -1,0 +1,52 @@
+{
+  "schema": 2,
+  "bundles": {
+    "hifi-wdl-resources": {
+      "version": "4.0.0",
+      "build": "GRCh38_GIABv3",
+      "source": "quay.io/pacbio/workflow-data-container-hifi-human-wgs-wdl-grch38_giabv3@sha256:f3799c1eff1b816a95ea06ce567d3324d06e945428567077d96eca07c76ad0aa",
+      "source_kind": "container",
+      "container_paths": {
+        "data": "/opt/data/GRCh38_GIABv3",
+        "manifest": "/opt/manifests/manifest.json",
+        "unpack_script": "/opt/scripts/unpack_container.py 1.1.0"
+      },
+      "install_subdir": "hifi-wdl-resources-v4.0.0-GRCh38_GIABv3",
+      "files": [
+        {"name": "GRCh38_GIABv3/human_GRCh38_GIABv3_no_alt_analysis_set_maskedGRC_decoys_MAP2K3_KMT2C_KCNJ18.fasta", "md5": "99be410b684e3fdb04ba67d98adba249", "bytes": 3145187795},
+        {"name": "GRCh38_GIABv3/human_GRCh38_GIABv3_no_alt_analysis_set_maskedGRC_decoys_MAP2K3_KMT2C_KCNJ18.fasta.fai", "md5": "a5bf6abc1f5efecc0a510f3120d08a3b", "bytes": 9001},
+        {"name": "GRCh38_GIABv3/methbat/cpgIslandExt.sorted.hg38.tsv", "md5": "af3e4b38d1fbe77fa587c0eccf8e6724", "bytes": 1066043},
+        {"name": "GRCh38_GIABv3/sawfish/annotation_and_common_cnv.GRCh38_GIABv3.bed.gz", "md5": "45a062410b59ea156e9bbdfdae4d8d98", "bytes": 36998},
+        {"name": "GRCh38_GIABv3/sawfish/annotation_and_common_cnv.GRCh38_GIABv3.bed.gz.tbi", "md5": "e96ac55c859ab01c07a908737d86fcf3", "bytes": 14598},
+        {"name": "GRCh38_GIABv3/sawfish/expected_cn.hg38.XX.bed", "md5": "cda5604d4cc4645657cf3e5c755ccb5b", "bytes": 203},
+        {"name": "GRCh38_GIABv3/sawfish/expected_cn.hg38.XY.bed", "md5": "e7bf2861de660e74a27232b5a2136d9a", "bytes": 203},
+        {"name": "GRCh38_GIABv3/trgt/adotto_strchive_20250827.hg38.bed.gz", "md5": "2b039907d043f722a91083ac704e8197", "bytes": 18572456},
+        {"name": "manifest.json", "md5": "f51386d9760153c8230b60907b25240a", "bytes": 2770}
+      ],
+      "scalars": {
+        "max_norm_female_chrY_depth": 0.1,
+        "paraphase_genome_build": "38",
+        "run_starphase": true
+      },
+      "archival": {
+        "source": "https://zenodo.org/records/21517827",
+        "files": [
+          {"name": "hifi-wdl-resources-v4.0.0-GRCh38_GIABv3.tar", "md5": "b0475c5790646733f29a4f105b1e30cb", "bytes": 3164907520}
+        ]
+      },
+      "compatible_with": {
+        "hifi-human-wgs-wdl": "v4.0.0"
+      },
+      "notes": "Verified 2026-09-22 against the container's /opt/manifests/manifest.json (12 entries: ref_name, eight files, three scalars) and file md5s; the same container upstream's singleton.wdl unpacks in every run (unpack_container_manifest). install-bundle.sh copies container_paths.data and container_paths.manifest out of the bundled SIF into <references>/<install_subdir>/ once (the archival Zenodo tar has the same layout), checks every md5, and renders references/ugc_wgw_ref_map.GRCh38_GIABv3.template.tsv against the manifest. The GRCh38 (no decoys) build is not installed: one build per bundle (DESIGN §10.4)."
+    },
+    "ugc-wgw-extras": {
+      "version": "0.2.0",
+      "source": "this repository (references/)",
+      "files": [
+        {"name": "scatter_regions.GRCh38_GIABv3.tsv", "sha256": "71edfe2d9e45f98599c24de49591d4e1436843e5493f21513fccf7d2b4fdd562"}
+      ],
+      "install_subdir": "ugc-wgw-extras-0.2.0",
+      "notes": "scatter_regions.GRCh38_GIABv3.tsv: scripts/make-scatter-regions.py --rest-shard rest on the container's fasta.fai (md5 a5bf6abc1f5efecc0a510f3120d08a3b): 26 shards = 25 primary contigs + rest (193 contigs: the 170 GRCh38 unplaced/unlocalized/decoy contigs plus the 23 GIABv3 decoys MAP2K3, KCNJ18 and KMT2C). 0.1.0 was the GRCh38 (v3.1.0 bundle) table."
+    }
+  }
+}

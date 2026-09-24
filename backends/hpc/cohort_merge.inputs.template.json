@@ -1,0 +1,34 @@
+{
+  "ugc_wgw_cohort_merge.ugc_wgw_version": "<ugc_wgw_version>",
+  "ugc_wgw_cohort_merge.cohort_id": "String",
+  "ugc_wgw_cohort_merge.sample_ids": [
+    "String"
+  ],
+  "ugc_wgw_cohort_merge.sv_vcfs": [
+    "File (phased_sv_vcf per sample)"
+  ],
+  "ugc_wgw_cohort_merge.sv_vcf_indices": [
+    "File"
+  ],
+  "ugc_wgw_cohort_merge.sv_merge_method": "svx",
+  "ugc_wgw_cohort_merge.trgt_vcfs": [
+    "File (phased_trgt_vcf / trgt_vcf per sample)"
+  ],
+  "ugc_wgw_cohort_merge.trgt_vcf_indices": [
+    "File"
+  ],
+  "ugc_wgw_cohort_merge.run_glnexus": true,
+  "ugc_wgw_cohort_merge.gvcfs": [
+    "File (small_variant_gvcf per sample)"
+  ],
+  "ugc_wgw_cohort_merge.gvcf_indices": [
+    "File"
+  ],
+  "ugc_wgw_cohort_merge.merge_phased_small_variants": false,
+  "ugc_wgw_cohort_merge.phased_small_variant_vcfs": "Array[File]? (optional)",
+  "ugc_wgw_cohort_merge.phased_small_variant_vcf_indices": "Array[File]? (optional)",
+  "ugc_wgw_cohort_merge.ref_map_file": "<local_path_prefix>/ugc_wgw_ref_map.GRCh38_GIABv3.tsv",
+  "ugc_wgw_cohort_merge.ugc_wgw_container_registry": "<ugc_wgw_container_registry>",
+  "ugc_wgw_cohort_merge.backend": "HPC",
+  "ugc_wgw_cohort_merge.preemptible": true
+}

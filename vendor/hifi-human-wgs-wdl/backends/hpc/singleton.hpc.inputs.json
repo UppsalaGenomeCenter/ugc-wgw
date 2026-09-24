@@ -1,0 +1,10 @@
+{
+  "humanwgs_singleton.sample_id": "String",
+  "humanwgs_singleton.hifi_reads": [
+    "File"
+  ],
+  "humanwgs_singleton.fail_reads": "Array[File]? (optional)",
+  "humanwgs_singleton.use_gpu": false,
+  "humanwgs_singleton.use_parabricks_deepvariant": false,
+  "humanwgs_singleton.backend": "HPC"
+}

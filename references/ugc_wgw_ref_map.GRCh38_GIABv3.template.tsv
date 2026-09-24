@@ -1,0 +1,18 @@
+# ugc-pacbio-wgw reference map for one build (docs/DESIGN.md §10.4). Tab-separated: key<TAB>value.
+# install-bundle.sh copies the build's /opt/data tree and /opt/manifests/manifest.json out of upstream's workflow data
+# container (references.lock: hifi-wdl-resources) into <local_path_prefix>/hifi-wdl-resources-v4.0.0-GRCh38_GIABv3/,
+# renders this template and checks it against that manifest; the keys are the manifest's entries (files and scalars,
+# as singleton.wdl reads them from unpack_container_manifest) plus scatter_regions from ugc-wgw-extras.
+name	GRCh38_GIABv3
+fasta	<local_path_prefix>/hifi-wdl-resources-v4.0.0-GRCh38_GIABv3/GRCh38_GIABv3/human_GRCh38_GIABv3_no_alt_analysis_set_maskedGRC_decoys_MAP2K3_KMT2C_KCNJ18.fasta
+fasta_index	<local_path_prefix>/hifi-wdl-resources-v4.0.0-GRCh38_GIABv3/GRCh38_GIABv3/human_GRCh38_GIABv3_no_alt_analysis_set_maskedGRC_decoys_MAP2K3_KMT2C_KCNJ18.fasta.fai
+max_norm_female_chrY_depth	0.1
+trgt_tandem_repeat_bed	<local_path_prefix>/hifi-wdl-resources-v4.0.0-GRCh38_GIABv3/GRCh38_GIABv3/trgt/adotto_strchive_20250827.hg38.bed.gz
+sawfish_exclude_bed	<local_path_prefix>/hifi-wdl-resources-v4.0.0-GRCh38_GIABv3/GRCh38_GIABv3/sawfish/annotation_and_common_cnv.GRCh38_GIABv3.bed.gz
+sawfish_exclude_bed_index	<local_path_prefix>/hifi-wdl-resources-v4.0.0-GRCh38_GIABv3/GRCh38_GIABv3/sawfish/annotation_and_common_cnv.GRCh38_GIABv3.bed.gz.tbi
+sawfish_expected_bed_male	<local_path_prefix>/hifi-wdl-resources-v4.0.0-GRCh38_GIABv3/GRCh38_GIABv3/sawfish/expected_cn.hg38.XY.bed
+sawfish_expected_bed_female	<local_path_prefix>/hifi-wdl-resources-v4.0.0-GRCh38_GIABv3/GRCh38_GIABv3/sawfish/expected_cn.hg38.XX.bed
+methbat_region_tsv	<local_path_prefix>/hifi-wdl-resources-v4.0.0-GRCh38_GIABv3/GRCh38_GIABv3/methbat/cpgIslandExt.sorted.hg38.tsv
+paraphase_genome_build	38
+run_starphase	true
+scatter_regions	<local_path_prefix>/ugc-wgw-extras-0.2.0/scatter_regions.GRCh38_GIABv3.tsv

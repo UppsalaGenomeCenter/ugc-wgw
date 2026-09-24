@@ -1,0 +1,5 @@
+# one sample ID per line; order is significant and frozen with the cohort
+HG002
+HG003
+HG004
+NA12878    # anything after the first token is ignored

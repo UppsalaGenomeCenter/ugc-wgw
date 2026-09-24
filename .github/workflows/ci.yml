@@ -1,0 +1,19 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends shellcheck
+      - run: pip install --no-cache-dir "$(grep '^miniwdl==' bundle/requirements.txt)"
+      - run: shellcheck scripts/*.sh tests/*.sh tests/smoke/*.sh
+      - run: python3 -m py_compile scripts/*.py bin/ugc-wgw bin/ugc_wgw/*.py plugins/ugc_wgw_miniwdl/ugc_wgw_miniwdl/*.py tests/driver/*.py tests/docs/*.py tests/plugin/*.py
+      - run: python3 -m unittest discover -s tests/driver -t .
+      - run: python3 -m unittest discover -s tests/docs -t .
+      - run: python3 -m unittest discover -s tests/plugin -t .
+      - run: tests/check.sh
+      - run: tests/bundle.sh

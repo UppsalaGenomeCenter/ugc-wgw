@@ -1,0 +1,20 @@
+{
+  "ugc_wgw_cohort_freq.ugc_wgw_version": "<ugc_wgw_version>",
+  "ugc_wgw_cohort_freq.cohort_id": "String",
+  "ugc_wgw_cohort_freq.sample_ids": [
+    "String"
+  ],
+  "ugc_wgw_cohort_freq.sample_sexes": [
+    "String (XX, XY or empty per member)"
+  ],
+  "ugc_wgw_cohort_freq.sample_sex_sources": [
+    "String (sheet, inferred or empty per member)"
+  ],
+  "ugc_wgw_cohort_freq.small_variant_vcf": "File? (cohort_small_variant_vcf of cohort_call, or of cohort_merge with run_glnexus)",
+  "ugc_wgw_cohort_freq.small_variant_vcf_index": "File? (optional)",
+  "ugc_wgw_cohort_freq.sv_vcf": "File (cohort_sv_vcf of cohort_merge)",
+  "ugc_wgw_cohort_freq.sv_vcf_index": "File",
+  "ugc_wgw_cohort_freq.ref_map_file": "<local_path_prefix>/ugc_wgw_ref_map.GRCh38_GIABv3.tsv",
+  "ugc_wgw_cohort_freq.backend": "HPC",
+  "ugc_wgw_cohort_freq.preemptible": true
+}

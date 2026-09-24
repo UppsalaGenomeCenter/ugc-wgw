@@ -1,0 +1,8 @@
+# Expected outputs of ugc_wgw_cohort_merge in every mode (svx), one glob per line relative to out/.
+# Mode-specific additions live in cohort_merge.<mode>.txt (run.sh check reads both).
+cohort_sv_vcf/*.merged.*.structural_variants.vcf.gz
+cohort_sv_vcf_index/*.merged.*.structural_variants.vcf.gz.tbi
+cohort_trgt_vcf/*.merged.*.trgt.vcf.gz
+cohort_trgt_vcf_index/*.merged.*.trgt.vcf.gz.tbi
+cohort_trgt_lps/*.merged.*.trgt.lps.tsv
+ugc_wgw_manifest/*.cohort_merge.ugc_wgw_manifest.json

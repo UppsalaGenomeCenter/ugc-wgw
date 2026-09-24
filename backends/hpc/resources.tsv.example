@@ -1,0 +1,19 @@
+# Site resource policy for ugc-pacbio-wgw (docs/guide/12-resources.md). Installed as
+# <prefix>/resources.tsv; applied to every task by the ugc_wgw_resources miniwdl plugin at launch.
+#
+# Tab-separated, header required. task = a task name or glob (deepvariant_*); every matching
+# row applies in file order, a later row's cells override an earlier row's. '-' or an empty cell
+# keeps what the task declared. memory needs a binary unit (256G = 256 GiB, as the WDL declares
+# and SLURM's --mem counts); time is sbatch syntax (minutes, HH:MM:SS, D-HH:MM:SS).
+# The declared values of every task are in code/backends/hpc/resources.declared.tsv: copy rows
+# from there (its extra columns are ignored) and edit the cells you want to change.
+#
+# Rows apply after the site caps (TASK_CPU_MAX, TASK_MEMORY_MAX) and are not capped by them.
+# A partition here only takes effect when SLURM_PARTITION, not SLURM_EXTRA_ARGS, names the default.
+# Lowering cpu leaves a command's own --threads as declared (oversubscribed, still correct);
+# lowering memory below a tool's own budget (glnexus --mem-gbytes) can get it killed.
+task	cpu	memory	time	partition	constraint
+#deepvariant_call_variants_cpu	48	-	-	-	-
+#ugc_wgw_hifiasm_assemble	-	-	2-00:00:00	fat	-
+#glnexus	-	200G	-	-	-
+#deepvariant_*	-	-	12:00:00	-	-

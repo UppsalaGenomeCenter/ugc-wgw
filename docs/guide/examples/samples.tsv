@@ -1,0 +1,5 @@
+sample_id	sex	hifi_reads	fail_reads	father_id	mother_id	batch
+HG002	MALE	/proj/data/HG002/m84011_220902_175841_s1.hifi_reads.bam,/proj/data/HG002/m84011_220902_181944_s2.hifi_reads.bam	/proj/data/HG002/m84011_220902_175841_s1.fail_reads.bam	HG003	HG004	2026-01
+HG003	MALE	/proj/data/HG003/m84010_220919_233127_s1.hifi_reads.bam				2026-01
+HG004	FEMALE	/proj/data/HG004/m84010_220919_235306_s2.hifi_reads.bam				2026-01
+NA12878		/proj/data/NA12878/m84039_230101_120000_s3.hifi_reads.bam				2026-02

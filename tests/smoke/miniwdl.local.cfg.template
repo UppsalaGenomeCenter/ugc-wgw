@@ -1,0 +1,39 @@
+# miniwdl configuration for running the smoke test on one machine without SLURM
+# (dev machine). Rendered by tests/smoke/run.sh init; the HPC smoke uses the
+# installed miniwdl.cfg instead (run.sh init --install). Mirrors
+# backends/hpc/miniwdl.cfg.template except for the backend and the concurrency.
+
+[scheduler]
+container_backend = singularity
+# tasks in flight per miniwdl process; miniwdl also reserves cpu/memory per task
+# against the host, and rounds a task's cpu request down to the host's cores
+task_concurrency = {{TASK_CONCURRENCY}}
+fail_fast = false
+
+[file_io]
+allow_any_input = true
+copy_input_files = false
+output_hardlinks = true
+delete_work = success
+
+[call_cache]
+put = true
+get = true
+dir = {{CALL_CACHE_DIR}}
+
+[singularity]
+exe = ["apptainer"]
+image_cache = {{SIF_CACHE_DIR}}
+run_options = ["--containall", "--no-mount", "hostfs"]
+
+[task_runtime]
+command_shell = /bin/bash
+# replaces miniwdl's built-in defaults; "docker" must stay (miniwdl reads it before every pull)
+defaults = {
+    "docker": "ubuntu:20.04",
+    "maxRetries": 1
+  }
+
+[ugc_wgw]
+# the site resource policy (docs/guide/12-resources.md); the local smoke ships the example (no active rows)
+resources = {{RESOURCES_FILE}}

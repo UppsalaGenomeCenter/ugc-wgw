@@ -1,0 +1,20 @@
+# Expected outputs of ugc_wgw_downstream, one glob per line relative to out/.
+stats_file/*.stats.txt
+msg_file/*.messages.txt
+merged_haplotagged_bam/*.haplotagged.bam
+merged_haplotagged_bam_index/*.haplotagged.bam.bai
+phased_small_variant_vcf/*.phased.vcf.gz
+phased_small_variant_vcf_index/*.tbi
+phased_sv_vcf/*.phased.vcf.gz
+phased_sv_vcf_index/*.tbi
+phase_stats/*
+read_quality_plot/*
+sv_stats_plot/*
+small_variant_stats/*
+trgt_vcf/*.trgt.sorted.vcf.gz
+trgt_vcf_index/*.tbi
+trgt_spanning_reads/*.bam
+trgt_coverage_dropouts/*
+cpg_pileup_bed/*
+pbstarphase_json/*
+ugc_wgw_manifest/*.downstream.ugc_wgw_manifest.json

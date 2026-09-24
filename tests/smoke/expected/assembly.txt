@@ -1,0 +1,14 @@
+# Expected outputs of ugc_wgw_assembly (sample or trio mode), one glob per line relative to out/ (arrays: name/<i>/file).
+zipped_assembly_fastas/*/*.hap1.p_ctg.fasta.gz
+zipped_assembly_fastas/*/*.hap2.p_ctg.fasta.gz
+assembly_stats/*/*.fasta.stats.txt
+assembly_noseq_gfas/*/*.noseq.gfa
+assembly_lowQ_beds/*/*.lowQ.bed
+asm_bams/*/*.asm.*.bam
+asm_bam_indices/*/*.bam.bai
+merged_asm_bam/*.asm.*.bam
+merged_asm_bam_index/*.asm.*.bam.bai
+paftools_vcfs/*/*.paftools.vcf.gz
+paftools_vcf_indices/*/*.paftools.vcf.gz.tbi
+paftools_vcf_stats/*/*.stats.txt
+ugc_wgw_manifest/*.assembly.ugc_wgw_manifest.json

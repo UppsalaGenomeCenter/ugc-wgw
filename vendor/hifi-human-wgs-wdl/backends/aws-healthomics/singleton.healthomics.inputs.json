@@ -1,0 +1,10 @@
+{
+  "sample_id": "String",
+  "hifi_reads": [
+    "File"
+  ],
+  "fail_reads": "Array[File]? (optional)",
+  "use_gpu": false,
+  "use_parabricks_deepvariant": false,
+  "backend": "AWS-HealthOmics"
+}

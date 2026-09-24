@@ -1,0 +1,8 @@
+{
+  "humanwgs_singleton.sample_id": "String",
+  "humanwgs_singleton.hifi_reads": [
+    "File"
+  ],
+  "humanwgs_singleton.fail_reads": "Array[File]? (optional)",
+  "humanwgs_singleton.backend": "Azure"
+}

@@ -1,0 +1,13 @@
+# Images the bundle needs beyond vendor/hifi-human-wgs-wdl/image_manifest.txt,
+# one per line, digest form only (docs/DESIGN.md §11.3, §13).
+# Built by this repository (containers/<tool>/Dockerfile) with scripts/build-containers.sh:
+# svx 0.6.0 and trgt-lps 0.10.0 pushed 2026-09-10; hifiasm 0.25.0 pushed 2026-09-22 (replaces quay.io/pacbio/hifiasm 0.25.0_build1):
+ghcr.io/uppsalagenomecenter/hifiasm@sha256:0e03f1dc2ab6ede5200bbc0e8e9c3ea10e693ce87cad9346e3a1aa59cec272cf
+ghcr.io/uppsalagenomecenter/svx@sha256:5f5577e979e4a1e629c9630ebb647e3efe8ebe3978cd20dfb81a712807007a94
+ghcr.io/uppsalagenomecenter/trgt-lps@sha256:2a7b3c6c78a8d09983698d73f4fc140b89c15ae89d912203eed80b24a113cae7
+# Taken as-is from PacBio for the assembly stage (docs/DESIGN.md §13): gfatools 0.5_34e0fcf_build2, yak 0.1_build3
+# (the *_build3/_build4 images ship dangling binary symlinks, verified 2026-09-10), align_hifiasm 2.17_1.14_build2
+# (deleted upstream in 2024; no successor):
+quay.io/pacbio/gfatools@sha256:0ec85987c043e84fd492e9e0908261e365b70a6d4eaf797c39a9c1da695a10ce
+quay.io/pacbio/yak@sha256:7809845f03cb04e3a686178b006c42b0f61768797543d4cb46f62940ba44ffb7
+quay.io/pacbio/align_hifiasm@sha256:0e8ad680b0e89376eb94fa8daa1a0269a4abe695ba39523a5c56a59d5c0e3953

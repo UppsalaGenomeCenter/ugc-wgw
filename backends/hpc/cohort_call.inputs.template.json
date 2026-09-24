@@ -1,0 +1,21 @@
+{
+  "ugc_wgw_cohort_call.ugc_wgw_version": "<ugc_wgw_version>",
+  "ugc_wgw_cohort_call.cohort_id": "String",
+  "ugc_wgw_cohort_call.sample_ids": [
+    "String"
+  ],
+  "ugc_wgw_cohort_call.gvcfs": [
+    "File (small_variant_gvcf per sample, from ugc_wgw_upstream)"
+  ],
+  "ugc_wgw_cohort_call.gvcf_indices": [
+    "File"
+  ],
+  "ugc_wgw_cohort_call.split_keep_homref": true,
+  "ugc_wgw_cohort_call.run_sawfish_joint_call": false,
+  "ugc_wgw_cohort_call.discover_tars": "Array[File]? (optional; discover_tar per sample)",
+  "ugc_wgw_cohort_call.aligned_bams": "Array[File]? (optional; aligned_hifi_reads per sample)",
+  "ugc_wgw_cohort_call.aligned_bam_indices": "Array[File]? (optional)",
+  "ugc_wgw_cohort_call.ref_map_file": "<local_path_prefix>/ugc_wgw_ref_map.GRCh38_GIABv3.tsv",
+  "ugc_wgw_cohort_call.backend": "HPC",
+  "ugc_wgw_cohort_call.preemptible": true
+}

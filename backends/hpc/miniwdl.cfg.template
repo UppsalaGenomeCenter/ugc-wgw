@@ -1,0 +1,71 @@
+# miniwdl configuration for the isolated HPC. Rendered by scripts/install-bundle.sh;
+# double-brace placeholders become absolute paths or site values (backends/hpc/site.cfg.example).
+# Reconciled against vendor/hifi-human-wgs-wdl/backends/hpc/miniwdl.cfg (v3.3.1) and
+# miniwdl 1.15.0's default.cfg; see docs/DESIGN.md §5.2, §8, §14.
+#
+# Design intent: many independent per-sample runs, each restartable via the call cache,
+# work dirs deleted on success, outputs hardlinked rather than copied.
+
+[scheduler]
+container_backend = slurm_singularity
+# per miniwdl process; the driver caps runs in flight, so total SLURM pressure is
+# max_inflight x task_concurrency
+task_concurrency = {{TASK_CONCURRENCY}}
+# keep running the other tasks of a run when one fails (as upstream); the call cache then
+# makes the retry cheap
+fail_fast = false
+
+[file_io]
+# required: upstream map files point at reference files not listed as inputs
+allow_any_input = true
+# never copy the 30-50 GB uBAMs into the work dir
+copy_input_files = false
+output_hardlinks = true
+# reclaim work dirs of successful runs; failed runs keep theirs for diagnosis
+# (requires output_hardlinks = true, otherwise miniwdl ignores it)
+delete_work = success
+
+[call_cache]
+put = true
+get = true
+dir = {{CALL_CACHE_DIR}}
+
+[singularity]
+exe = ["apptainer"]
+# fully offline: every image must already be here (populated by install-bundle.sh)
+image_cache = {{SIF_CACHE_DIR}}
+# "--nv" is appended when the site file sets SINGULARITY_NV=1: the GPU DeepVariant and Parabricks tasks
+# need the host driver bound in; on a node without one Apptainer only warns
+run_options = {{SINGULARITY_RUN_OPTIONS}}
+
+[slurm]
+# appended to every sbatch after the per-task arguments (qos, reservation, mail, ...); from the
+# site file at install time. Not the partition or account: those are runtime defaults below.
+extra_args = "{{SLURM_EXTRA_ARGS}}"
+
+[task_runtime]
+# upstream commands use bash arrays (e.g. sawfish_call); requires miniwdl >= 1.9.0
+command_shell = /bin/bash
+# Caps on what any task may ask for. miniwdl rounds a larger request down and logs
+# "runtime.cpu adjusted to host limit" (the driver's report tabulates it). 0 means no cap under
+# miniwdl-slurm (it reports unlimited host resources), so set the node shape of the partition in
+# site.cfg: TASK_CPU_MAX=48, TASK_MEMORY_MAX=375G (bytes below; binary units at render time).
+# Per-task exceptions and partitions are the policy file under [ugc-wgw].
+cpu_max = {{TASK_CPU_MAX}}
+memory_max = {{TASK_MEMORY_MAX}}
+# Defaults for runtime keys a task does not set, one JSON object rendered from site.cfg:
+# "docker" (miniwdl reads it before every pull; KeyError without it), "maxRetries",
+# "time_minutes" (sbatch --time; no upstream task sets one), "slurm_partition" / "slurm_account"
+# (sbatch --partition / --account) when SLURM_PARTITION / SLURM_ACCOUNT are set, and their
+# "_gpu" twins from SLURM_PARTITION_GPU / SLURM_ACCOUNT_GPU, which miniwdl-slurm uses instead for
+# any task that asks for GPUs (runtime gpuCount).
+# The partition lives here rather than in [slurm] extra_args so a policy row can override it per
+# task: miniwdl-slurm appends extra_args last and sbatch keeps the last --partition it sees.
+# This dict REPLACES miniwdl's built-in defaults. Keep it on one line: configparser needs any
+# continuation line indented.
+defaults = {{TASK_RUNTIME_DEFAULTS}}
+
+[ugc_wgw]
+# The site resource policy (docs/guide/12-resources.md), applied per task by the ugc_wgw_resources
+# plugin from plugins/ugc_wgw_miniwdl: cpu, memory, wall time, partition, constraint. Empty = none.
+resources = {{TASK_RESOURCES}}

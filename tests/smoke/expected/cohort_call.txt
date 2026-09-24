@@ -1,0 +1,6 @@
+# Expected outputs of ugc_wgw_cohort_call with defaults (run_sawfish_joint_call=false), one glob per line relative to out/.
+cohort_small_variant_vcf/*.joint.*.small_variants.vcf.gz
+cohort_small_variant_vcf_index/*.joint.*.small_variants.vcf.gz.tbi
+split_small_variant_vcfs/*/*.joint.*.small_variants.vcf.gz
+split_small_variant_vcf_indices/*/*.joint.*.small_variants.vcf.gz.tbi
+ugc_wgw_manifest/*.cohort_call.ugc_wgw_manifest.json

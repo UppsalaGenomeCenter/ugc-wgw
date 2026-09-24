@@ -1,0 +1,17 @@
+{
+  "ugc_wgw_downstream.ugc_wgw_version": "<ugc_wgw_version>",
+  "ugc_wgw_downstream.sample_id": "String",
+  "ugc_wgw_downstream.aligned_hifi_reads": "File (aligned_hifi_reads from ugc_wgw_upstream)",
+  "ugc_wgw_downstream.aligned_hifi_reads_index": "File",
+  "ugc_wgw_downstream.aligned_fail_reads": "File? (optional)",
+  "ugc_wgw_downstream.aligned_fail_reads_index": "File? (optional)",
+  "ugc_wgw_downstream.small_variant_vcf": "File (small_variant_vcf from ugc_wgw_upstream, or split_small_variant_vcfs[i] from ugc_wgw_cohort_call)",
+  "ugc_wgw_downstream.small_variant_vcf_index": "File",
+  "ugc_wgw_downstream.sv_vcf": "File (sv_vcf from ugc_wgw_upstream, or split_sv_vcfs[i] from ugc_wgw_cohort_call)",
+  "ugc_wgw_downstream.sv_vcf_index": "File",
+  "ugc_wgw_downstream.stat_depth_mean": "String? (optional; stat_depth_mean from ugc_wgw_upstream)",
+  "ugc_wgw_downstream.upstream_msg": "Array[String]? (optional; msg from ugc_wgw_upstream)",
+  "ugc_wgw_downstream.ref_map_file": "<local_path_prefix>/ugc_wgw_ref_map.GRCh38_GIABv3.tsv",
+  "ugc_wgw_downstream.backend": "HPC",
+  "ugc_wgw_downstream.preemptible": true
+}

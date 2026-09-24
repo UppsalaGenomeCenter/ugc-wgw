@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "sources": {
+    "hifi-human-wgs-wdl": {
+      "commit": "15e82cb994292424223bceca100780c4fe3b40ea",
+      "notes": "no ref_map/tertiary_map templates at this tag: reference data ships in the workflow-data-container-* images (grch38 sha256:5e3f23e44c1c09762838e81677f7d136367be2a4063efc608129841cef745b42, grch38_giabv3 sha256:f3799c1eff1b816a95ea06ce567d3324d06e945428567077d96eca07c76ad0aa, both in image_manifest.txt) unpacked by unpack_container_manifest; archival tars on zenodo 21517827 (hifi-wdl-resources-v4.0.0-<build>.tar); tertiary analysis, PharmCAT, pb-cpg-tools and bam_stats removed upstream; kivvi, pbjam, pbsamoa added; workflows/wdl-common is an in-tree directory at this tag, not a submodule (.gitmodules lists only 'wiki'); workflow_version string in singleton/family outputs = 4.0.0 (ugc_wgw_singleton mirrors singleton.wdl and writes it as a literal)",
+      "submodules": {},
+      "tag": "v4.0.0",
+      "url": "https://github.com/PacificBiosciences/HiFi-human-WGS-WDL.git",
+      "vendored_at": "2026-09-22T12:24:13Z"
+    }
+  }
+}

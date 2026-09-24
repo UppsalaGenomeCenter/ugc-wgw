@@ -117,3 +117,7 @@ workflows are PacBio's HiFi-human-WGS-WDL, BSD-3-Clause-Clear
 DeepVariant, HiPhase, sawfish, TRGT, Paraphase, mitorsaw, MethBat, StarPhase,
 kivvi, pbjam, GLnexus, hifiasm, svx, trgt-lps and others) are cited in the
 analysis summaries and in `vendor/hifi-human-wgs-wdl/docs/`.
+
+Logo fixed by **[Gemini](https://gemini.google.com/)** <br>
+Code fixed by **[Claude](https://claude.ai/)** <br>
+Ideas and guidance by **[Iggy](https://github.com/iggyB)** <br>

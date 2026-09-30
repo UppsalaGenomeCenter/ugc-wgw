@@ -153,6 +153,19 @@ without `--nv` or no GPU partition. Exit 1 on a malformed policy (chapter
 | `--cohort ID` | | Cohort context. A cohort subject without `--cohort` is looked up by its own ID. |
 | `--any-version` | off | Read earlier outputs at any version. |
 
+### `ugc-wgw stage-inputs [--stage S | --mode M] [--nested] [--json]`
+
+Every input of every stage (or of one stage, or of a mode's stages) with
+its type, WDL default, `parameter_meta` description, who fills it (`driver`;
+`config.json` with the key; `stage_inputs`: nobody, so the project may) and
+the project's current override. Warns about `stage_inputs` keys that name no
+stage or no input (`submit` would refuse them) and about overrides of values
+the driver fills. `--nested` adds the call-qualified inputs of the tasks and
+subworkflows inside each entrypoint, listed by miniwdl itself in the engine
+venv (`config.json` `venv_dir`), and checks dotted overrides against that
+list. Needs no state database. Exit 1 when `--nested` finds no engine
+Python.
+
 ### Exit codes
 
 `0` success; `1` an error was printed or a run failed in this session;
@@ -190,7 +203,7 @@ without `--nv` or no GPU partition. Exit 1 on a malformed policy (chapter
 | `cancel_orphans` | `true` | Run `scancel` on the SLURM jobs of runs settled as `driver_lost` or killed after the stop grace. |
 | `lease_seconds` | `900` | A lease older than this is expired; a driver on another host may then take the project. |
 | `progress_interval` | `300` | Seconds between progress summaries in the log while `submit` runs (also logged when the counts change); `0` disables. |
-| `stage_inputs` | `{}` | `{"<stage>": {"<input>": value}}`; `ugc_wgw_<stage>` also accepted and wins. |
+| `stage_inputs` | `{}` | `{"<stage>": {"<input>": value}}`; `ugc_wgw_<stage>` also accepted and wins. `ugc-wgw stage-inputs` lists every input and checks these. |
 | `summary_thresholds` | `{}` | `ugc-wgw summary` QC thresholds, e.g. `{"depth_mean_min": 25}` (chapter 07). |
 | `project_url` | the public repository | Repository link printed in the analysis summaries. |
 | `deepvariant` | `"cpu"` | `cpu`, `gpu` or `parabricks`: the small-variant caller of `singleton` and `upstream` (chapter 12). |

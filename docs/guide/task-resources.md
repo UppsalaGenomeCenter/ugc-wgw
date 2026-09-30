@@ -16,7 +16,9 @@ Reading the tables:
   declaration, so lowering the request oversubscribes the cores (slower, still
   correct) or lowers the tool's own memory budget (may be killed).
 - `input default`, `workflow input default`: the value is an input default,
-  overridable through `stage_inputs` (chapter 05); `call site`: fixed by the
+  overridable through `stage_inputs` (chapter 05); `cpu input: <name>` names
+  the entrypoint input that sets both the request and the command's thread
+  count; `call site`: fixed by the
   calling workflow.
 - `source` is the task definition; `stages` lists the entrypoints that call it.
 
@@ -25,12 +27,12 @@ Reading the tables:
 | task | cpu | memory | stages | notes |
 |---|---|---|---|---|
 | `deepvariant_call_variants_cpu` | 64 | 28G | singleton, upstream | cpu from workflow input default; memory from input default |
-| `ugc_wgw_hifiasm_assemble` | 48 | 288G | assembly | cpu from workflow input default; memory from workflow input default; command uses threads |
+| `ugc_wgw_hifiasm_assemble` | 48 | 288G | assembly | cpu from workflow input default; cpu input: hifiasm_threads; memory from workflow input default; memory input: hifiasm_mem_gb; command uses threads |
 | `run_parabricks_deepvariant` | 48 | 192G | singleton, upstream | cpu from input default; memory from input default; command uses threads; gpu |
 | `pbmm2_align_wgs` | 32 | 64G | singleton, upstream | cpu from input default; memory from input default; command uses threads |
 | `pbsamoa_merge` | 32 | 32G | singleton, upstream | cpu from input default; memory from input default; command uses threads; command uses mem |
-| `glnexus` | 32 | - | cohort_call, cohort_merge | cpu from workflow input default; memory: "~{mem_gb} GiB" where mem_gb = glnexus_mem_gb = glnexus_mem = select_first([glnexus_mem_gb, 32 + ceil(n_samples * 0.1)]); memory scales with N; command uses threads; command uses mem |
-| `ugc_wgw_yak_count` | 24 | - | assembly | cpu from workflow input default; memory: "~{mem_gb} GiB" where mem_gb = yak_mem_gb_used = select_first([yak_mem_gb, if low_depth then 70 else 50]); command uses threads |
+| `glnexus` | 32 | - | cohort_call, cohort_merge | cpu from workflow input default; cpu input: glnexus_threads; memory: "~{mem_gb} GiB" where mem_gb = glnexus_mem_gb = glnexus_mem = select_first([glnexus_mem_gb, 32 + ceil(n_samples * 0.1)]); memory scales with N; command uses threads; command uses mem |
+| `ugc_wgw_yak_count` | 24 | - | assembly | cpu from workflow input default; cpu input: yak_threads; memory: "~{mem_gb} GiB" where mem_gb = yak_mem_gb_used = select_first([yak_mem_gb, if low_depth then 70 else 50]); command uses threads |
 | `sawfish_discover` | 16 | 128G | singleton, upstream | cpu from input default; memory from input default; command uses threads |
 | `ugc_wgw_minimap2_align_asm` | 16 | 128G | assembly | cpu from input default; memory from input default; command uses threads |
 | `hiphase` | 16 | 96G | singleton, downstream | cpu from input default; memory from input default; command uses threads |
@@ -111,7 +113,7 @@ Reading the tables:
 | `ugc_wgw_manifest_write` | 1 | 1G | - | `workflows/ugc_wgw/provenance.wdl:9` |
 | `ugc_wgw_regions_prepare` | 1 | 1G | - | `workflows/ugc_wgw/cohort/regions.wdl:9` |
 | `ugc_wgw_bcftools_slice` | 2 | 4G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/cohort/gvcf_slice.wdl:9` |
-| `glnexus` | 32 | - | cpu from workflow input default; memory: "~{mem_gb} GiB" where mem_gb = glnexus_mem_gb = glnexus_mem = select_first([glnexus_mem_gb, 32 + ceil(n_samples * 0.1)]); memory scales with N; command uses threads; command uses mem | `workflows/overrides/glnexus.wdl:9` |
+| `glnexus` | 32 | - | cpu from workflow input default; cpu input: glnexus_threads; memory: "~{mem_gb} GiB" where mem_gb = glnexus_mem_gb = glnexus_mem = select_first([glnexus_mem_gb, 32 + ceil(n_samples * 0.1)]); memory scales with N; command uses threads; command uses mem | `workflows/overrides/glnexus.wdl:9` |
 | `ugc_wgw_bcftools_concat` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/cohort/concat.wdl:9` |
 | `ugc_wgw_bcftools_split` | 4 | - | cpu from input default; memory: "~{mem_gb} GiB" where mem_gb = split_mem = select_first([split_mem_gb, 8 + ceil(n_samples * 0.02)]); memory scales with N | `workflows/ugc_wgw/cohort/split_by_sample.wdl:9` |
 | `split_vcf_by_sample` | 2 | 4G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/bcftools.wdl:224` |
@@ -144,12 +146,12 @@ Reading the tables:
 | `ugc_wgw_manifest_write` | 1 | 1G | - | `workflows/ugc_wgw/provenance.wdl:9` |
 | `ugc_wgw_regions_prepare` | 1 | 1G | - | `workflows/ugc_wgw/cohort/regions.wdl:9` |
 | `ugc_wgw_bcftools_slice` | 2 | 4G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/cohort/gvcf_slice.wdl:9` |
-| `glnexus` | 32 | - | cpu from workflow input default; memory: "~{mem_gb} GiB" where mem_gb = glnexus_mem_gb = glnexus_mem = select_first([glnexus_mem_gb, 32 + ceil(n_samples * 0.1)]); memory scales with N; command uses threads; command uses mem | `workflows/overrides/glnexus.wdl:9` |
+| `glnexus` | 32 | - | cpu from workflow input default; cpu input: glnexus_threads; memory: "~{mem_gb} GiB" where mem_gb = glnexus_mem_gb = glnexus_mem = select_first([glnexus_mem_gb, 32 + ceil(n_samples * 0.1)]); memory scales with N; command uses threads; command uses mem | `workflows/overrides/glnexus.wdl:9` |
 | `ugc_wgw_bcftools_concat` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/cohort/concat.wdl:9` |
-| `ugc_wgw_svx_merge` | 8 | - | cpu from workflow input default; memory: "~{mem_gb} GiB" where mem_gb = svx_mem = select_first([svx_mem_gb, 8 + ceil(n_samples * 0.05)]); memory scales with N; command uses threads | `workflows/ugc_wgw/cohort/svx.wdl:9` |
+| `ugc_wgw_svx_merge` | 8 | - | cpu from workflow input default; cpu input: svx_threads; memory: "~{mem_gb} GiB" where mem_gb = svx_mem = select_first([svx_mem_gb, 8 + ceil(n_samples * 0.05)]); memory scales with N; command uses threads | `workflows/ugc_wgw/cohort/svx.wdl:9` |
 | `ugc_wgw_bcftools_merge` | 4 | - | cpu from input default; memory: "~{mem_gb} GiB" where mem_gb = bcftools_merge_mem = select_first([bcftools_merge_mem_gb, 8 + ceil(n_samples * 0.02)]); memory scales with N; command uses threads | `workflows/ugc_wgw/cohort/sv_merge_bcftools.wdl:9` |
-| `ugc_wgw_trgt_merge` | 2 | - | cpu from workflow input default; memory: "~{mem_gb} GiB" where mem_gb = trgt_merge_mem = select_first([trgt_merge_mem_gb, 8 + ceil(n_samples * 0.02)]); memory scales with N; command uses threads | `workflows/ugc_wgw/cohort/trgt_merge_lps.wdl:9` |
-| `ugc_wgw_trgt_lps` | 8 | 16G | cpu from workflow input default; memory from input default; command uses threads | `workflows/ugc_wgw/cohort/trgt_merge_lps.wdl:122` |
+| `ugc_wgw_trgt_merge` | 2 | - | cpu from workflow input default; cpu input: trgt_merge_threads; memory: "~{mem_gb} GiB" where mem_gb = trgt_merge_mem = select_first([trgt_merge_mem_gb, 8 + ceil(n_samples * 0.02)]); memory scales with N; command uses threads | `workflows/ugc_wgw/cohort/trgt_merge_lps.wdl:9` |
+| `ugc_wgw_trgt_lps` | 8 | 16G | cpu from workflow input default; cpu input: trgt_lps_threads; memory from input default; command uses threads | `workflows/ugc_wgw/cohort/trgt_merge_lps.wdl:122` |
 
 ## ugc_wgw_cohort_freq
 
@@ -160,7 +162,7 @@ Reading the tables:
 | `ugc_wgw_manifest_write` | 1 | 1G | - | `workflows/ugc_wgw/provenance.wdl:9` |
 | `ugc_wgw_regions_prepare` | 1 | 1G | - | `workflows/ugc_wgw/cohort/regions.wdl:9` |
 | `ugc_wgw_bcftools_concat` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/cohort/concat.wdl:9` |
-| `ugc_wgw_bcftools_freq` | 2 | 4G | cpu from workflow input default; memory from workflow input default; command uses threads | `workflows/ugc_wgw/cohort/freq.wdl:9` |
+| `ugc_wgw_bcftools_freq` | 2 | 4G | cpu from workflow input default; cpu input: freq_threads; memory from workflow input default; memory input: freq_mem_gb; command uses threads | `workflows/ugc_wgw/cohort/freq.wdl:9` |
 | `ugc_wgw_freq_summary` | 1 | 2G | - | `workflows/ugc_wgw/cohort/freq.wdl:179` |
 
 ## ugc_wgw_assembly
@@ -171,8 +173,8 @@ Reading the tables:
 |---|---|---|---|---|
 | `ugc_wgw_manifest_write` | 1 | 1G | - | `workflows/ugc_wgw/provenance.wdl:9` |
 | `samtools_fasta` | 16 | 16G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/samtools.wdl:86` |
-| `ugc_wgw_yak_count` | 24 | - | cpu from workflow input default; memory: "~{mem_gb} GiB" where mem_gb = yak_mem_gb_used = select_first([yak_mem_gb, if low_depth then 70 else 50]); command uses threads | `workflows/ugc_wgw/assembly/yak.wdl:9` |
-| `ugc_wgw_hifiasm_assemble` | 48 | 288G | cpu from workflow input default; memory from workflow input default; command uses threads | `workflows/ugc_wgw/assembly/hifiasm.wdl:9` |
+| `ugc_wgw_yak_count` | 24 | - | cpu from workflow input default; cpu input: yak_threads; memory: "~{mem_gb} GiB" where mem_gb = yak_mem_gb_used = select_first([yak_mem_gb, if low_depth then 70 else 50]); command uses threads | `workflows/ugc_wgw/assembly/yak.wdl:9` |
+| `ugc_wgw_hifiasm_assemble` | 48 | 288G | cpu from workflow input default; cpu input: hifiasm_threads; memory from workflow input default; memory input: hifiasm_mem_gb; command uses threads | `workflows/ugc_wgw/assembly/hifiasm.wdl:9` |
 | `ugc_wgw_gfatools_gfa2fa` | 2 | 4G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/assembly/gfatools.wdl:9` |
 | `ugc_wgw_minimap2_align_asm` | 16 | 128G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/assembly/align_hifiasm.wdl:9` |
 | `ugc_wgw_paftools_call` | 4 | 32G | cpu from input default; memory from input default; command uses threads; command uses mem | `workflows/ugc_wgw/assembly/align_hifiasm.wdl:114` |

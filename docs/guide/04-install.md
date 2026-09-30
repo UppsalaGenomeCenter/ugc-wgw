@@ -113,7 +113,7 @@ from is in `examples/site.cfg`; the reference is
 | `SINGULARITY_NV` | `0` | `1` appends `--nv` to `[singularity] run_options`, which binds the node's NVIDIA driver into every container; without it a GPU task finds no device. Harmless on nodes without a driver (Apptainer warns). |
 | `TASK_CPU_MAX` | `0` | `[task_runtime] cpu_max`: no task asks for more cores than this; `0` = no cap. Set the node's core count (chapter 12). |
 | `TASK_MEMORY_MAX` | `0` | `[task_runtime] memory_max`: same for memory, with a binary unit (`375G` = a 384000 MB node); `0` = no cap. |
-| `TASK_RESOURCES` | `<prefix>/resources.tsv` | `[ugc_wgw] resources`: the per-task resource policy (chapter 12). Created from `backends/hpc/resources.tsv.example` when absent, validated when present. |
+| `TASK_RESOURCES` | `<prefix>/resources.tsv` | `[ugc_wgw] resources`: the per-task resource policy (chapter 12). Created from `backends/hpc/resources.tsv.example` when absent, validated when present; `examples/resources.tsv` is a worked policy for 48-core nodes. |
 | `TASK_CONCURRENCY` | `50` | `[scheduler] task_concurrency`: SLURM jobs one miniwdl process keeps in flight. Total pressure is this times the driver's `--max-inflight`. |
 | `TASK_TIME_MINUTES` | `4320` | `[task_runtime] defaults.time_minutes`: wall time for tasks that set none (all upstream tasks); three days. A policy row can set it per task. |
 | `CALL_CACHE_DIR` | `<prefix>/call_cache` | `[call_cache] dir`, shared by all versions. Keep it on fast shared storage. |

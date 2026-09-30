@@ -67,8 +67,11 @@ class Config:
     def stage_overrides(self, stage: str) -> dict[str, object]:
         """Per-stage input overrides from config.json, keyed `ugc_wgw_<stage>` (bare stage name also accepted)."""
         merged: dict[str, object] = {}
-        merged.update(self.stage_inputs.get(stage, {}))
-        merged.update(self.stage_inputs.get(f"ugc_wgw_{stage}", {}))
+        for key in (stage, f"ugc_wgw_{stage}"):
+            value = self.stage_inputs.get(key, {})
+            if not isinstance(value, dict):
+                raise UgcError(f"config.json stage_inputs.{key} must be an object of input: value, not {type(value).__name__}")
+            merged.update(value)
         return merged
 
     def to_json(self) -> dict[str, object]:

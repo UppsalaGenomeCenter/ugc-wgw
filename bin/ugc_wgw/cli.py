@@ -8,7 +8,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import cohorts, config, engine, manifest, progress, report, resources, samples, summary
+from . import cohorts, config, engine, manifest, progress, report, resources, samples, stage_inputs, summary
 from .log import LOGGER
 from .db import DB
 from .log import Events, setup_logging
@@ -152,6 +152,17 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--mode", default="standalone", choices=sorted(MODES))
     s.add_argument("--cohort", metavar="ID")
     s.add_argument("--any-version", action="store_true")
+
+    s = sub.add_parser("stage-inputs", help="every input of every stage: type, default, who fills it (the driver, a "
+                                            "config.json key, or nobody: yours under stage_inputs), its description and "
+                                            "the project's override; warns about overrides submit would refuse")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--stage", choices=sorted(STAGES), help="only this stage")
+    g.add_argument("--mode", choices=sorted(MODES), help="only the stages of this mode")
+    s.add_argument("--nested", action="store_true",
+                   help="also the call-qualified inputs of the tasks and subworkflows inside each entrypoint "
+                        "(<call>.<task>.<input>: thread counts, memory, tool options); runs miniwdl in the engine venv")
+    s.add_argument("--json", action="store_true")
     return p
 
 
@@ -471,6 +482,31 @@ def cmd_inputs(a: argparse.Namespace) -> int:
         db.close()
 
 
+def cmd_stage_inputs(a: argparse.Namespace) -> int:
+    cfg = config.load(Path(a.project))
+    if a.stage:
+        stages = [a.stage]
+    elif a.mode:
+        stages = list(mode_stages(a.mode))
+    else:
+        stages = list(STAGES)
+    rows, warnings = stage_inputs.listing(cfg, stages, nested=a.nested)
+    for w in warnings:
+        diag(f"warning: {w}")
+    if a.json:
+        print(json.dumps([r.as_dict() for r in rows], indent=2))
+        return 0
+    print(f"# {stage_inputs.summary(rows, stages, nested=a.nested)}")
+    print(f"# {stage_inputs.COLUMNS_HELP}")
+    for stage in stages:
+        mine = [r for r in rows if r.stage == stage]
+        own = sum(1 for r in mine if not r.nested)
+        extra = f", {len(mine) - own} call-qualified" if a.nested else ""
+        print(f"\n# {stage} ({stage_spec(stage).wdl}): {own} inputs{extra}")
+        _print_rows([r.as_table_row() for r in mine], False)
+    return 0
+
+
 def _print_rows(rows: list[dict[str, object]], as_json: bool) -> None:
     if as_json:
         print(json.dumps(rows, indent=2, sort_keys=True))
@@ -517,6 +553,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_progress(a)
         if a.command == "resources":
             return cmd_resources(a)
+        if a.command == "stage-inputs":
+            return cmd_stage_inputs(a)
         parser.error(f"unknown command {a.command}")
     except UgcError as exc:
         diag(f"error: {exc}")

@@ -3,6 +3,31 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.5.0
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is unchanged.
+
+- `ugc-wgw stage-inputs`: every input of every stage with its type, default,
+  description, who fills it (the driver, a `config.json` key, or nobody, so
+  it is yours under `stage_inputs`) and the project's current override; it
+  warns about overrides `submit` would refuse. `--nested` adds the
+  call-qualified inputs of the tasks inside each entrypoint (thread counts,
+  memory, tool options), listed by miniwdl itself, and checks dotted
+  overrides against them.
+- Upstream's task thread counts are settable as such nested keys
+  (`upstream.pbmm2.pbmm2_align_wgs.threads`), which size both the SLURM
+  request and the command. `ugc-wgw resources` says so when a policy row
+  sets `cpu` for a task that interpolates its thread count, and names the
+  entrypoint input where one exists (`hifiasm_threads`); the task inventory
+  records those inputs.
+- Guide: `examples/resources.tsv`, a worked site policy for 48-core, 384 GB
+  nodes with its reasoning in chapter 12; every entrypoint input now carries
+  a `parameter_meta` description.
+- Smoke harness: `run.sh init --hifiasm-threads N`; the drivers it tees run
+  with `--color never`.
+- A non-object `stage_inputs.<stage>` in `config.json` is a clean error.
+
 ## 0.4.1
 
 Patch release: the shell scripts pass shellcheck 0.9.0, which the CI runs.

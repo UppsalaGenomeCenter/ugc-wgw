@@ -1,0 +1,33 @@
+# A worked site resource policy for a cluster of 48-core, 384000 MB nodes on a shared
+# partition, with 96-core large-memory nodes and two GPU nodes (4 x A100, 6 x L40S), derived
+# from ten real 20-25x samples (docs/guide/12-resources.md, "A worked policy"). Copy it to
+# <prefix>/resources.tsv and adjust the time limits to your queue. Rows apply in file order and
+# a later row's cells override an earlier row's, so the catch-all comes first.
+task	cpu	memory	time	partition	constraint
+# every task that no row below names: the small ones run in minutes; a short limit lets SLURM backfill them
+*	-	-	2:00:00	-	-
+# alignment: 32 cores would leave 16 of 48 idle; two 24-core jobs fill a node (the command keeps
+# 32 threads, a mild oversubscription). Whole-BAM alignment (use_alignment_chunking false) takes
+# about 20 minutes per BAM; chunked jobs take 2 minutes and the limit could be 30 minutes
+pbmm2_align_wgs	24	-	3:00:00	-	-
+pbsamoa_merge	24	64G	2:00:00	-	-
+index_input_bam	-	-	1:00:00	-	-
+create_pbmm2_index	-	-	1:00:00	-	-
+# small variants: make_examples 8 x 8 cores (six per node), call_variants a whole node (the cap)
+deepvariant_make_examples	-	-	4:00:00	-	-
+deepvariant_call_variants_cpu	48	-	3:00:00	-	-
+deepvariant_postprocess_variants	-	-	2:00:00	-	-
+# memory asked far above the observed peak: three sawfish per node instead of two, HiPhase no
+# longer blocks 96 GB for a 5 GB peak
+sawfish_discover	-	64G	3:00:00	-	-
+hiphase	-	32G	3:00:00	-	-
+trgt_genotype	-	-	2:00:00	-	-
+paraphase	-	-	2:00:00	-	-
+# assembly: hifiasm takes a whole standard node (81 GB peak at 21x); the fat partition only for
+# outliers (uncomment the partition cell); minimap2 asks 128 GB for a 32 GB peak
+ugc_wgw_hifiasm_assemble	-	-	12:00:00	-	-
+ugc_wgw_yak_count	-	-	4:00:00	-	-
+ugc_wgw_minimap2_align_asm	-	64G	2:00:00	-	-
+# GPU: Parabricks with 4 GPUs is one job per GPU node; on the 6-GPU node a 3-GPU, 32-core,
+# 160 GB shape (parabricks_gpus 3 in config.json plus this row) runs two at once
+#run_parabricks_deepvariant	32	160G	2:00:00	-	-

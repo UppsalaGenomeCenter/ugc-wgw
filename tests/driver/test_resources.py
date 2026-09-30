@@ -131,6 +131,17 @@ class ResourcesCommandTest(unittest.TestCase):
         rows, err = self.rows()
         self.assertIn("deepvariant_call_variants_gpu", err)   # the selected task has no partition
 
+    def test_cpu_row_on_a_threads_task_names_the_input(self):
+        self.policy.write_text(HEADER + "ugc_wgw_hifiasm_assemble\t96\t-\t-\tfat\t-\npbmm2_align_wgs\t16\t-\t-\t-\t-\n"
+                               "deepvariant_call_variants_cpu\t48\t-\t-\t-\t-\n")
+        rows, err = self.rows()
+        self.assertEqual(rows["ugc_wgw_hifiasm_assemble"]["cpu"], "96 (policy)")
+        self.assertIn("sets cpu 96 for ugc_wgw_hifiasm_assemble", err)
+        self.assertIn('"stage_inputs": {"assembly": {"hifiasm_threads": 96}}', err)
+        self.assertIn("sets cpu 16 for pbmm2_align_wgs", err)
+        self.assertIn("stage-inputs --nested --stage singleton", err)   # upstream task: a call-qualified input
+        self.assertNotIn("deepvariant_call_variants_cpu, whose command", err)   # does not interpolate its threads
+
     def test_malformed_policy_is_refused_by_resources_and_submit(self):
         self.policy.write_text(HEADER + "mosdepth\tlots\t-\t-\t-\t-\n")
         code, out, err = run_cli(["--project", self.proj, "resources"])

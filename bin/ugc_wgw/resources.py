@@ -278,6 +278,22 @@ def load(cfg: Config, *, engine_info: dict[str, str] | None = None) -> Resources
     for rule in rules:
         if not any(rule.matches(n) for n in names):
             warnings.append(f"policy row {rule.source} ({rule.pattern}) matches no task in the inventory (typo?)")
+    for dec in declared:
+        if "command uses threads" not in dec.notes:
+            continue
+        cell = policy.resolve(rules, dec.task).get("cpu")
+        if cell is None:
+            continue
+        value, rule = cell
+        key = next((n.split("cpu input: ", 1)[1] for n in dec.notes.split("; ") if n.startswith("cpu input: ")), None)
+        stage = dec.stages[0] if dec.stages else "<stage>"
+        stage = stage[len("ugc_wgw_"):] if stage.startswith("ugc_wgw_") else stage
+        fix = (f'set it as a workflow input instead: "stage_inputs": {{"{stage}": {{"{key}": {value}}}}} in config.json (chapter 05)'
+               if key else f"the row only changes the allocation; the task's own thread input is call-qualified "
+                           f"(`ugc-wgw stage-inputs --nested --stage {stage}` lists it as <call>.{dec.task}.<input>) and "
+                           f"set under stage_inputs sizes both (chapter 12)")
+        warnings.append(f"policy row {rule.source} sets cpu {value} for {dec.task}, whose command uses its declared "
+                        f"thread count ({dec.cpu}): {fix}")
     if any(r.partition is not None for r in rules) and PARTITION_ARG.search(eng.extra_args):
         warnings.append(f"policy rows set partitions but [slurm] extra_args carries a --partition ({eng.extra_args!r}); "
                         "sbatch keeps the last one, so those rows have no effect: move the partition to SLURM_PARTITION")

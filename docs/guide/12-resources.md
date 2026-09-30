@@ -67,6 +67,8 @@ Tab-separated, header required, `#` lines ignored. The installer creates
 `<prefix>/resources.tsv` from `backends/hpc/resources.tsv.example` when it
 does not exist and never overwrites it; edit it in place and the next task
 to start reads it (every task launch re-reads the file when it changed).
+`examples/resources.tsv` is a complete policy for one cluster, explained
+below under "A worked policy".
 
 ```
 task	cpu	memory	time	partition	constraint
@@ -112,7 +114,31 @@ the WDL wrote:
 - Lowering `memory` below what a tool budgets for itself
   (`glnexus --mem-gbytes`, paftools' `sort -S`; marked `command uses mem`)
   can get the task killed. Raise those through `stage_inputs` instead.
-- Raising `cpu` or `memory` gives the tool room it may not use.
+- Raising `cpu` or `memory` gives the tool room it may not use: a row with
+  `cpu` 96 for `ugc_wgw_hifiasm_assemble` allocates 96 cores, and hifiasm
+  still runs `-t 48`, because the command was rendered from the WDL's
+  declaration before the plugin saw the task. Where the declaration is a
+  workflow input (the inventory says `cpu input: <name>`), set that input
+  per project instead; it sizes both the request and the command:
+
+  ```json
+  "stage_inputs": {"assembly": {"hifiasm_threads": 96, "hifiasm_mem_gb": 384}}
+  ```
+
+  `ugc-wgw resources` warns when a row sets `cpu` for a task marked
+  `command uses threads` and names the input to use. Upstream's tasks
+  (pbmm2, HiPhase, sawfish, ...) expose no such entrypoint input, but their
+  thread count is a task input reachable as a call-qualified key:
+  `ugc-wgw stage-inputs --nested --stage singleton` lists
+  `upstream.pbmm2.pbmm2_align_wgs.threads` (default 32), and
+
+  ```json
+  "stage_inputs": {"singleton": {"upstream.pbmm2.pbmm2_align_wgs.threads": 24}}
+  ```
+
+  makes pbmm2 both ask for and use 24 cores. Prefer the policy row when
+  only the allocation should change: the nested key changes the task's
+  inputs and with them its call-cache entries.
 - `time` replaces the site default `TASK_TIME_MINUTES` for that task.
 
 ## Partitions
@@ -186,6 +212,40 @@ is a different build of the caller: 7 percent fewer small variants, mostly
 hom-alt and indels, and a higher Ts/Tv on the same BAM. Treat it as a
 flavour to validate against a truth set for your data before production
 use, not as a drop-in accelerator.
+
+## A worked policy
+
+`examples/resources.tsv` is a policy for one real cluster: 48-core,
+384000 MB nodes on a shared partition, two 96-core large-memory nodes and
+two GPU nodes, written after ten 20–25x samples had run with the defaults
+(`sacct` peaks and elapsed times per task). What it does and why:
+
+- **Cores that tile the node.** Upstream's pbmm2 and pbsamoa tasks ask for
+  32 cores; on a 48-core node that leaves 16 idle unless small jobs
+  backfill them. Two 24-core jobs fill the node. The command keeps its 32
+  threads (`ugc-wgw resources` warns, deliberately here), a mild
+  oversubscription that costs less than a third of every alignment node.
+  A project that wants the command to follow sets the task's own input
+  instead, `"singleton": {"upstream.pbmm2.pbmm2_align_wgs.threads": 24}`
+  under `stage_inputs` (chapter 05): it sizes both and needs no row.
+  DeepVariant's `call_variants` takes the whole node through the cap.
+- **Memory near the observed peak.** `sawfish discover` peaked at 46 GB
+  against a 128 GB request, so only two fit a node by memory while three
+  fit by cores; HiPhase peaked at 5 GB against 96; minimap2 at 32 against
+  128. Rows at 64, 32 and 64 GB let the scheduler pack them. `pbsamoa_merge`
+  goes the other way: 25 of 32 GB at 21x, so 64 GB before deeper samples.
+- **Time limits that let backfill work.** The site default is three days
+  for every job. SLURM's backfill scheduler fills gaps with jobs whose
+  limit fits, so a two-minute task declared as three days waits behind
+  everything; the ten-sample round spent an hour per alignment chunk in
+  the queue for two minutes of work. The rows set limits at about three
+  times the observed maximum; the catch-all `*` row (first, so that named
+  rows override it) gives every small task two hours.
+- **Assembly on standard nodes.** hifiasm asks 48 cores and 288 GB, a whole
+  standard node, and peaked at 81 GB; the `fat` partition is for outliers.
+
+Adjust the limits to your queue and coverage; after the first cohort,
+`sacct` on the manifests' job ids (below) says whether they hold.
 
 ## Checking what will be asked
 

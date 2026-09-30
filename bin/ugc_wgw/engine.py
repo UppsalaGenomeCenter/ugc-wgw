@@ -47,10 +47,20 @@ def _run(cmd: list[str]) -> str:
     return text.splitlines()[0] if text else "unknown"
 
 
+def engine_python(cfg: Config) -> Path:
+    """The engine venv's interpreter, where miniwdl's `WDL` package lives: `<venv>/bin/python3` (or `python`),
+    else the miniwdl executable's sibling. Used by probe() and by `ugc-wgw stage-inputs --nested`."""
+    base = (cfg.venv_dir / "bin") if cfg.venv_dir else cfg.miniwdl.parent
+    for name in ("python3", "python"):
+        if (base / name).exists():
+            return base / name
+    return base / "python"
+
+
 def probe(cfg: Config) -> dict[str, str]:
     info = {"miniwdl": _run([str(cfg.miniwdl), "--version"]), "miniwdl_slurm": "unknown", "apptainer": "unknown",
             "ugc_wgw_miniwdl": "unknown"}
-    python = (cfg.venv_dir / "bin" / "python") if cfg.venv_dir else cfg.miniwdl.parent / "python"
+    python = engine_python(cfg)
     if python.exists():
         info["miniwdl_slurm"] = _run([str(python), "-c",
                                       "import importlib.metadata as m; print(m.version('miniwdl-slurm'))"])

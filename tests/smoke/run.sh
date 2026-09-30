@@ -6,9 +6,12 @@
 # Usage:
 #   run.sh init [--install DIR | --code DIR --miniwdl EXE [--cfg FILE]] [--sif-cache DIR]
 #               [--inflight N] [--deepvariant cpu|gpu|parabricks] [--gpu-type TYPE]
-#               [--parabricks-gpus N] [--force]  create the ugc-wgw project on the smoke data; a GPU
+#               [--parabricks-gpus N] [--hifiasm-threads N] [--force]
+#                                                create the ugc-wgw project on the smoke data; a GPU
 #                                                flavour adds --nv to the local miniwdl.cfg and, without
-#                                                SLURM, runs one sample at a time (--inflight overrides)
+#                                                SLURM, runs one sample at a time (--inflight overrides);
+#                                                --hifiasm-threads sets stage_inputs.assembly.hifiasm_threads
+#                                                (the fat partition allocates whole 96-core nodes)
 #   run.sh <stage> [<subject>] [--mode M] [--retry [--max-attempts N]]   submit (or retry) one stage, then check
 #   run.sh check <stage> [<subject>]           check expected outputs of the current attempt
 #   run.sh all [standalone] [joint] [assembly]  the phases in that order (default: all three):
@@ -36,6 +39,7 @@ results=$smoke/results
 ugc=()
 
 log() { echo "[smoke] $*" >&2; }
+# the teed driver logs are files first: never coloured, whatever UGC_WGW_COLOR or the terminal say
 die() { echo "[smoke] error: $*" >&2; exit 1; }
 usage() { sed -n '2,22p' "$0"; exit "${1:-0}"; }
 
@@ -60,7 +64,7 @@ set_ugc() {
 # ---- init --------------------------------------------------------------------
 cmd_init() {
   local install="" code="$repo" miniwdl="$repo/.venv/bin/miniwdl" cfg="" sif="$repo/bundle/out/sif-cache" inflight="" force=0
-  local deepvariant=cpu gpu_type="" parabricks_gpus=""
+  local deepvariant=cpu gpu_type="" parabricks_gpus="" hifiasm_threads=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --install) install="$2"; shift 2 ;;
@@ -72,6 +76,7 @@ cmd_init() {
       --deepvariant) deepvariant="$2"; shift 2 ;;
       --gpu-type) gpu_type="$2"; shift 2 ;;
       --parabricks-gpus) parabricks_gpus="$2"; shift 2 ;;
+      --hifiasm-threads) hifiasm_threads="$2"; shift 2 ;;
       --force) force=1; shift ;;
       -h|--help) usage ;;
       *) die "init: unknown option $1" ;;
@@ -131,6 +136,17 @@ cmd_init() {
       --ref-map "$ref_map" --results "$results" \
       --max-inflight "$inflight" --poll-interval 15 "${gpu_args[@]}"
   set_ugc
+  if [ -n "$hifiasm_threads" ]; then
+    # the request and the command's -t both come from this workflow input; a policy row would change only the request
+    python3 - "$project/.ugc-wgw/config.json" "$hifiasm_threads" <<'PY'
+import json, sys
+path, n = sys.argv[1], int(sys.argv[2])
+doc = json.load(open(path))
+doc.setdefault("stage_inputs", {}).setdefault("assembly", {})["hifiasm_threads"] = n
+json.dump(doc, open(path, "w"), indent=2, sort_keys=True)
+PY
+    log "stage_inputs.assembly.hifiasm_threads = $hifiasm_threads"
+  fi
   # the sheet from prepare.sh names the paths of the machine that prepared the data;
   # point every read at this machine's data/ (columns 3 and 4: hifi_reads, fail_reads)
   awk -F'\t' -v OFS='\t' -v d="$smoke/data" 'NR == 1 { print; next }
@@ -212,7 +228,7 @@ cmd_stage() {
   logf=$smoke/logs/$stage-$subject-$stamp.log
   log "$verb --mode $mode --stage $stage ${sel[*]} (log $logf)"
   local rc=0
-  "${ugc[@]}" -v "$verb" --mode "$mode" --stage "$stage" "${sel[@]}" "${extra[@]}" 2>&1 | tee "$logf" || rc=${PIPESTATUS[0]}
+  "${ugc[@]}" --color never -v "$verb" --mode "$mode" --stage "$stage" "${sel[@]}" "${extra[@]}" 2>&1 | tee "$logf" || rc=${PIPESTATUS[0]}
   [ "$rc" -eq 0 ] || log "ugc-wgw $verb exited $rc"
   cmd_check "$stage" "$subject"
 }
@@ -227,7 +243,7 @@ phase() {  # phase <name> <ugc-wgw submit args...>
   logf=$smoke/logs/all-$name-$stamp.log
   log "phase $name: ugc-wgw submit $* (log $logf)"
   local rc=0
-  "${ugc[@]}" -v submit "$@" 2>&1 | tee "$logf" || rc=${PIPESTATUS[0]}
+  "${ugc[@]}" --color never -v submit "$@" 2>&1 | tee "$logf" || rc=${PIPESTATUS[0]}
   log "phase $name finished in $(( $(date +%s) - t0 )) s, exit $rc"
 }
 

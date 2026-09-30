@@ -138,7 +138,7 @@ need.
 
 These change what a stage does without changing the stage sequence. They are
 set per project in `stage_inputs` (chapter 05) and listed with their defaults
-in chapter 08.
+in chapter 08 and by `ugc-wgw stage-inputs`.
 
 | Switch | Stage | Default | Effect |
 |---|---|---|---|

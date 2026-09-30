@@ -48,6 +48,7 @@ ugc-wgw report [--mode M] [--cohort ID] [--any-version] [--sizes] [--out FILE]  
 ugc-wgw summary [--samples ... | --cohort ID] [--mode M] [--any-version] [--out-dir DIR] [--force]
             [--threshold KEY=VALUE ...] [--jobs N]  # per-sample and cohort analysis pages (what was found, QC flags)
 ugc-wgw resources [--stage S] [--changed] [--json]     # what each task asks SLURM for: declared → site caps → policy
+ugc-wgw stage-inputs [--stage S | --mode M] [--nested] [--json]   # every workflow input: default, who fills it, your override
 ```
 
 `--project DIR` (default `.`) selects the project; `-v` streams INFO logs to stderr;

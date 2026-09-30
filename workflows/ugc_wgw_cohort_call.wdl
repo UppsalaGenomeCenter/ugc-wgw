@@ -119,6 +119,21 @@ workflow ugc_wgw_cohort_call {
         "HPC"
       ]
     }
+    zones: {
+      description: "Zones where compute will take place; required if backend is set to 'GCP'"
+    }
+    cpuPlatform: {
+      description: "Optional minimum CPU platform to use for tasks on GCP"
+    }
+    gpuType: {
+      description: "Optional type of GPU/Accelerator to use (no GPU task in this stage)"
+    }
+    container_registry: {
+      description: "Container registry for upstream images; default quay.io/pacbio"
+    }
+    preemptible: {
+      description: "Where possible, run tasks preemptibly (no effect on HPC)"
+    }
   }
 
   input {

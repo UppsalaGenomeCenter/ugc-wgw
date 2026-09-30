@@ -10,7 +10,11 @@ in [workflow-graphs.md](workflow-graphs.md). Upstream documents its tools in
 Every stage takes `ugc_wgw_version` (echoed back and checked), `ref_map_file`
 (the one rendered map, chapter 04), `backend` (`HPC`) and `preemptible` from
 the driver; `cohort_merge` and `assembly` also take `ugc_wgw_container_registry`
-for the images this repository builds.
+for the images this repository builds. `ugc-wgw stage-inputs --stage <stage>`
+prints these tables from the installed WDL: every input with its type,
+default, description, who fills it and the project's override; `--nested`
+adds the inputs of the tasks inside (chapter 05).
+
 Per-sample resource requests are upstream's own and unchanged: every task's
 request is in the generated [inventory](task-resources.md), and chapter 12
 shows how a site caps or overrides them. The numbers below are the ones

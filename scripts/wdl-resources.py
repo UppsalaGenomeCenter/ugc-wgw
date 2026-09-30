@@ -201,6 +201,7 @@ def walk(doc: Tree.Document, stage: str, tasks: Dict[str, TaskInfo], docs: Dict[
                     site: Dict[str, Optional[Value.Base]] = {}
                     notes: Dict[str, str] = {}
                     texts: Dict[str, str] = {}
+                    wf_names: Dict[str, str] = {}
                     for name, expr in node.inputs.items():
                         texts[name] = site_text(expr, doc, inherited)
                         try:
@@ -208,6 +209,9 @@ def walk(doc: Tree.Document, stage: str, tasks: Dict[str, TaskInfo], docs: Dict[
                             refs = [getattr(i, "referee", None) for i in idents(expr)]
                             notes[name] = ("workflow input default" if any(id(r) in wf_inputs for r in refs)
                                            else "call site")
+                            wf_refs = [r.name for r in refs if id(r) in wf_inputs]
+                            if len(wf_refs) == 1:
+                                wf_names[name] = wf_refs[0]   # the entrypoint input a stage_inputs key can set
                         except Dynamic:
                             site[name] = None
                     key = callee.name
@@ -221,7 +225,7 @@ def walk(doc: Tree.Document, stage: str, tasks: Dict[str, TaskInfo], docs: Dict[
                                          "bare task names, rename one")
                     if stage not in info.stages:
                         info.stages.append(stage)
-                    entry = {"__notes__": notes, "__texts__": texts, **site}
+                    entry = {"__notes__": notes, "__texts__": texts, "__wf_names__": wf_names, **site}
                     if site_key(entry) not in {site_key(e) for e in info.call_sites}:
                         info.call_sites.append(entry)  # type: ignore[arg-type]
                 elif isinstance(callee, Tree.Workflow):
@@ -294,6 +298,12 @@ def evaluate(info: TaskInfo) -> None:
                 note = f"{key} from {o}"
                 if note not in notes:
                     notes.append(note)
+            wf_names: Dict[str, str] = site.get("__wf_names__", {})  # type: ignore[assignment]
+            for n in sorted(used):
+                if n in wf_names:
+                    note = f"{key} input: {wf_names[n]}"   # settable per project through stage_inputs
+                    if note not in notes:
+                        notes.append(note)
         results.append((cpu, memory, notes))
     cpus = {r[0] for r in results}
     mems = {r[1] for r in results}
@@ -409,7 +419,9 @@ def md_text(tasks: Dict[str, TaskInfo]) -> str:
         "  declaration, so lowering the request oversubscribes the cores (slower, still",
         "  correct) or lowers the tool's own memory budget (may be killed).",
         "- `input default`, `workflow input default`: the value is an input default,",
-        "  overridable through `stage_inputs` (chapter 05); `call site`: fixed by the",
+        "  overridable through `stage_inputs` (chapter 05); `cpu input: <name>` names",
+        "  the entrypoint input that sets both the request and the command's thread",
+        "  count; `call site`: fixed by the",
         "  calling workflow.",
         "- `source` is the task definition; `stages` lists the entrypoints that call it.",
         "",

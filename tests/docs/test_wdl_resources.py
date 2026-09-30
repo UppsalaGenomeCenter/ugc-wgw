@@ -105,6 +105,8 @@ class FixtureTests(unittest.TestCase):
         self.assertTrue(any(n.startswith("memory varies by call site: 16G, 24G") for n in t.notes), t.notes)
         self.assertIn("memory from call site", t.notes)
         self.assertIn("memory from workflow input default", t.notes)
+        self.assertIn("memory input: wf_mem", t.notes)      # the entrypoint input a stage_inputs key can set
+        self.assertNotIn("cpu input: t", t.notes)           # a task input default is not a workflow input
         self.assertEqual(len(t.call_sites), 2)
 
     def test_size_is_dynamic_but_memory_folds(self):

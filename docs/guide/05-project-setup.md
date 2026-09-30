@@ -68,9 +68,31 @@ from earlier stages can be set per project under `stage_inputs`, keyed by the
 stage name. The value is merged into the generated inputs file **after** the
 driver's own values, so an override always wins, and the result is checked
 against the workflow's input block: a key the workflow does not declare is an
-error before anything is submitted. Cores, memory and wall time of the
-upstream tasks are not workflow inputs; they are set per site by caps and
-the resource policy (chapter 12).
+error before anything is submitted.
+
+`ugc-wgw stage-inputs` prints the complete list: every input of every stage
+with its type, default and description, who fills it (the driver, a
+`config.json` key, or nobody, which makes it yours to set here) and the
+project's current override. It warns about keys `submit` would refuse and
+about overrides of values the driver fills. `--stage S` or `--mode M`
+narrows it, `--json` gives the same rows to a script.
+
+```bash
+ugc-wgw stage-inputs --stage cohort_merge          # the knobs of one stage
+ugc-wgw stage-inputs --nested --stage singleton    # plus the tasks' own inputs
+```
+
+With `--nested` the list also holds the call-qualified inputs of the tasks
+and subworkflows inside the entrypoint, `<call>.<task>.<input>`, exactly as
+miniwdl accepts them: thread counts, memory and tool options such as
+`upstream.pbmm2.pbmm2_align_wgs.threads` or
+`downstream.hiphase.phase_singletons`. Cores and memory of upstream's tasks
+are therefore settable, though only through these nested keys; the resource
+policy (chapter 12) remains the tool for the SLURM allocation alone, and the
+nested input is for when the tool's own thread count or memory budget must
+follow. Wall time is never an input: it comes from the site default and the
+policy. A nested input is a task input, so changing it invalidates the call
+cache of that task.
 
 ```json
 {
@@ -88,9 +110,9 @@ namespaced form wins when both exist. Chapter 08 lists every input per stage
 with its default. A dotted key names an input of a call inside the
 entrypoint (the driver itself sets
 `upstream.parabricks_deepvariant.run_parabricks_deepvariant.gpuCount` for
-Parabricks); the driver checks only
-that the first segment is a call of the entrypoint and miniwdl checks the
-rest when the run starts. The DeepVariant flavour is not a stage input but
+Parabricks); the driver checks only that the first segment is a call of the
+entrypoint, miniwdl checks the rest when the run starts, and
+`ugc-wgw stage-inputs --nested` checks it before. The DeepVariant flavour is not a stage input but
 the `deepvariant` key above, which sets `use_gpu`, `use_parabricks_deepvariant`
 and `gpuType` consistently for both stages; `stage_inputs` still win over
 it.

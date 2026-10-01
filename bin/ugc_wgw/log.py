@@ -31,7 +31,7 @@ EVENT_COLOR = {
     "run.failed": RED, "run.cancelled": RED, "run.driver_lost": RED,
     "run.created": CYAN, "run.submitted": CYAN,
     "run.blocked": DIM, "run.backoff": DIM,
-    "run.auto_retry": MAGENTA, "run.scancel": MAGENTA, "run.reconciled": MAGENTA,
+    "run.auto_retry": MAGENTA, "run.scancel": MAGENTA, "run.reconciled": MAGENTA, "run.accounting": MAGENTA,
     "submit.start": BOLD, "submit.stop": BOLD, "submit.progress": DIM,
     "progress": BOLD + CYAN,
 }

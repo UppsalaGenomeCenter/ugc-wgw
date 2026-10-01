@@ -17,6 +17,7 @@ Environment knobs:
   UGC_WGW_FAKE_FAIL_ATTEMPTS=1,2   fail only when the attempt directory is attempt-<n> for n in the list
   UGC_WGW_FAKE_SLURM_LOG=TEXT write TEXT (\n decoded) to <attempt>/call-fake/slurm_singularity.log.txt on every run
   UGC_WGW_FAKE_STDERR=TEXT    write TEXT to <attempt>/call-fake/stderr.txt
+  UGC_WGW_FAKE_TASK_LOG=1     log one task (`fake_task`, dir call-fake) as `task setup` + `done` in workflow.log.json
   UGC_WGW_FAKE_IGNORE_TERM=1  with UGC_WGW_FAKE_HANG: ignore SIGTERM so the driver has to SIGKILL
   UGC_WGW_FAKE_INFERRED_SEX=S1=MALE,S2=FEMALE   inferred_sex per sample for singleton/upstream (default ""); a seed
                           may also carry a non-WDL "inferred_sex" key (tests/driver/helpers.py seed_success)
@@ -268,10 +269,17 @@ def main(argv: list[str] | None = None) -> int:
     ugc_wgw_version = str(inputs.get(ns + "ugc_wgw_version"))
 
     (run_dir / "workflow.log").write_text(f"fake miniwdl run {stage} {sid}\n")
-    (run_dir / "workflow.log.json").write_text(json.dumps({"level": "NOTICE", "message": f"fake miniwdl run {stage} {sid}"}) + "\n")
-    (run_dir / "inputs.json").write_text(json.dumps(inputs, indent=2, sort_keys=True) + "\n")
+    log_lines = [{"level": "NOTICE", "message": f"fake miniwdl run {stage} {sid}"}]
     task_dir = run_dir / "call-fake"
-    if os.environ.get("UGC_WGW_FAKE_SLURM_LOG") or os.environ.get("UGC_WGW_FAKE_STDERR"):
+    if os.environ.get("UGC_WGW_FAKE_TASK_LOG"):   # one task, as miniwdl logs it: setup (with its dir) and done
+        src = f"wdl.w:ugc_wgw_{stage}.t:call-fake"
+        now = time.time()
+        log_lines += [{"level": "NOTICE", "message": "task setup", "name": "fake_task", "source": src, "dir": str(task_dir),
+                       "timestamp": now},
+                      {"level": "NOTICE", "message": "done", "source": src, "timestamp": now + 1.5}]
+    (run_dir / "workflow.log.json").write_text("".join(json.dumps(line) + "\n" for line in log_lines))
+    (run_dir / "inputs.json").write_text(json.dumps(inputs, indent=2, sort_keys=True) + "\n")
+    if os.environ.get("UGC_WGW_FAKE_SLURM_LOG") or os.environ.get("UGC_WGW_FAKE_STDERR") or os.environ.get("UGC_WGW_FAKE_TASK_LOG"):
         task_dir.mkdir(exist_ok=True)
         if os.environ.get("UGC_WGW_FAKE_SLURM_LOG"):
             (task_dir / "slurm_singularity.log.txt").write_text(os.environ["UGC_WGW_FAKE_SLURM_LOG"].replace("\\n", "\n") + "\n")

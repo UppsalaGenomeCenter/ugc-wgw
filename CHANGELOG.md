@@ -3,6 +3,24 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.6.0
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is unchanged.
+
+- `ugc-wgw usage` and a "Resource usage" section in the run report:
+  core-hours (allocated and requested), CPU-hours used with the efficiency,
+  GPU-hours, memory GB-hours, queue wait, jobs, disk usage (`--sizes`) and a
+  cost estimate from prices you supply (`--price KEY=VALUE`, `config.json`
+  `prices`; `--basis allocated|requested`), per stage, task and subject,
+  with the mean per sample (clean and as run).
+- The driver reads `sacct` for every run's jobs when the run finishes and
+  keeps it as `accounting.json` next to the manifest (compute time without
+  the queue wait, the wait itself, CPUs, `TotalCPU`, peak memory, GPUs,
+  disk); `usage --collect` reads it later for older runs; attempts without
+  accounting are estimated from the workflow log and labelled so.
+- The smoke harness's `sacct` step also prints the driver's per-task table.
+
 ## 0.5.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

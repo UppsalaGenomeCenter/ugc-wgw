@@ -63,6 +63,7 @@ class RunFiles:
     stdout: Path
     stderr: Path
     manifest: Path
+    accounting: Path
 
 
 def run_files(attempt_path: Path) -> RunFiles:
@@ -77,4 +78,5 @@ def run_files(attempt_path: Path) -> RunFiles:
         stdout=p / "miniwdl.stdout",
         stderr=p / "miniwdl.stderr",
         manifest=p / "run_manifest.json",
+        accounting=p / "accounting.json",
     )

@@ -1,15 +1,14 @@
 """`ugc-wgw report`: a self-contained HTML summary of a project's runs (technical metrics, not analysis results).
 
-Sources: the state DB (runs, events), each attempt's run_manifest.json, and miniwdl's workflow.log.json,
-whose NOTICE lines pair `task setup` with `done` / `done (cached)` per task logger and carry the
-`runtime.cpu adjusted to host limit` warnings. No external assets: inline CSS, inline SVG, a few lines
-of inline JavaScript for sortable tables. See docs/guide/07-results.md ("Run report").
+Sources: the state DB (runs, events), each attempt's run_manifest.json and accounting.json (SLURM accounting,
+usage.py), and miniwdl's workflow.log.json, whose NOTICE lines pair `task setup` with `done` / `done (cached)`
+per task logger and carry the `runtime.cpu adjusted to host limit` warnings. No external assets: inline CSS,
+inline SVG, a few lines of inline JavaScript for sortable tables. See docs/guide/07-results.md ("Run report").
 """
 from __future__ import annotations
 
 import html
 import json
-import os
 import statistics
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
@@ -21,6 +20,10 @@ from .layout import run_files
 from .manifest import CodeInfo
 from .stages import mode_stages
 from .util import parse_utc, read_json, utc_now
+from . import usage as usage_mod
+from .resources import Effective, GpuChoice
+from .usage import Prices
+from .wdllog import TaskStat, parse_workflow_log  # noqa: F401  (re-exported for the tests)
 
 STATUS_COLOR = {"success": "#2e7d32", "failed": "#c62828", "cancelled": "#ef6c00",
                 "running": "#1565c0", "submitted": "#5c6bc0", "pending": "#9e9e9e"}
@@ -29,30 +32,13 @@ STATUS_COLOR = {"success": "#2e7d32", "failed": "#c62828", "cancelled": "#ef6c00
 # ---- data ----------------------------------------------------------------------
 
 @dataclass
-class TaskStat:
-    name: str
-    call_id: str
-    start: float
-    end: float | None = None
-    cached: bool = False
-    cpu_requested: int | None = None
-    cpu_granted: int | None = None
-    policy: str = ""              # the ugc_wgw_resources plugin's summary, e.g. "cpu 64→48, partition -→fat"
-    retries: int = 0
-    failed: bool = False
-
-    @property
-    def duration(self) -> float | None:
-        return None if self.end is None else max(0.0, self.end - self.start)
-
-
-@dataclass
 class RunReport:
     run: RunRecord
     tasks: list[TaskStat] = field(default_factory=list)
     ignored_keys: Counter = field(default_factory=Counter)
     manifest: dict[str, object] = field(default_factory=dict)
     out_bytes: int | None = None
+    usage: usage_mod.AttemptUsage | None = None
 
     @property
     def duration(self) -> float | None:
@@ -61,71 +47,15 @@ class RunReport:
         return (parse_utc(self.run.finished_at) - parse_utc(self.run.started_at)).total_seconds()
 
 
-def parse_workflow_log(path: Path) -> tuple[list[TaskStat], Counter]:
-    """Per-task timings from miniwdl's JSON-lines workflow log; the task logger name is the key."""
-    tasks: dict[str, TaskStat] = {}
-    ignored: Counter = Counter()
-    try:
-        fh = open(path, errors="replace")
-    except OSError:
-        return [], ignored
-    with fh:
-        for line in fh:
-            try:
-                d = json.loads(line)
-            except ValueError:
-                continue
-            src = str(d.get("source", ""))
-            msg = str(d.get("message", ""))
-            ts = d.get("timestamp")
-            if not isinstance(ts, (int, float)) or ".t:" not in src:
-                continue
-            if msg == "task setup":
-                call_id = src.rsplit(".t:", 1)[-1]
-                tasks[src] = TaskStat(str(d.get("name", call_id)), call_id, float(ts))
-            elif src in tasks:
-                t = tasks[src]
-                if msg.startswith("done"):
-                    t.end = float(ts)
-                    t.cached = "cached" in msg
-                elif msg == "runtime.cpu adjusted to host limit":
-                    t.cpu_requested, t.cpu_granted = _int(d.get("original")), _int(d.get("adjusted"))
-                elif msg == "ugc-wgw resource policy applied":
-                    t.policy = str(d.get("summary") or "")
-                elif msg == "failed task will be retried":
-                    t.retries += 1
-                elif msg == "ignored runtime settings":
-                    for k in d.get("keys") or []:
-                        ignored[str(k)] += 1
-                elif d.get("level") == "ERROR" and "failed" in msg:
-                    t.failed = True
-    return list(tasks.values()), ignored
-
-
-def _int(v: object) -> int | None:
-    try:
-        return int(v)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None
-
-
-def _dir_bytes(path: Path) -> int:
-    total = 0
-    for root, _dirs, files in os.walk(path):
-        for f in files:
-            try:
-                total += os.lstat(os.path.join(root, f)).st_size
-            except OSError:
-                pass
-    return total
-
-
 def collect(cfg: Config, db: DB, *, mode: str | None, cohort: str | None, ugc_wgw_version: str | None,
-            sizes: bool = False) -> list[RunReport]:
+            sizes: bool = False, inv: dict[str, Effective] | None = None, gpu: GpuChoice | None = None) -> list[RunReport]:
     members: set[str] | None = None
     if cohort:
         c = db.get_cohort(cohort)
         members = set(c.members) if c else set()
+    if inv is None or gpu is None:
+        inv, gpu, _ = usage_mod.inventory(cfg)
+    cohorts = {c.cohort_id: list(c.members) for c in db.list_cohorts()}
     out: list[RunReport] = []
     for run in db.all_runs(ugc_wgw_version):
         if mode and run.mode != mode:
@@ -141,8 +71,10 @@ def collect(cfg: Config, db: DB, *, mode: str | None, cohort: str | None, ugc_wg
                 rr.manifest = doc if isinstance(doc, dict) else {}
             except (OSError, ValueError):
                 rr.manifest = {}
-        if sizes and (run.run_path / "out").exists():
-            rr.out_bytes = _dir_bytes(run.run_path / "out")
+        rr.usage = usage_mod.attempt_usage(cfg, run, inv=inv, gpu=gpu, sizes=sizes,
+                                           members=cohorts.get(run.subject_id) if run.subject_type == "cohort" else None)
+        if sizes:
+            rr.out_bytes = rr.usage.usage.out_bytes
         out.append(rr)
     return out
 
@@ -297,8 +229,9 @@ def concurrency_svg(reports: list[RunReport]) -> str:
             f'<text x="{label_w + 180}" y="12" font-size="10" fill="#8e24aa">tasks in flight (peak {task_peak})</text></svg>')
 
 
-def bars_svg(items: list[tuple[str, float, str]]) -> str:
-    """Horizontal bars: (label, value in seconds, note)."""
+def bars_svg(items: list[tuple[str, float, str]], fmt=None) -> str:
+    """Horizontal bars: (label, value, note); values are seconds unless `fmt` says otherwise."""
+    fmt = fmt or _dur
     if not items:
         return "<p>No finished tasks.</p>"
     top = max(v for _, v, _ in items) or 1.0
@@ -309,7 +242,7 @@ def bars_svg(items: list[tuple[str, float, str]]) -> str:
         w = v / top * width
         parts.append(f'<text x="{label_w - 6}" y="{y + 12}" font-size="10" text-anchor="end">{_esc(label)}</text>'
                      f'<rect x="{label_w}" y="{y + 2}" width="{w:.1f}" height="{row_h - 4}" fill="#607d8b"/>'
-                     f'<text x="{label_w + w + 4:.1f}" y="{y + 12}" font-size="10">{_esc(_dur(v))} {_esc(note)}</text>')
+                     f'<text x="{label_w + w + 4:.1f}" y="{y + 12}" font-size="10">{_esc(fmt(v))} {_esc(note)}</text>')
     parts.append("</svg>")
     return "".join(parts)
 
@@ -344,7 +277,7 @@ CSS = """
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#15191d;--fg:#e4e8ec;--muted:#9aa5b1;--line:#333b44;--panel:#1c2126;--head:#232a31;--zebra:#1a1f24;--accent:#6fb7c7;--grid:#333b44}}
 :root[data-theme="dark"]{--bg:#15191d;--fg:#e4e8ec;--muted:#9aa5b1;--line:#333b44;--panel:#1c2126;--head:#232a31;--zebra:#1a1f24;--accent:#6fb7c7;--grid:#333b44}
 body{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;margin:0;padding:24px 16px 48px;color:var(--fg);background:var(--bg);max-width:1200px;font-variant-numeric:tabular-nums}
-h1{font-size:22px;margin:0 0 4px;letter-spacing:-0.01em}h2{font-size:15px;margin-top:36px;border-bottom:1px solid var(--line);padding-bottom:4px;color:var(--accent);text-transform:uppercase;letter-spacing:0.06em}
+h1{font-size:22px;margin:0 0 4px;letter-spacing:-0.01em}h3{font-size:13px;margin:18px 0 4px;color:var(--muted)}h2{font-size:15px;margin-top:36px;border-bottom:1px solid var(--line);padding-bottom:4px;color:var(--accent);text-transform:uppercase;letter-spacing:0.06em}
 p{max-width:70ch}table{border-collapse:collapse;font-size:12px;margin:8px 0;background:var(--panel)}th,td{border:1px solid var(--line);padding:3px 6px;text-align:left;vertical-align:top}
 th{background:var(--head);cursor:pointer;user-select:none;font-weight:600}tr:nth-child(even) td{background:var(--zebra)}
 .cards{display:flex;flex-wrap:wrap;gap:12px}.card{border:1px solid var(--line);background:var(--panel);padding:8px 14px;min-width:120px}
@@ -364,9 +297,70 @@ rows.forEach(function(r){t.tBodies[0].appendChild(r);});});});
 """
 
 
+def _dict_table(rows: list[dict[str, object]]) -> str:
+    if not rows:
+        return "<p>None.</p>"
+    cols: list[str] = []
+    for r in rows:
+        for c in r:
+            if c not in cols:
+                cols.append(c)
+    return _table(cols, [[r.get(c, "") for c in cols] for r in rows])
+
+
+def usage_section(summary: usage_mod.Summary, prices: Prices, basis: str, *, mode: str | None, sizes: bool) -> str:
+    """Cards, bars and tables of core-hours, GPU-hours, memory, queue wait, disk and cost (usage.py)."""
+    t = summary.totals
+    src = summary.sources
+    source = f"SLURM accounting (sacct) for {src.get('sacct', 0)} of {t.attempts} attempt(s)"
+    if src.get("estimate"):
+        source += (f"; {src['estimate']} estimated from workflow.log wall time × requested cpu "
+                   "(wall time includes the SLURM queue wait)")
+    if src.get("none"):
+        source += f"; {src['none']} without task logs"
+    source += f"; basis: {basis} CPUs"
+    source += f"; prices: {prices.describe()}" if prices.any() else "; no prices given (--price KEY=VALUE or config.json prices)"
+    fmt_h, fmt_dur, fmt_bytes = usage_mod.fmt_h, usage_mod.fmt_dur, usage_mod.fmt_bytes
+    cards: list[tuple[str, str]] = [
+        ("core-hours allocated", fmt_h(t.core_h_alloc)), ("core-hours requested", fmt_h(t.core_h_req)),
+        ("cpu-hours used", (fmt_h(t.cpu_h_used) + f" ({usage_mod.fmt_pct(t.efficiency)})") if t.core_h_with_used else "–"),
+        ("gpu-hours", fmt_h(t.gpu_h)), ("memory GB-hours", fmt_h(t.mem_gb_h)),
+        ("queue wait median / max", f"{fmt_dur(t.queue_median)} / {fmt_dur(t.queue_max)}" if t.queue_s else "–"),
+        ("jobs", f"{t.jobs} ({t.failed_jobs} failed, {fmt_h(t.wasted_core_h)} core-h wasted)"),
+    ]
+    if t.out_bytes is not None:
+        cards.append(("results on disk, all attempts", fmt_bytes(t.out_bytes)))
+        cards.append(("results on disk, latest successful", fmt_bytes(summary.clean.out_bytes)))
+    if summary.n_samples:
+        pc, pr = summary.per_sample_clean, summary.per_sample_as_run
+        cards.append(("per sample, clean", f"{fmt_h(pc.core_h(basis))} core-h, {fmt_h(pc.gpu_h)} gpu-h"))  # type: ignore[union-attr]
+        cards.append(("per sample, as run", f"{fmt_h(pr.core_h(basis))} core-h, {fmt_h(pr.gpu_h)} gpu-h"))  # type: ignore[union-attr]
+    if prices.any():
+        cards.append(("estimated compute cost", prices.money(t.cost(prices, basis))))
+        if summary.n_samples:
+            cards.append(("cost per sample, clean", prices.money(summary.per_sample_clean.cost(prices, basis))))  # type: ignore[union-attr]
+        if prices.storage_gb_month is not None and t.out_bytes is not None:
+            cards.append(("storage per month, all attempts", prices.money(t.storage_per_month(prices))))
+    cards_html = '<div class="cards">' + "".join(
+        f'<div class="card"><span class="muted">{_esc(k)}</span><b>{_esc(v)}</b></div>' for k, v in cards) + "</div>"
+    bars = [(task, u.core_h(basis), f"{u.jobs} jobs") for task, u in
+            sorted(summary.by_task.items(), key=lambda kv: -kv[1].core_h(basis))[:20] if u.core_h(basis) > 0]
+    notes = "".join(f"<p class='muted'>{_esc(n)}</p>" for n in summary.notes)
+    return (f"<p class='muted'>{_esc(source)}</p>{cards_html}{notes}"
+            f"<h3>Core-hours per task</h3><div class='wrap'>{bars_svg(bars, fmt=lambda v: f'{fmt_h(v)} core-h')}</div>"
+            f"<h3>Per stage</h3><div class='wrap'>{_dict_table(usage_mod.rows_stage(summary, prices, basis, mode=mode, sizes=sizes))}</div>"
+            f"<h3>Per task</h3><div class='wrap'>{_dict_table(usage_mod.rows_task(summary, prices, basis, top=20))}</div>"
+            f"<h3>Per subject</h3><div class='wrap'>{_dict_table(usage_mod.rows_subject(summary, prices, basis, sizes=sizes))}</div>")
+
+
 def render(cfg: Config, code: CodeInfo, reports: list[RunReport], *, ugc_wgw_version: str, mode: str | None,
-           cohort: str | None, events: list[dict[str, object]], n_samples: int, n_cohorts: int) -> str:
+           cohort: str | None, events: list[dict[str, object]], n_samples: int, n_cohorts: int,
+           prices: Prices | None = None, basis: str = "allocated", sizes: bool = False,
+           usage_notes: list[str] | None = None) -> str:
+    prices = prices or Prices()
     runs = [r.run for r in reports]
+    summary = usage_mod.aggregate([r.usage for r in reports if r.usage is not None])
+    summary.notes = list(usage_notes or []) + summary.notes
     by_status = Counter(r.status for r in runs)
     kinds = Counter(r.error_kind for r in runs if r.status in ("failed", "cancelled"))
     all_tasks = [t for r in reports for t in r.tasks]
@@ -433,7 +427,9 @@ def render(cfg: Config, code: CodeInfo, reports: list[RunReport], *, ugc_wgw_ver
                          Raw(f'<span class="kind-{_esc(kind)}">{_esc(kind)}</span>'), r.run.started_at or "", _dur(r.duration),
                          "" if r.run.exit_code is None else r.run.exit_code,
                          f"{len(r.tasks)} ({sum(1 for t in r.tasks if t.cached)} cached)",
-                         _ids(list(r.manifest.get("slurm_job_ids", []) or [])), _bytes(r.out_bytes) if r.out_bytes is not None else "",
+                         _ids(list(r.manifest.get("slurm_job_ids", []) or [])),
+                         (r.usage.source + (f" ({r.usage.status}), {r.usage.usage.jobs} jobs" if r.usage.source == "sacct" else "")) if r.usage else "",
+                         _bytes(r.out_bytes) if r.out_bytes is not None else "",
                          Raw(manifest_link), r.run.error_message or ""])
 
     # failures
@@ -497,6 +493,7 @@ def render(cfg: Config, code: CodeInfo, reports: list[RunReport], *, ugc_wgw_ver
         section("Provenance", _table(["what", "value"], prov_rows, cls="")),
         section("Stages", '<div class="wrap">' + _table(["stage", "runs", "subjects done", "success", "failed", "cancelled", "active",
                                                           "re-attempts", "median", "mean", "max", "total", "tasks", "cached"], stage_rows) + "</div>"),
+        section("Resource usage", usage_section(summary, prices, basis, mode=mode, sizes=sizes)),
         section("Timeline", '<div class="wrap">' + timeline_svg(reports) + "</div>"),
         section("Concurrency", '<div class="wrap">' + concurrency_svg(reports) + "</div>"),
         section("Progress over time", '<div class="wrap">' + progress_svg(events) + "</div>"),
@@ -504,7 +501,7 @@ def render(cfg: Config, code: CodeInfo, reports: list[RunReport], *, ugc_wgw_ver
         section("Tasks", '<div class="wrap">' + _table(["task", "calls", "cached", "miniwdl retries", "failed", "median", "mean",
                                                          "max", "total", "cpu requested→granted (n)", "policy (n)"], task_rows) + "</div>"),
         section("Runs", '<div class="wrap">' + _table(["subject", "type", "stage", "mode", "attempt", "status", "kind", "started",
-                                                        "duration", "exit", "tasks", "slurm jobs", "out size", "manifest", "message"], run_rows) + "</div>"),
+                                                        "duration", "exit", "tasks", "slurm jobs", "accounting", "out size", "manifest", "message"], run_rows) + "</div>"),
         section("Failures", '<div class="wrap">' + (_table(["subject", "stage", "attempt", "status", "kind", "class", "node",
                                                              "exit status", "evidence", "task dir", "not before"], fail_rows) if fail_rows else "<p>None.</p>") + "</div>"),
         section("Resource adjustments",
@@ -523,8 +520,10 @@ def render(cfg: Config, code: CodeInfo, reports: list[RunReport], *, ugc_wgw_ver
 
 
 def build(cfg: Config, db: DB, code: CodeInfo, *, ugc_wgw_version: str | None, mode: str | None = None,
-          cohort: str | None = None, sizes: bool = False) -> str:
-    reports = collect(cfg, db, mode=mode, cohort=cohort, ugc_wgw_version=ugc_wgw_version, sizes=sizes)
+          cohort: str | None = None, sizes: bool = False, prices: Prices | None = None, basis: str = "allocated") -> str:
+    inv, gpu, notes = usage_mod.inventory(cfg)
+    reports = collect(cfg, db, mode=mode, cohort=cohort, ugc_wgw_version=ugc_wgw_version, sizes=sizes, inv=inv, gpu=gpu)
     events = db.all_events()
     return render(cfg, code, reports, ugc_wgw_version=ugc_wgw_version or "", mode=mode, cohort=cohort, events=events,
-                  n_samples=len(db.list_sample_ids()), n_cohorts=len(db.list_cohorts()))
+                  n_samples=len(db.list_sample_ids()), n_cohorts=len(db.list_cohorts()), prices=prices, basis=basis,
+                  sizes=sizes, usage_notes=notes)

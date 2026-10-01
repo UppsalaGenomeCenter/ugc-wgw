@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass
 from typing import IO
 
-from . import engine, failures, inputs, layout, manifest, progress, resources, slurm
+from . import accounting, engine, failures, inputs, layout, manifest, progress, resources, slurm
 from . import lease as lease_mod
 from .config import Config
 from .db import DB, RunRecord
@@ -133,6 +133,10 @@ def finalize_run(cfg: Config, db: DB, events: Events, code: manifest.CodeInfo, e
                 exit_code=result.exit_code, error_class=error_class, kind=run.error_kind, message=run.error_message,
                 engine_message=result.error_message, task_dir=result.task_dir, node=result.node,
                 slurm_job_ids=run.meta.get("slurm_job_ids", []), not_before=run.not_before)
+    # SLURM accounting of the attempt's jobs (accounting.json); a lost driver's jobs may still be dying, so those and
+    # cancelled runs are left to `ugc-wgw usage --collect`
+    if cfg.accounting and status != "cancelled" and error_class != "driver_lost":
+        accounting.capture(cfg, events, run)
     return status
 
 

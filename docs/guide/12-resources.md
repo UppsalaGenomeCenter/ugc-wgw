@@ -275,8 +275,9 @@ NOTICE per changed task (`ugc-wgw resource policy applied` with
 `cpu 64→48, partition -→fat`) and one WARNING per capped task; `ugc-wgw report`
 tabulates both under "Resource adjustments", and `run_manifest.json`
 records the policy file's path and sha256 (`resource_policy`). On the HPC,
-`tests/smoke/run.sh sacct` shows the allocated cores and peak memory per
-task against what was asked.
+`ugc-wgw usage --by task` shows the allocated cores and peak memory per
+task against what was asked, from the accounting the driver reads with
+`sacct` when each run finishes (chapter 07).
 
 Two details worth knowing. A run whose every task comes from the call cache
 never starts the plugin, and miniwdl then prints a harmless
@@ -287,8 +288,11 @@ rendered `miniwdl.cfg`.
 ## Finding the right numbers
 
 The inventory gives the declared values; the cluster gives the truth.
-`tests/smoke/run.sh sacct` shows peak memory and elapsed time per task, and
-so does `sacct` on the job ids a manifest records:
+`ugc-wgw usage --by task` lists, per task, the jobs, the elapsed and queue
+times, the core-hours, the CPU-hours actually used and the peak memory
+against the request (`mem use %`), from the accounting the driver keeps
+per attempt (chapter 07); `tests/smoke/run.sh sacct` dumps the raw rows,
+and so does `sacct` on the job ids a manifest records:
 
 ```bash
 sacct -j <id> --format JobID,AllocCPUS,ReqMem,MaxRSS,Elapsed,Timelimit
@@ -296,5 +300,6 @@ sacct -j <id> --format JobID,AllocCPUS,ReqMem,MaxRSS,Elapsed,Timelimit
 
 A task whose peak memory sits far below its request can take a smaller
 row, which lets more jobs run at once; one that ends near its limit needs a
-larger one. A command that turns finished runs' accounting into proposed
-rows is planned once the HPC smoke test has produced real numbers.
+larger one. The worked policy above was written that way from the first
+ten samples; proposing rows from the accounting automatically stays a
+manual step.

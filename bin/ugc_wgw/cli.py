@@ -8,7 +8,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import cohorts, config, engine, manifest, progress, report, resources, samples, stage_inputs, summary
+from . import cohorts, config, engine, manifest, progress, report, resources, samples, stage_inputs, summary, usage
 from .log import LOGGER
 from .db import DB
 from .log import Events, setup_logging
@@ -124,6 +124,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--any-version", action="store_true", help="runs of every ugc-wgw version (default: the current one)")
     s.add_argument("--sizes", action="store_true", help="also measure each run's out/ (walks the results tree)")
     s.add_argument("--out", metavar="FILE", help="output file (default: <results>/reports/ugc-wgw-report-<stamp>.html)")
+    _price_args(s)
 
     s = sub.add_parser("summary", help="write self-contained HTML analysis summaries: one per sample, one per cohort "
                                        "(what the analysis found, with QC flags)")
@@ -153,6 +154,27 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--cohort", metavar="ID")
     s.add_argument("--any-version", action="store_true")
 
+    s = sub.add_parser("usage", help="core-hours, GPU-hours, memory, queue wait, disk and a cost estimate per stage, task "
+                                     "and sample, from each run's SLURM accounting (accounting.json, read with sacct when "
+                                     "the run finished) or, without it, estimated from the workflow log")
+    s.add_argument("--mode", choices=sorted(MODES), help="only runs of this mode (default: all)")
+    s.add_argument("--cohort", metavar="ID", help="only the cohort and its members")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--samples", nargs="+", metavar="ID", help="only these samples' runs")
+    g.add_argument("--samples-file", metavar="FILE")
+    s.add_argument("--any-version", action="store_true", help="runs of every ugc-wgw version (default: the current one)")
+    s.add_argument("--by", choices=("stage", "task", "subject", "attempt", "all"), default="all",
+                   help="which table(s) to print (default: all = stage, task and subject)")
+    s.add_argument("--top", type=int, default=20, metavar="N", help="tasks shown, by core-hours (default 20)")
+    s.add_argument("--sizes", action="store_true", help="also measure each attempt's out/ and whole directory (walks the results tree)")
+    _price_args(s)
+    s.add_argument("--collect", action="store_true",
+                   help="first read sacct for the finished runs that have no accounting.json, or a partial one (needs sacct)")
+    s.add_argument("--refresh", action="store_true", help="re-read sacct for every finished run (implies --collect)")
+    f = s.add_mutually_exclusive_group()
+    f.add_argument("--json", action="store_true")
+    f.add_argument("--tsv", action="store_true", help="tab-separated tables")
+
     s = sub.add_parser("stage-inputs", help="every input of every stage: type, default, who fills it (the driver, a "
                                             "config.json key, or nobody: yours under stage_inputs), its description and "
                                             "the project's override; warns about overrides submit would refuse")
@@ -164,6 +186,14 @@ def build_parser() -> argparse.ArgumentParser:
                         "(<call>.<task>.<input>: thread counts, memory, tool options); runs miniwdl in the engine venv")
     s.add_argument("--json", action="store_true")
     return p
+
+
+def _price_args(s: argparse.ArgumentParser) -> None:
+    s.add_argument("--price", action="append", default=[], metavar="KEY=VALUE",
+                   help="unit price for the cost columns (keys: " + ", ".join(usage.PRICE_KEYS) + ", currency); repeatable; "
+                        "config.json `prices` gives the defaults")
+    s.add_argument("--basis", choices=usage.BASES, default="allocated",
+                   help="core-hours charged: allocated CPUs (what SLURM gave) or requested (what a cloud would be sized to)")
 
 
 def _open(a: argparse.Namespace) -> tuple[config.Config, DB, Events, str]:
@@ -414,7 +444,7 @@ def cmd_report(a: argparse.Namespace) -> int:
         if a.cohort and db.get_cohort(a.cohort) is None:
             raise UgcError(f"unknown cohort {a.cohort}")
         text = report.build(cfg, db, code, ugc_wgw_version=None if a.any_version else version, mode=a.mode,
-                            cohort=a.cohort, sizes=a.sizes)
+                            cohort=a.cohort, sizes=a.sizes, prices=usage.parse_prices(cfg, a.price), basis=a.basis)
         out = Path(a.out) if a.out else cfg.results_dir / "reports" / f"ugc-wgw-report-{utc_stamp()}.html"
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(text)
@@ -482,6 +512,45 @@ def cmd_inputs(a: argparse.Namespace) -> int:
         db.close()
 
 
+def cmd_usage(a: argparse.Namespace) -> int:
+    cfg, db, events, version = _open(a)
+    try:
+        code = manifest.load_code_info(cfg.code_dir)
+        reconcile(cfg, db, events, code, {})
+        prices = usage.parse_prices(cfg, a.price)
+        samples_sel = list(a.samples) if a.samples else cohorts.read_ids(Path(a.samples_file)) if a.samples_file else None
+        ver = None if a.any_version else version
+        runs = usage.select_runs(db, mode=a.mode, cohort=a.cohort, samples=samples_sel, ugc_wgw_version=ver)
+        if a.collect or a.refresh:
+            statuses = usage.collect_missing(cfg, db, events, runs, refresh=a.refresh)
+            diag("accounting: " + (", ".join(f"{k} {v}" for k, v in sorted(statuses.items())) or "no finished runs"))
+        summary_, attempts = usage.build(cfg, db, mode=a.mode, cohort=a.cohort, samples=samples_sel, ugc_wgw_version=ver,
+                                         sizes=a.sizes)
+        for note in summary_.notes:
+            diag(f"note: {note}")
+        if a.json:
+            print(json.dumps(usage.as_json(summary_, attempts, prices, a.basis), indent=2))
+            return 0
+        tables: list[tuple[str, list[dict[str, object]]]] = []
+        if a.by in ("stage", "all"):
+            tables.append(("stage", usage.rows_stage(summary_, prices, a.basis, mode=a.mode, sizes=a.sizes)))
+        if a.by in ("task", "all"):
+            tables.append((f"task, top {a.top} by core-hours", usage.rows_task(summary_, prices, a.basis, top=a.top)))
+        if a.by in ("subject", "all"):
+            tables.append(("subject", usage.rows_subject(summary_, prices, a.basis, sizes=a.sizes)))
+        if a.by == "attempt":
+            tables.append(("attempt", usage.rows_attempts(attempts, prices, a.basis, sizes=a.sizes)))
+        if not a.tsv:
+            print(f"# {usage.summary_line(summary_, prices, a.basis)}")
+        for i, (title, rows) in enumerate(tables):
+            if not a.tsv or len(tables) > 1:
+                print(("\n" if i or not a.tsv else "") + f"# by {title}")
+            _print_rows(rows, False, tsv=a.tsv)
+        return 0
+    finally:
+        db.close()
+
+
 def cmd_stage_inputs(a: argparse.Namespace) -> int:
     cfg = config.load(Path(a.project))
     if a.stage:
@@ -507,7 +576,7 @@ def cmd_stage_inputs(a: argparse.Namespace) -> int:
     return 0
 
 
-def _print_rows(rows: list[dict[str, object]], as_json: bool) -> None:
+def _print_rows(rows: list[dict[str, object]], as_json: bool, *, tsv: bool = False) -> None:
     if as_json:
         print(json.dumps(rows, indent=2, sort_keys=True))
         return
@@ -519,6 +588,11 @@ def _print_rows(rows: list[dict[str, object]], as_json: bool) -> None:
         for c in r:
             if c not in cols:
                 cols.append(c)
+    if tsv:
+        print("\t".join(cols))
+        for r in rows:
+            print("\t".join(str(r.get(c, "")) for c in cols))
+        return
     widths = {c: max(len(c), *(len(str(r.get(c, ""))) for r in rows)) for c in cols}
     print("  ".join(c.ljust(widths[c]) for c in cols))
     for r in rows:
@@ -555,6 +629,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_resources(a)
         if a.command == "stage-inputs":
             return cmd_stage_inputs(a)
+        if a.command == "usage":
+            return cmd_usage(a)
         parser.error(f"unknown command {a.command}")
     except UgcError as exc:
         diag(f"error: {exc}")

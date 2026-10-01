@@ -17,7 +17,8 @@
 │   │   ├── out/               miniwdl, on success: one directory per output, hardlinks
 │   │   ├── call-<task>/       miniwdl work dirs; removed on success (delete_work), kept on failure;
 │   │   │                      slurm_singularity.log.txt holds the SLURM job id and slurmd's messages
-│   │   └── run_manifest.json  driver, on every finished attempt
+│   │   ├── run_manifest.json  driver, on every finished attempt
+│   │   └── accounting.json    driver, the SLURM accounting of the attempt's jobs (sacct), on a cluster
 │   ├── attempt-2/             a retry
 │   └── current -> attempt-2   the latest finished attempt, whatever its status
 └── cohorts/<cohort_id>/<v>/<stage>/   same shape
@@ -177,7 +178,8 @@ traced to the exact files that were on the HPC.
 
 ## Run report
 
-`ugc-wgw report [--mode M] [--cohort ID] [--any-version] [--sizes] [--out FILE]`
+`ugc-wgw report [--mode M] [--cohort ID] [--any-version] [--sizes] [--price
+KEY=VALUE ...] [--basis allocated|requested] [--out FILE]`
 writes one self-contained HTML file (inline styles and charts, nothing
 fetched from the network, so it opens anywhere) summarising the project's
 runs. It is a technical summary of how the campaign ran, not of what it
@@ -189,6 +191,9 @@ found. Sections:
   bundle, engine versions, hosts.
 - Stages: per stage the runs, subjects done, statuses, re-attempts, median,
   mean, max and total wall time, tasks and cache hits.
+- Resource usage: core-hours, CPU-hours used, GPU-hours, memory GB-hours,
+  queue wait, jobs, results on disk and, with prices, a cost estimate; per
+  stage, per task and per subject, with a per-sample mean (next section).
 - Timeline: one bar per attempt, coloured by status, on a shared time axis.
 - Concurrency: runs and tasks in flight over time, with the peaks.
 - Progress over time: the driver's `submit.progress` samples (done fraction
@@ -197,8 +202,8 @@ found. Sections:
   retries, failures, median, mean, max and total wall time, and cpu requests
   that miniwdl rounded down to the host.
 - Runs: every attempt with its kind, duration, exit code, task count, SLURM
-  job count, optional `out/` size (`--sizes` walks the results tree) and a
-  link to its manifest.
+  job count, accounting source, optional `out/` size (`--sizes` walks the
+  results tree) and a link to its manifest.
 - Failures: kind, class, node, exit status, the evidence line and the task
   directory, and when the driver will re-attempt.
 - resource adjustments (site caps and policy rows per task, chapter 12),
@@ -208,6 +213,61 @@ found. Sections:
 Task timings come from `workflow.log.json`, which miniwdl writes for the
 whole run, so they survive `delete_work`. The default output is
 `<results>/reports/ugc-wgw-report-<timestamp>.html`; the path is printed.
+
+## Resource usage and cost
+
+```bash
+ugc-wgw usage                                   # per stage, task and subject
+ugc-wgw usage --by task --top 40                # the tasks that cost the most
+ugc-wgw usage --sizes --price cpu_hour=0.04 --price gpu_hour=2.5 \
+    --price storage_gb_month=0.02 --price currency=EUR
+ugc-wgw usage --collect                         # read sacct for runs that have no accounting yet
+```
+
+`ugc-wgw usage [--mode M] [--cohort ID] [--samples ...] [--any-version]
+[--by stage|task|subject|attempt|all] [--top N] [--sizes] [--price KEY=VALUE
+...] [--basis allocated|requested] [--collect] [--refresh] [--json|--tsv]`
+prints what the campaign consumed, and the report's "Resource usage"
+section shows the same numbers. Per stage, task and subject: jobs, elapsed
+(compute) time, queue wait, core-hours allocated and requested, CPU-hours
+actually used with the efficiency, GPU-hours, memory GB-hours, peak memory
+against the request, disk written, and with `--sizes` the bytes of each
+attempt's `out/` and whole directory. Two rows close the subject table:
+the mean per sample *clean* (the latest successful attempt of every stage,
+cohort stages divided equally among the samples: what a clean run would be
+billed) and *as run* (everything consumed, retries and failed attempts
+included, divided by the samples that have results).
+
+Where the numbers come from. On the cluster the driver reads `sacct` for
+every attempt's jobs when the run finishes and keeps the answer as
+`accounting.json` next to the manifest: elapsed time without the queue
+wait, the wait itself (`Start − Submit`), allocated and requested CPUs,
+`TotalCPU`, peak RSS, GPUs and disk volumes per job, joined to the task
+names of the workflow log. A run finished before this version, or while
+`sacct` was unavailable, has no file; `--collect` reads it later for every
+finished run that lacks one (or has a partial one, from jobs that were
+still ending), `--refresh` for all of them, as far as the cluster's
+accounting retention reaches. Without a file an attempt is *estimated*
+from the workflow log: each task's wall time, which includes the SLURM
+queue wait, times the cpu it was launched with (policy row, site cap, else
+the inventory) and the inventory's memory. The source line of the report
+and the `source` column of `--by attempt` say which attempts are
+estimates; on the dev machine every one is.
+
+Cost is a multiplication you control. Prices come from `config.json`
+`prices` and `--price` (`cpu_hour`, `gpu_hour`, `mem_gb_hour`,
+`storage_gb_month`, `currency`); a cost column appears when any is set:
+core-hours × `cpu_hour` + GPU-hours × `gpu_hour` + memory GB-hours ×
+`mem_gb_hour`, and `storage_gb_month` × the results on disk per month. Two
+choices to make deliberately: `--basis allocated` (default) charges the
+CPUs SLURM gave, which on a whole-node partition such as `fat` is more
+than the task asked for; `requested` charges what the task asked for,
+which is what a cloud instance would be sized to. A cloud bills instance
+hours, not core-hours, so size the per-core price from the instance shape
+the task would run on (a 48-core alignment task on a 48-vCPU instance:
+that instance's hourly price divided by 48) and treat the result as an
+estimate, not a quote. GPU hours and the per-sample clean figure are the
+two numbers to carry into such an estimate.
 
 ## Analysis summary
 
@@ -274,5 +334,6 @@ Events: `sample.added`, `sample.warning`, `cohort.frozen`, `submit.start`,
 command line), `run.running`, `run.blocked`, `run.auto_retry`,
 `run.terminating`, `run.success`, `run.failed`, `run.cancelled` (each with the
 kind, message, task directory, node and SLURM job ids), `run.reconciled`,
-`run.scancel`. The sequence of a clean run is `created`, `submitted`, `running`,
-`success`.
+`run.scancel`, `run.accounting` (the sacct read: `ok`, `partial` or
+`failed`, with the job counts). The sequence of a clean run is `created`,
+`submitted`, `running`, `success` and, on a cluster, `accounting`.

@@ -108,8 +108,28 @@ flags besides `--samples`.
 | `--mode M` | all | Only runs of this mode. |
 | `--cohort ID` | all | Only the cohort and its members. |
 | `--any-version` | current | Runs of every ugc-wgw version. |
-| `--sizes` | off | Measure each run's `out/` (walks the results tree). |
+| `--sizes` | off | Measure each run's `out/` and whole directory (walks the results tree). |
+| `--price KEY=VALUE` | config.json `prices` | Unit price for the cost figures; repeatable. Keys `cpu_hour`, `gpu_hour`, `mem_gb_hour`, `storage_gb_month`, `currency`. |
+| `--basis allocated\|requested` | `allocated` | Core-hours charged: the CPUs SLURM allocated, or the CPUs the task requested. |
 | `--out FILE` | `<results>/reports/ugc-wgw-report-<stamp>.html` | Output file; the path is printed. |
+
+### `ugc-wgw usage`
+
+Core-hours, GPU-hours, memory GB-hours, queue wait, disk usage and a cost
+estimate per stage, task and subject, with the mean per sample (chapter
+07), from each attempt's `accounting.json` or, without one, estimated from
+the workflow log.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--mode M`, `--cohort ID`, `--samples`, `--samples-file`, `--any-version` | all, current version | The runs to count. |
+| `--by stage\|task\|subject\|attempt\|all` | `all` | The tables to print (`all` = stage, task, subject). |
+| `--top N` | `20` | Tasks shown, by core-hours. |
+| `--sizes` | off | Measure each attempt's `out/` and whole directory. |
+| `--price KEY=VALUE`, `--basis` | as for `report` | Cost figures. |
+| `--collect` | off | First read `sacct` for finished runs without `accounting.json` or with a partial one; needs `sacct`. |
+| `--refresh` | off | Re-read `sacct` for every finished run (implies `--collect`). |
+| `--json`, `--tsv` | off | Machine-readable output. |
 
 ### `ugc-wgw summary`
 
@@ -209,6 +229,9 @@ Python.
 | `deepvariant` | `"cpu"` | `cpu`, `gpu` or `parabricks`: the small-variant caller of `singleton` and `upstream` (chapter 12). |
 | `gpu_type` | `""` | SLURM gres type behind `--gres gpu:<type>:N`; empty = `gpu:N`. |
 | `parabricks_gpus` | `4` | GPUs per Parabricks task. |
+| `prices` | `{}` | Unit prices for `usage` and `report` cost figures, e.g. `{"cpu_hour": 0.04, "gpu_hour": 2.5, "currency": "EUR"}` (chapter 07). |
+| `accounting` | `true` | Read `sacct` for every finished run into `accounting.json` (nothing happens without `sacct`). |
+| `accounting_timeout` | `120` | Seconds allowed per `sacct` call. |
 
 ## Sample sheet
 
@@ -274,9 +297,10 @@ is required as rendered (chapter 04).
 
 `inputs.json`, `miniwdl.stdout`, `miniwdl.stderr`, `workflow.log` (plain),
 `workflow.log.json`, `run.json`, `outputs.json`, `error.json`, `out/`,
-`call-<task>/` (with `slurm_singularity.log.txt`), `run_manifest.json`;
-`current` in the stage directory points at the latest finished attempt
-(chapter 07).
+`call-<task>/` (with `slurm_singularity.log.txt`), `run_manifest.json`,
+`accounting.json` (the SLURM accounting of the attempt's jobs, on a
+cluster); `current` in the stage directory points at the latest finished
+attempt (chapter 07).
 
 ## Run states, error classes, events
 
@@ -289,9 +313,10 @@ reported in `error.json` (`CommandFailed` and others). Failure kinds:
 `cohort.frozen`, `submit.start`, `submit.stop`, `run.created`,
 `run.submitted`, `run.running`, `run.blocked`, `run.auto_retry`,
 `run.terminating`, `run.success`, `run.failed`, `run.cancelled`,
-`run.reconciled`, `run.scancel`, `submit.progress`. miniwdl log lines the
-report reads: `runtime.cpu adjusted to host limit` (a site cap) and
-`ugc-wgw resource policy applied` (a policy row).
+`run.reconciled`, `run.scancel`, `run.accounting`, `submit.progress`.
+miniwdl log lines the report reads: `runtime.cpu adjusted to host limit`
+(a site cap), `ugc-wgw resource policy applied` (a policy row) and
+`ugc-wgw gpu request` (the gres of a GPU task).
 
 ## Blocked reasons
 

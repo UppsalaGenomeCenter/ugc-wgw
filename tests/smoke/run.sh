@@ -340,6 +340,8 @@ for name, js in sorted(by.items(), key=lambda kv: -max(j["max"] for j in kv[1]))
     gres = ",".join(sorted({j["gres"] for j in js}))
     print(f"{name[:40]:40} {len(js):4d} {states[:10]:10} {js[0]['limit']:>11} {js[0]['cpus']:>4} {gres[:12]:>12} {longest:>11} {req:8.0f} {mx:10.0f} {(100 * mx / req if req else 0):4.0f}%")
 PY
+  # the driver's own view: accounting.json per attempt (read now for runs that finished without it), per task
+  "${ugc[@]}" --color never usage --collect --by task --any-version
 }
 
 cmd_report() {  # self-contained HTML summary of every run of the smoke project, then the analysis summaries

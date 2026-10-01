@@ -104,6 +104,28 @@ def fake_scancel(tmp: pathlib.Path) -> tuple[str, pathlib.Path]:
     return str(bin_dir), log
 
 
+def fake_sacct(tmp: pathlib.Path, text: str) -> tuple[str, pathlib.Path]:
+    """A fake `sacct` that appends its arguments to $UGC_WGW_FAKE_SACCT_LOG and prints the canned `text`; when
+    $UGC_WGW_FAKE_SACCT_REJECT names a field present in the --format, it fails like an old sacct. Returns (bin dir, args log)."""
+    bin_dir = pathlib.Path(tmp) / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    out = pathlib.Path(tmp) / "sacct.out"
+    out.write_text(text)
+    log = pathlib.Path(tmp) / "sacct.log"
+    exe = bin_dir / "sacct"
+    exe.write_text('#!/bin/sh\necho "$@" >> "$UGC_WGW_FAKE_SACCT_LOG"\n'
+                   'if [ -n "$UGC_WGW_FAKE_SACCT_REJECT" ]; then case " $* " in *"$UGC_WGW_FAKE_SACCT_REJECT"*)\n'
+                   '  echo "sacct: error: Invalid field requested: \\"$UGC_WGW_FAKE_SACCT_REJECT\\"" >&2; exit 1;; esac; fi\n'
+                   f'cat "{out}"\n')
+    exe.chmod(0o755)
+    return str(bin_dir), log
+
+
+def sacct_env(tmp: pathlib.Path, text: str) -> tuple[dict[str, str], pathlib.Path]:
+    bin_dir, log = fake_sacct(tmp, text)
+    return {"PATH": f"{bin_dir}:{os.environ['PATH']}", "UGC_WGW_FAKE_SACCT_LOG": str(log)}, log
+
+
 def scancel_env(tmp: pathlib.Path) -> tuple[dict[str, str], pathlib.Path]:
     bin_dir, log = fake_scancel(tmp)
     return {"PATH": f"{bin_dir}:{os.environ['PATH']}", "UGC_WGW_FAKE_SCANCEL_LOG": str(log)}, log

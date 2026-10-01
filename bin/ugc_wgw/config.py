@@ -43,6 +43,9 @@ class Config:
     deepvariant: str = "cpu"        # cpu | gpu (DeepVariant call_variants on 1 GPU) | parabricks (pbrun deepvariant)
     gpu_type: str = ""              # SLURM gres type (`a100`): --gres gpu:<type>:N; empty = gpu:N
     parabricks_gpus: int = 4        # GPUs per Parabricks task (the WDL's own default is 4)
+    prices: dict[str, object] = field(default_factory=dict)   # unit prices for `usage`/`report` cost columns (guide chapter 07)
+    accounting: bool = True         # read `sacct` for every finished run into accounting.json (no-op without sacct)
+    accounting_timeout: float = 120.0   # seconds per sacct call
 
     @property
     def ugc_wgw_dir(self) -> Path:
@@ -100,6 +103,9 @@ class Config:
             "deepvariant": self.deepvariant,
             "gpu_type": self.gpu_type,
             "parabricks_gpus": self.parabricks_gpus,
+            "prices": self.prices,
+            "accounting": self.accounting,
+            "accounting_timeout": self.accounting_timeout,
         }
 
     @classmethod
@@ -142,6 +148,9 @@ class Config:
             deepvariant=check_deepvariant(str(doc.get("deepvariant") or "cpu")),
             gpu_type=str(doc.get("gpu_type") or "").strip(),
             parabricks_gpus=check_gpus(doc.get("parabricks_gpus", 4)),
+            prices=dict(doc.get("prices") or {}),  # type: ignore[arg-type]
+            accounting=bool(doc.get("accounting", True)),
+            accounting_timeout=float(doc.get("accounting_timeout", 120.0)),
         )
 
 

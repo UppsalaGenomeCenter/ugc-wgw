@@ -44,11 +44,13 @@ ugc-wgw status [--mode M] [--cohort ID] [--failed] [--json]   # --failed/--json 
 ugc-wgw logs   <subject_id> --stage S [--tail N] [--attempt N] [--follow] [--json]
 ugc-wgw inputs <subject_id> --stage S [--mode M] [--cohort ID]
 ugc-wgw progress [--mode M] [--stage S] [--samples ... | --cohort ID] [--json]  # done/total per stage, ETA
-ugc-wgw report [--mode M] [--cohort ID] [--any-version] [--sizes] [--out FILE]   # self-contained HTML run summary
+ugc-wgw report [--mode M] [--cohort ID] [--any-version] [--sizes] [--price K=V ...] [--out FILE]   # self-contained HTML run summary
 ugc-wgw summary [--samples ... | --cohort ID] [--mode M] [--any-version] [--out-dir DIR] [--force]
             [--threshold KEY=VALUE ...] [--jobs N]  # per-sample and cohort analysis pages (what was found, QC flags)
 ugc-wgw resources [--stage S] [--changed] [--json]     # what each task asks SLURM for: declared → site caps → policy
 ugc-wgw stage-inputs [--stage S | --mode M] [--nested] [--json]   # every workflow input: default, who fills it, your override
+ugc-wgw usage [--by stage|task|subject|attempt|all] [--top N] [--sizes] [--price K=V ...] [--basis allocated|requested]
+            [--collect] [--refresh] [--json | --tsv]   # core-hours, GPU-hours, memory, queue wait, disk, cost (sacct accounting)
 ```
 
 `--project DIR` (default `.`) selects the project; `-v` streams INFO logs to stderr;

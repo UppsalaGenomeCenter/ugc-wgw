@@ -15,7 +15,7 @@ from .config import Config
 from .db import DB, RunRecord
 from .layout import run_files
 from .plan import Plan
-from .report import parse_workflow_log
+from .wdllog import parse_workflow_log
 from .stages import mode_stages, stage_spec
 from .util import parse_utc
 

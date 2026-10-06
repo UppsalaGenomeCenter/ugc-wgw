@@ -40,16 +40,19 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--ref-map", required=True, metavar="FILE",
                    help="ugc-wgw reference map TSV of the build (rendered by install-bundle.sh, ref_map= in its report)")
     s.add_argument("--registry", default=config.DEFAULT_REGISTRY, help="registry of the ugc-built images")
-    s.add_argument("--max-inflight", type=int, default=4, help="default concurrent miniwdl runs for submit")
-    s.add_argument("--poll-interval", type=float, default=30.0, help="seconds between polls in submit")
+    s.add_argument("--profile", metavar="NAME|FILE",
+                   help="site profile applied before the flags below: <prefix>/profiles/NAME.json (with --install), else "
+                        "backends/hpc/profiles/NAME.json of the code, or a file; keys: " + ", ".join(config.PROFILE_KEYS))
+    s.add_argument("--max-inflight", type=int, default=None, help="default concurrent miniwdl runs for submit (default 4)")
+    s.add_argument("--poll-interval", type=float, default=None, help="seconds between polls in submit (default 30)")
     s.add_argument("--no-assembly-parents", action="store_true",
                    help="assembly mode never trio-bins, even when both parents are registered")
-    s.add_argument("--deepvariant", choices=config.DEEPVARIANT_MODES, default="cpu",
+    s.add_argument("--deepvariant", choices=config.DEEPVARIANT_MODES, default=None,
                    help="small-variant caller of singleton/upstream: cpu (default), gpu (DeepVariant call_variants on "
                         "one GPU) or parabricks (pbrun deepvariant); needs --nv and a GPU partition in the install")
-    s.add_argument("--gpu-type", default="", metavar="TYPE",
+    s.add_argument("--gpu-type", default=None, metavar="TYPE",
                    help="SLURM gres type of the GPU tasks (sbatch --gres gpu:TYPE:N); empty = any GPU (gpu:N)")
-    s.add_argument("--parabricks-gpus", type=int, default=4, metavar="N", help="GPUs per Parabricks task (default 4)")
+    s.add_argument("--parabricks-gpus", type=int, default=None, metavar="N", help="GPUs per Parabricks task (default 4)")
 
     s = sub.add_parser("samples", help="register and list samples")
     ss = s.add_subparsers(dest="samples_command", required=True)
@@ -227,14 +230,31 @@ def cmd_init(a: argparse.Namespace) -> int:
             raise UgcError("init needs --install DIR, or all of --code, --miniwdl and --cfg")
         code, miniwdl, cfg_file = Path(a.code), Path(a.miniwdl), Path(a.cfg)
         venv = Path(a.venv) if a.venv else None
+    profile: dict[str, object] = {}
+    meta: dict[str, object] = {}
+    if a.profile:
+        path = config.find_profile(a.profile, install=Path(a.install) if a.install else None, code=code)
+        profile = config.load_profile(path)
+        meta = config.profile_meta(path, profile)
+
+    def pick(flag: object, key: str, default: object) -> object:
+        return flag if flag is not None else profile.get(key, default)
+
     cfg = config.init_project(
         Path(a.project_dir), code=code, miniwdl=miniwdl, cfg=cfg_file, venv=venv,
         results=Path(a.results) if a.results else None, ref_map=Path(a.ref_map), registry=a.registry,
-        max_inflight=a.max_inflight, poll_interval=a.poll_interval, assembly_use_parents=not a.no_assembly_parents,
-        deepvariant=a.deepvariant, gpu_type=a.gpu_type, parabricks_gpus=a.parabricks_gpus,
+        max_inflight=int(pick(a.max_inflight, "max_inflight", 4)),  # type: ignore[arg-type]
+        poll_interval=float(pick(a.poll_interval, "poll_interval", 30.0)),  # type: ignore[arg-type]
+        assembly_use_parents=False if a.no_assembly_parents else bool(profile.get("assembly_use_parents", True)),
+        deepvariant=str(pick(a.deepvariant, "deepvariant", "cpu")), gpu_type=str(pick(a.gpu_type, "gpu_type", "")),
+        parabricks_gpus=int(pick(a.parabricks_gpus, "parabricks_gpus", 4)),  # type: ignore[arg-type]
+        stage_inputs=profile.get("stage_inputs"), prices=profile.get("prices"),  # type: ignore[arg-type]
+        summary_thresholds=profile.get("summary_thresholds"), profile=meta,  # type: ignore[arg-type]
     )
     DB(cfg.db_path).close()
     diag(f"initialised {cfg.ugc_wgw_dir} (ugc-wgw version {config.read_version(cfg.code_dir)}, results {cfg.results_dir})")
+    if meta:
+        diag(f"profile {meta['name']} ({meta['path']}) set {', '.join(meta['applied'])}")  # type: ignore[arg-type]
     if not cfg.miniwdl_cfg.exists():
         diag(f"warning: miniwdl cfg does not exist yet: {cfg.miniwdl_cfg}")
     return 0

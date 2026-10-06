@@ -1,0 +1,9 @@
+{
+  "description": "CPU DeepVariant on 48-core, 384 GB nodes: whole-BAM alignment (no chunking: chunked alignment made 142 one-minute jobs per sample), pbmm2 on 24 threads so two alignments share a node, 20 runs in flight. Site admins add prices for the cost columns and adjust max_inflight to the partition.",
+  "max_inflight": 20,
+  "deepvariant": "cpu",
+  "stage_inputs": {
+    "singleton": {"use_alignment_chunking": false, "upstream.pbmm2.pbmm2_align_wgs.threads": 24},
+    "upstream": {"use_alignment_chunking": false, "upstream.pbmm2.pbmm2_align_wgs.threads": 24}
+  }
+}

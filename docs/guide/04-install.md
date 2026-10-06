@@ -156,6 +156,7 @@ ref_map=/proj/ugc/versions/0.2.0/references/ugc_wgw_ref_map.GRCh38_GIABv3.tsv
 inputs_templates=/proj/ugc/versions/0.2.0/inputs
 ugc_wgw=/proj/ugc/versions/0.2.0/code/bin/ugc-wgw
 resources=/proj/ugc/resources.tsv
+profiles=/proj/ugc/profiles
 plugin=ugc-wgw-miniwdl 0.1.0
 # next: /proj/ugc/versions/0.2.0/code/bin/ugc-wgw init <project_dir> --install /proj/ugc/versions/0.2.0 --ref-map ...
 ```
@@ -182,6 +183,7 @@ again with `--force`.
 │   └── install-bundle.sh
 ├── current -> versions/<v>   set by --activate only
 ├── resources.tsv             the site resource policy (chapter 12); created once, never overwritten
+├── profiles/                 site profiles for `ugc-wgw init --profile` (chapter 05); installed once, never overwritten
 ├── call_cache/               miniwdl call cache shared by all versions
 └── references/               hifi-wdl-resources-v4.0.0-GRCh38_GIABv3/, ugc-wgw-extras-0.2.0/
 ```

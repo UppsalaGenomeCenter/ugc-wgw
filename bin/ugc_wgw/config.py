@@ -10,11 +10,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .log import LOGGER
-from .util import UgcError, read_json, write_json
+from .util import UgcError, read_json, sha256_file, write_json
 
 CONFIG_SCHEMA = 1
 DEFAULT_REGISTRY = "ghcr.io/uppsalagenomecenter"
 DEEPVARIANT_MODES = ("cpu", "gpu", "parabricks")   # small-variant caller of singleton/upstream (guide chapter 12)
+# the project keys a site profile may set (`ugc-wgw init --profile`, guide chapter 05); `description` is allowed and ignored
+PROFILE_KEYS = ("max_inflight", "poll_interval", "assembly_use_parents", "deepvariant", "gpu_type", "parabricks_gpus",
+                "stage_inputs", "prices", "summary_thresholds")
 
 
 @dataclass
@@ -46,6 +49,7 @@ class Config:
     prices: dict[str, object] = field(default_factory=dict)   # unit prices for `usage`/`report` cost columns (guide chapter 07)
     accounting: bool = True         # read `sacct` for every finished run into accounting.json (no-op without sacct)
     accounting_timeout: float = 120.0   # seconds per sacct call
+    profile: dict[str, object] = field(default_factory=dict)   # the site profile init applied: name, path, sha256, applied keys
 
     @property
     def ugc_wgw_dir(self) -> Path:
@@ -106,6 +110,7 @@ class Config:
             "prices": self.prices,
             "accounting": self.accounting,
             "accounting_timeout": self.accounting_timeout,
+            "profile": self.profile,
         }
 
     @classmethod
@@ -151,6 +156,7 @@ class Config:
             prices=dict(doc.get("prices") or {}),  # type: ignore[arg-type]
             accounting=bool(doc.get("accounting", True)),
             accounting_timeout=float(doc.get("accounting_timeout", 120.0)),
+            profile=dict(doc.get("profile") or {}),  # type: ignore[arg-type]
         )
 
 
@@ -169,6 +175,78 @@ def check_gpus(value: object) -> int:
     if n < 1:
         raise UgcError(f"parabricks_gpus must be a positive integer, not {value!r}")
     return n
+
+
+def install_root(install: Path) -> Path | None:
+    """`<root>/versions/<v>` or `<root>/current` -> `<root>`; None when the directory is not laid out that way."""
+    real = Path(install).resolve()
+    return real.parent.parent if real.parent.name == "versions" else None
+
+
+def find_profile(spec: str, *, install: Path | None, code: Path) -> Path:
+    """A profile by file path, else by name under `<root>/profiles/` of the install, else the code's
+    `backends/hpc/profiles/` (the examples shipped with the bundle)."""
+    p = Path(spec)
+    if p.suffix == ".json" or "/" in spec:
+        if p.is_file():
+            return p.resolve()
+        raise UgcError(f"profile file not found: {spec}")
+    candidates: list[Path] = []
+    root = install_root(install) if install else None
+    if root is not None:
+        candidates.append(root / "profiles" / f"{spec}.json")
+    candidates.append(Path(code) / "backends" / "hpc" / "profiles" / f"{spec}.json")
+    for c in candidates:
+        if c.is_file():
+            return c.resolve()
+    raise UgcError(f"profile {spec!r} not found; looked for " + ", ".join(str(c) for c in candidates))
+
+
+def load_profile(path: Path) -> dict[str, object]:
+    """Read and check a site profile: the project keys that depend on the cluster and the sample set."""
+    try:
+        doc = read_json(path)
+    except (OSError, ValueError) as exc:
+        raise UgcError(f"profile {path}: {exc}") from None
+    if not isinstance(doc, dict):
+        raise UgcError(f"profile {path}: not a JSON object")
+    out: dict[str, object] = {}
+    for key, value in doc.items():
+        if key == "description":
+            continue
+        if key not in PROFILE_KEYS:
+            raise UgcError(f"profile {path}: unknown key {key!r} (known: {', '.join(PROFILE_KEYS)}, description)")
+        out[key] = value
+    if "deepvariant" in out:
+        out["deepvariant"] = check_deepvariant(str(out["deepvariant"]))
+    if "parabricks_gpus" in out:
+        out["parabricks_gpus"] = check_gpus(out["parabricks_gpus"])
+    if "gpu_type" in out:
+        out["gpu_type"] = str(out["gpu_type"]).strip()
+    if "max_inflight" in out and (not isinstance(out["max_inflight"], int) or out["max_inflight"] < 1):
+        raise UgcError(f"profile {path}: max_inflight must be a positive integer")
+    if "poll_interval" in out and (not isinstance(out["poll_interval"], (int, float)) or out["poll_interval"] <= 0):
+        raise UgcError(f"profile {path}: poll_interval must be a positive number")
+    if "assembly_use_parents" in out and not isinstance(out["assembly_use_parents"], bool):
+        raise UgcError(f"profile {path}: assembly_use_parents must be true or false")
+    for key in ("stage_inputs", "prices", "summary_thresholds"):
+        if key in out and not isinstance(out[key], dict):
+            raise UgcError(f"profile {path}: {key} must be an object")
+    for stage, values in (out.get("stage_inputs") or {}).items():  # type: ignore[union-attr]
+        if not isinstance(values, dict):
+            raise UgcError(f"profile {path}: stage_inputs.{stage} must be an object of input: value")
+    return out
+
+
+def profile_meta(path: Path, profile: dict[str, object]) -> dict[str, object]:
+    """What config.json records about the profile init applied: name, path, checksum and the keys it set."""
+    applied = []
+    for key, value in profile.items():
+        if key == "stage_inputs" and isinstance(value, dict):
+            applied += [f"stage_inputs.{stage}.{name}" for stage, inputs in value.items() for name in inputs]
+        else:
+            applied.append(key)
+    return {"name": Path(path).stem, "path": str(path), "sha256": sha256_file(Path(path)), "applied": sorted(applied)}
 
 
 def derive_from_install(install: Path) -> dict[str, Path]:
@@ -243,6 +321,10 @@ def init_project(
     deepvariant: str = "cpu",
     gpu_type: str = "",
     parabricks_gpus: int = 4,
+    stage_inputs: dict[str, object] | None = None,
+    prices: dict[str, object] | None = None,
+    summary_thresholds: dict[str, object] | None = None,
+    profile: dict[str, object] | None = None,
 ) -> Config:
     project_dir = project_dir.resolve()
     config = Config(
@@ -265,6 +347,10 @@ def init_project(
         deepvariant=check_deepvariant(deepvariant),
         gpu_type=gpu_type.strip(),
         parabricks_gpus=check_gpus(parabricks_gpus),
+        stage_inputs=dict(stage_inputs or {}),  # type: ignore[arg-type]
+        prices=dict(prices or {}),
+        summary_thresholds=dict(summary_thresholds or {}),  # type: ignore[arg-type]
+        profile=dict(profile or {}),
     )
     if config.ugc_wgw_dir.exists():
         raise UgcError(f"{config.ugc_wgw_dir} already exists; refusing to re-initialise")

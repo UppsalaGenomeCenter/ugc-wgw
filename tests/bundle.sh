@@ -3,9 +3,25 @@
 # reference data container, so the installer's copy-and-verify step runs; --images none otherwise)
 # -> install-bundle.sh --verify-only and a real install into a scratch prefix, then `ugc-wgw init --install`.
 # Needs network for pip download (dev machine or CI). Usage: tests/bundle.sh [<scratch dir>]
+# A scratch dir it made itself (about 8 GB) is removed after a passing run and kept, with its path printed, after
+# a failing one or when UGC_WGW_KEEP_SCRATCH=1; a scratch dir given as the argument is always kept.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-scratch=${1:-$(mktemp -d "${TMPDIR:-/tmp}/ugc-bundle-test.XXXXXX")}
+keep=${UGC_WGW_KEEP_SCRATCH:-}
+if [ $# -ge 1 ]; then
+  scratch=$1; keep=1
+else
+  scratch=$(mktemp -d "${TMPDIR:-/tmp}/ugc-bundle-test.XXXXXX")
+fi
+cleanup() {
+  rc=$?
+  if [ "$rc" -eq 0 ] && [ -z "$keep" ]; then
+    rm -rf "$scratch"
+  else
+    echo "== scratch kept at $scratch" >&2
+  fi
+}
+trap cleanup EXIT
 echo "== bundle test in $scratch"
 images=none; bundle_args=()
 if ls bundle/out/sif-cache/*workflow-data-container-hifi-human-wgs-wdl-grch38_giabv3*.sif >/dev/null 2>&1; then
@@ -27,6 +43,8 @@ printf 'SLURM_PARTITION=core\nSLURM_ACCOUNT=acc-1\nSLURM_EXTRA_ARGS=--qos short\
 report=$(scripts/install-bundle.sh --bundle "$tarball" --prefix "$scratch/prefix" --site "$scratch/site.cfg" --activate)
 install_dir=$(echo "$report" | sed -n 's/^install_dir=//p')
 [ -x "$install_dir/venv/bin/miniwdl" ]
+echo "$report" | grep -q '^profiles='
+[ -f "$scratch/prefix/profiles/cpu.json" ] && [ -f "$scratch/prefix/profiles/parabricks.json" ]
 [ -f "$install_dir/miniwdl.cfg" ] && ! grep -q '{{' "$install_dir/miniwdl.cfg"
 [ "$(readlink "$scratch/prefix/current")" = "versions/$(cat VERSION)" ]
 grep -q 'command_shell = /bin/bash' "$install_dir/miniwdl.cfg"
@@ -65,6 +83,7 @@ if [ "$images" = data ]; then
   # a second install must reuse the tree (no copy) and still verify it
   scripts/install-bundle.sh --bundle "$tarball" --prefix "$scratch/prefix" --site "$scratch/site.cfg" --force > "$scratch/reinstall.log" 2>&1
   grep -q 'reference tree present' "$scratch/reinstall.log"
+  grep -q 'profile kept' "$scratch/reinstall.log"
 fi
 if grep -rq 'v3p1p0\|tertiary' "$install_dir/references" "$install_dir/inputs"; then echo "v3 map names survive in the install" >&2; exit 1; fi
 # WDL read_map() needs exactly two fields per line: no comments, no blank lines, in any rendered map

@@ -21,6 +21,7 @@ when stderr is a terminal and `NO_COLOR` is unset. The file log
 | `--results DIR` | project dir | Results root. |
 | `--ref-map FILE` | required | The rendered reference map (`ref_map=` in the installer's report). |
 | `--registry STR` | `ghcr.io/uppsalagenomecenter` | Registry prefix of the ugc-built images. |
+| `--profile NAME\|FILE` | none | Site profile applied before the flags below: `<prefix>/profiles/NAME.json`, else `backends/hpc/profiles/NAME.json`, or a file (chapter 05). |
 | `--max-inflight N` | `4` | Default concurrency for `submit`. |
 | `--poll-interval SEC` | `30` | Default poll period. |
 | `--no-assembly-parents` | off | Assembly never trio-bins. |
@@ -232,6 +233,7 @@ Python.
 | `prices` | `{}` | Unit prices for `usage` and `report` cost figures, e.g. `{"cpu_hour": 0.04, "gpu_hour": 2.5, "currency": "EUR"}` (chapter 07). |
 | `accounting` | `true` | Read `sacct` for every finished run into `accounting.json` (nothing happens without `sacct`). |
 | `accounting_timeout` | `120` | Seconds allowed per `sacct` call. |
+| `profile` | `{}` | The site profile `init --profile` applied: `name`, `path`, `sha256`, `applied` keys (chapter 05). |
 
 ## Sample sheet
 

@@ -19,6 +19,31 @@ The installer prints this line with the right paths at the end of an install.
 resolves the symlink and stores the versioned paths, so the project stays on
 that version even after another one is activated.
 
+Add `--profile NAME` to start from a site profile instead of editing
+`config.json` afterwards:
+
+```bash
+ugc-wgw init /proj/ugc/projects/cohort2026 --install /proj/ugc/current \
+    --ref-map /proj/ugc/current/references/ugc_wgw_ref_map.GRCh38_GIABv3.tsv \
+    --results /proj/ugc/results/cohort2026 --profile cpu
+```
+
+A profile is a JSON file with the project keys that depend on the cluster
+and the sample set: `stage_inputs`, `deepvariant`, `gpu_type`,
+`parabricks_gpus`, `max_inflight`, `poll_interval`, `assembly_use_parents`,
+`prices` and `summary_thresholds`, plus a `description`. `NAME` is looked
+up as `<prefix>/profiles/NAME.json` (the installer places the examples
+there once and never overwrites them, so a site edits them in place), then
+as `backends/hpc/profiles/NAME.json` in the code; a path to a file works
+too. The bundle ships `cpu` (no alignment chunking, pbmm2 on 24 threads so
+two alignments share a 48-core node, 20 runs in flight) and `parabricks`
+(the same with Parabricks on 4 GPUs). Flags given on the command line win
+over the profile. The profile's values are copied into `config.json`, and
+`profile` there records its name, path, checksum and the keys it set, so a
+project stays self-contained while the site's profile evolves;
+`ugc-wgw stage-inputs` marks the overrides that came from it, and the run
+report names it under Provenance.
+
 | Flag | Default | Meaning |
 |---|---|---|
 | `project_dir` | required | Where `.ugc-wgw/` is created. Refuses to run if it already exists. |
@@ -28,6 +53,7 @@ that version even after another one is activated.
 | `--results DIR` | the project dir | Results root. |
 | `--ref-map FILE` | required | The reference map rendered by the installer (`ref_map=` in its report): reference files, scalars and scatter regions of one build. Passed to every stage. |
 | `--registry STR` | `ghcr.io/uppsalagenomecenter` | Registry prefix of the ugc-built images (svx, trgt-lps, hifiasm), as they were cached. |
+| `--profile NAME\|FILE` | none | A site profile applied before the flags below (above). |
 | `--max-inflight N` | `4` | Default number of concurrent miniwdl runs for `submit`. |
 | `--poll-interval SEC` | `30` | Default seconds between polls in `submit`. |
 | `--no-assembly-parents` | off | Assembly mode never trio-bins. |
@@ -60,6 +86,7 @@ sorted by key.
 | `deepvariant` | `"cpu"` | `cpu`, `gpu` or `parabricks`: fills `use_gpu`, `use_parabricks_deepvariant`, `gpuType` and Parabricks' GPU count for `singleton` and `upstream` (chapter 12). |
 | `gpu_type`, `parabricks_gpus` | `""`, `4` | The gres type and the Parabricks GPU count behind that switch. |
 | `stage_inputs` | `{}` | Per-stage input overrides, below. |
+| `profile` | `{}` | The profile `init --profile` applied: `name`, `path`, `sha256`, `applied` (the keys it set). Informational. |
 
 ## Stage input overrides
 

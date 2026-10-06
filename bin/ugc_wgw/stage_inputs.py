@@ -132,6 +132,7 @@ class Row:
     description: str
     has_override: bool = False
     override: object = None
+    override_source: str = ""        # "config.json" or "profile <name>"
 
     def as_dict(self) -> dict[str, object]:
         d: dict[str, object] = {"stage": self.stage, "input": self.name, "type": self.type, "default": self.default,
@@ -139,13 +140,14 @@ class Row:
                                 "from": self.note, "description": self.description}
         if self.has_override:
             d["override"] = self.override
+            d["override_source"] = self.override_source
         return d
 
     def as_table_row(self) -> dict[str, object]:
         d: dict[str, object] = {"input": self.name, "type": self.type, "default": "-" if self.default is None else self.default,
                                 "set_by": self.set_by, "from": self.note, "description": self.description}
         if self.has_override:
-            d["override"] = json.dumps(self.override)
+            d["override"] = json.dumps(self.override) + (" (profile)" if self.override_source.startswith("profile") else "")
         return d
 
 
@@ -226,10 +228,13 @@ def check_overrides(cfg: Config, stage: str, rows: list[Row], *, nested: bool) -
         overrides = cfg.stage_overrides(stage)
     except UgcError:
         return warnings   # not an object: stage_key_warnings said so
+    applied = {str(k) for k in (cfg.profile.get("applied") or [])}  # type: ignore[union-attr]
     for key, value in overrides.items():
         row = by_name.get(key)
         if row is not None:
             row.has_override, row.override = True, value
+            from_profile = {f"stage_inputs.{stage}.{key}", f"stage_inputs.ugc_wgw_{stage}.{key}"} & applied
+            row.override_source = f"profile {cfg.profile.get('name')}" if from_profile else "config.json"
             if row.set_by == DRIVER:
                 warnings.append(f"stage_inputs.{stage}.{key} overrides a value the driver fills ({row.note})")
             continue

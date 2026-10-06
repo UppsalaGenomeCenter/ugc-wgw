@@ -246,6 +246,18 @@ else
   cp "$dest/code/backends/hpc/resources.tsv.example" "$TASK_RESOURCES"
   log "   resource policy created from the example (no active rows): $TASK_RESOURCES"
 fi
+# site profiles for `ugc-wgw init --profile NAME`: the examples are installed once next to the policy and never
+# overwritten, so a site's edits survive upgrades
+mkdir -p "$prefix/profiles"
+for f in "$dest"/code/backends/hpc/profiles/*.json; do
+  [ -f "$f" ] || continue
+  if [ -e "$prefix/profiles/$(basename "$f")" ]; then
+    log "   profile kept: $prefix/profiles/$(basename "$f")"
+  else
+    cp "$f" "$prefix/profiles/$(basename "$f")"
+    log "   profile installed from the example: $prefix/profiles/$(basename "$f")"
+  fi
+done
 
 # ---- 4. references and inputs templates ---------------------------------
 log "4. references under $references"
@@ -367,6 +379,7 @@ ref_map=$ref_map
 inputs_templates=$dest/inputs
 ugc_wgw=$dest/code/bin/ugc-wgw
 resources=$TASK_RESOURCES
+profiles=$prefix/profiles
 plugin=ugc-wgw-miniwdl $plugin
-# next: $dest/code/bin/ugc-wgw init <project_dir> --install $dest --ref-map $ref_map
+# next: $dest/code/bin/ugc-wgw init <project_dir> --install $dest --ref-map $ref_map [--profile cpu|parabricks]
 REPORT

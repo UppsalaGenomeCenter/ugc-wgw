@@ -1,0 +1,11 @@
+{
+  "description": "As cpu, with Parabricks DeepVariant on 4 GPUs of an L40S node (12 minutes per sample on the GPU instead of 65 core-hours; jobs serialise on a single GPU node, and Parabricks calls about 10 % fewer indels than CPU DeepVariant, so benchmark against a truth set before production). gpu_type sets the gres type and travels into every task's inputs: projects with different gpu_type values share no call cache.",
+  "max_inflight": 20,
+  "deepvariant": "parabricks",
+  "gpu_type": "l40s",
+  "parabricks_gpus": 4,
+  "stage_inputs": {
+    "singleton": {"use_alignment_chunking": false, "upstream.pbmm2.pbmm2_align_wgs.threads": 24},
+    "upstream": {"use_alignment_chunking": false, "upstream.pbmm2.pbmm2_align_wgs.threads": 24}
+  }
+}

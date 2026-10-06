@@ -31,7 +31,7 @@ the canonical provenance path of a subject and stage.
 ## Commands
 
 ```
-ugc-wgw init <project_dir> --install <root>/current --ref-map F [--deepvariant cpu|gpu|parabricks --gpu-type T]
+ugc-wgw init <project_dir> --install <root>/current --ref-map F [--profile cpu|parabricks|FILE] [--deepvariant cpu|gpu|parabricks --gpu-type T]
 ugc-wgw init <project_dir> --code <repo> --miniwdl <exe> --cfg <miniwdl.cfg> ...     # dev machine, no install prefix
 ugc-wgw samples add <samples.tsv> [--no-check] [--replace]
 ugc-wgw samples remove <id>... [--force]                # refused for cohort members; --force deletes run rows too

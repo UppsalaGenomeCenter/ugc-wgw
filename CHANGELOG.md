@@ -3,6 +3,22 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.7.0
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is unchanged.
+
+- Site profiles: `ugc-wgw init --profile NAME|FILE` applies a JSON profile
+  of the project keys that depend on the cluster and the sample set
+  (`stage_inputs`, the DeepVariant flavour and GPU choice, `max_inflight`,
+  prices, QC thresholds) from `<prefix>/profiles/`, which the installer
+  fills from `backends/hpc/profiles/` once and never overwrites, or from
+  the shipped examples; flags win over the profile; `config.json` records
+  the profile's name, checksum and the keys it set, `ugc-wgw stage-inputs`
+  marks its overrides and the report names it.
+- Shipped profiles `cpu` and `parabricks`: no alignment chunking, pbmm2 on
+  24 threads so two alignments share a 48-core node, 20 runs in flight.
+
 ## 0.6.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

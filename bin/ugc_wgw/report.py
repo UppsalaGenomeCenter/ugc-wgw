@@ -485,6 +485,8 @@ def render(cfg: Config, code: CodeInfo, reports: list[RunReport], *, ugc_wgw_ver
     for k, v in sorted(engine.items()):
         prov_rows.append([f"engine {k}", str(v)])
     prov_rows.append(["hosts", ", ".join(hosts)])
+    if cfg.profile:
+        prov_rows.append(["profile", f"{cfg.profile.get('name')} ({str(cfg.profile.get('sha256', ''))[:12]}) from {cfg.profile.get('path')}"])
     prov_rows.append(["containers", f"{len(code.containers)} image digests (see the manifests)"])
 
     parts = [

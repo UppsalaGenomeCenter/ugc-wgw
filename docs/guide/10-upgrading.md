@@ -5,22 +5,22 @@
 ```mermaid
 flowchart LR
   subgraph prefix["prefix"]
-    v1["versions/0.1.0: code, sif, venv, miniwdl.cfg, references, inputs"]
-    v2["versions/0.2.0: code, sif, venv, miniwdl.cfg, references, inputs"]
-    cur["current -> versions/0.2.0, after --activate"]
+    v1["versions/0.7.0: code, sif, venv, miniwdl.cfg, references, inputs"]
+    v2["versions/0.8.0: code, sif, venv, miniwdl.cfg, references, inputs"]
+    cur["current -> versions/0.8.0, after --activate"]
     cc["call_cache, shared"]
     refs["references, shared"]
     pol["resources.tsv, shared"]
   end
   subgraph proj["project A"]
-    cfgA["config.json: code_dir, miniwdl, miniwdl_cfg = versions/0.1.0 paths"]
+    cfgA["config.json: code_dir, miniwdl, miniwdl_cfg = versions/0.7.0 paths"]
   end
   subgraph proj2["project B"]
-    cfgB["config.json = versions/0.2.0 paths"]
+    cfgB["config.json = versions/0.8.0 paths"]
   end
   subgraph res["results"]
-    r1["samples/S1/0.1.0/singleton/current"]
-    r2["samples/S1/0.2.0/singleton/current"]
+    r1["samples/S1/0.7.0/singleton/current"]
+    r2["samples/S1/0.8.0/singleton/current"]
   end
   cfgA --> v1
   cfgB --> v2
@@ -73,7 +73,7 @@ what changed in each release.
 
 `--any-version` on `submit` accepts an earlier stage's success at any version
 as a prerequisite and reads its outputs. Use it to run `cohort_merge` at
-version 0.2.0 over `singleton` results produced at 0.1.0 without re-running
+version 0.8.0 over `singleton` results produced at 0.7.0 without re-running
 the samples, or to `downstream` old `upstream` results after a phasing-only
 change. The run manifest records, per member, the version and run ID whose
 outputs were used, so the mixture is traceable. Do not use it across an

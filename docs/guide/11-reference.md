@@ -206,7 +206,8 @@ Python.
 ### Exit codes
 
 `0` success; `1` an error was printed or a run failed in this session;
-`130` stopped by SIGINT or SIGTERM.
+`2` a command-line usage error (unknown command or flag); `130` stopped by
+SIGINT or SIGTERM.
 
 ## Files of a project
 

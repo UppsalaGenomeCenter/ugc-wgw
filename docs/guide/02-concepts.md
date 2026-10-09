@@ -33,7 +33,7 @@ VCF, `cohort_merge` in standalone mode takes files from `singleton` runs.
 ## Version
 
 The ugc-pacbio-wgw version is the content of `VERSION` in the installed code,
-for example `0.1.0`. It is part of every results path and every manifest, and
+for example `0.8.0`. It is part of every results path and every manifest, and
 it gates the driver: a stage counts as done for a subject only if it succeeded
 **at the current version**. Installing a new version therefore starts every
 subject from the first stage again unless you pass `--any-version`, which lets

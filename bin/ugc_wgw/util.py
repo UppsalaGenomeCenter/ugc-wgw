@@ -6,8 +6,10 @@ import hashlib
 import json
 import math
 import os
+import shutil
 import socket
 import sys
+import time
 from pathlib import Path
 
 
@@ -82,6 +84,65 @@ def read_json(path: Path) -> object:
 
 def diag(msg: str) -> None:
     print(f"[ugc-wgw] {msg}", file=sys.stderr, flush=True)
+
+
+def hms(seconds: float) -> str:
+    s = int(round(seconds))
+    if s < 60:
+        return f"{s}s"
+    if s < 3600:
+        return f"{s // 60}m{s % 60:02d}s"
+    return f"{s // 3600}h{(s % 3600) // 60:02d}m"
+
+
+class Meter:
+    """Progress of a long loop on stderr: a line rewritten in place on a terminal, one plain line every
+    `interval` seconds otherwise (a log or a batch job), nothing at all for work shorter than `quiet` seconds.
+    `update(done, total, label)` after each item; `close(summary)` clears the line and prints the summary."""
+
+    def __init__(self, what: str, *, stream=None, interval: float = 10.0, quiet: float = 0.5,
+                 clock=time.monotonic):
+        self.what, self.interval, self.quiet, self.clock = what, interval, quiet, clock
+        self.stream = stream if stream is not None else sys.stderr
+        self.tty = bool(getattr(self.stream, "isatty", lambda: False)())
+        self.start = self.clock()
+        self.last = float("-inf")
+        self.done = self.total = 0
+        self.drawn = False
+
+    @property
+    def elapsed(self) -> float:
+        return self.clock() - self.start
+
+    def update(self, done: int, total: int, label: str = "") -> None:
+        self.done, self.total = done, total
+        now = self.clock()
+        if now - self.start < self.quiet or done >= total:
+            return
+        if now - self.last < (0.2 if self.tty else self.interval):
+            return
+        self.last = now
+        elapsed = now - self.start
+        left = (total - done) * elapsed / done if done else 0.0
+        pct = 100.0 * done / total if total else 100.0
+        text = f"[ugc-wgw] {self.what} {done}/{total} ({pct:.0f}%), {hms(elapsed)} elapsed, about {hms(left)} left"
+        if label:
+            text += f": {label}"
+        if self.tty:
+            width = shutil.get_terminal_size((100, 20)).columns
+            self.stream.write("\r\x1b[K" + text[: max(20, width - 1)])
+            self.drawn = True
+        else:
+            self.stream.write(text + "\n")
+        self.stream.flush()
+
+    def close(self, summary: str | None = None) -> None:
+        if self.drawn:
+            self.stream.write("\r\x1b[K")
+            self.drawn = False
+        if summary:
+            self.stream.write(f"[ugc-wgw] {summary}\n")
+        self.stream.flush()
 
 
 def hostname() -> str:

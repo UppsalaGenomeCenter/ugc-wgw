@@ -36,8 +36,8 @@ to a path. Files live under `out/<name>/<basename>`; array outputs under
 
 ```bash
 python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["ugc_wgw_singleton.phased_small_variant_vcf"])' \
-    samples/HG002/0.2.0/singleton/current/outputs.json
-ls samples/HG002/0.2.0/singleton/current/out/phased_small_variant_vcf/
+    samples/HG002/0.8.0/singleton/current/outputs.json
+ls samples/HG002/0.8.0/singleton/current/out/phased_small_variant_vcf/
 ```
 
 The output names are upstream's; the tables below give the ones analysts

@@ -235,6 +235,13 @@ ugc-wgw samples check                 # read every registered file again; exit 1
 ugc-wgw samples check S1 S2 --stored  # what registration recorded, without touching the files
 ```
 
+Both commands show their progress while they read (`inspecting read files
+312/1344 (23%), 1m02s elapsed, about 3m25s left: study_0023 m84045_...bam`,
+rewritten in place on a terminal, one line every ten seconds otherwise)
+and end with `inspected N read file(s) in T`; with `-v` the yield of every
+sample is logged as it is inspected. A plate of a thousand BAMs takes a few
+minutes on a cluster file system.
+
 Run `samples check` when a sheet was registered with `--no-check` before the
 data landed, or when files were re-copied: it refreshes the record. `submit`
 repeats the cheap part of the check (present, same size as registered, end

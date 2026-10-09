@@ -3,6 +3,20 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.8.1
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.3.0,
+unchanged since 0.8.0.
+
+- `samples add` and `samples check` show the progress of the input check
+  (`inspecting read files N/M (p%), elapsed, about T left`, rewritten in
+  place on a terminal, one line every ten seconds otherwise) and end with
+  `inspected N read file(s) in T`; `-v` logs each sample's yield.
+- Guide: the examples show the current version and the installer's current
+  report; the quick start describes the input check, `--profile cpu` and
+  `ugc-wgw usage`; the command reference lists exit code 2.
+
 ## 0.8.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

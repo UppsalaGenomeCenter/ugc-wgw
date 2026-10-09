@@ -115,13 +115,13 @@ cohort.
 
 ```
 # resources: cpu_max=48 memory_max=375G policy=/proj/ugc/resources.tsv (2 rows) deepvariant=cpu
-# ugc-wgw dry-run: mode=joint version=0.2.0 runnable=3 blocked=1 active=0 done=0
+# ugc-wgw dry-run: mode=joint version=0.8.0 runnable=3 blocked=1 active=0 done=0
 
-## sample S1 / upstream -> /proj/ugc/results/c26/samples/S1/0.2.0/upstream/attempt-1
+## sample S1 / upstream -> /proj/ugc/results/c26/samples/S1/0.8.0/upstream/attempt-1
 { "ugc_wgw_upstream.hifi_reads": [...], ... }
 # inputs: 14 read file(s), 61.2 GB, present and complete
-miniwdl run /proj/ugc/versions/0.2.0/code/workflows/ugc_wgw_upstream.wdl -i .../inputs.json \
-    --dir .../attempt-1/. -o run.json --cfg /proj/ugc/versions/0.2.0/miniwdl.cfg --no-color --log-json
+miniwdl run /proj/ugc/versions/0.8.0/code/workflows/ugc_wgw_upstream.wdl -i .../inputs.json \
+    --dir .../attempt-1/. -o run.json --cfg /proj/ugc/versions/0.8.0/miniwdl.cfg --no-color --log-json
 ...
 # blocked: cohort C1 / cohort_call: waiting for upstream of S1, S2, S3
 ```

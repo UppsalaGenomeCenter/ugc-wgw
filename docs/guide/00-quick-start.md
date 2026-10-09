@@ -27,7 +27,7 @@ registered into the same project and a new cohort is frozen.
 - A `python3` of the version the bundle was built for. The installer prints
   both and refuses a mismatch; on the smoke cluster it is
   `module load python/3.12.7`.
-- The bundle directory: `ugc-pacbio-wgw-0.3.0.tar`, its `.sha256`,
+- The bundle directory: `ugc-pacbio-wgw-0.8.0.tar`, its `.sha256`,
   `install-bundle.sh`, and a `site.cfg` to start from
   (`examples/site.cfg` in this guide).
 - Three writable places on a filesystem the compute nodes read: the install
@@ -40,14 +40,14 @@ registered into the same project and a new cohort is frozen.
 ```bash
 module load python/3.12.7
 cd /path/to/share
-sha256sum -c ugc-pacbio-wgw-0.3.0.tar.sha256
-./install-bundle.sh --bundle ugc-pacbio-wgw-0.3.0.tar --prefix /proj/ugc --verify-only
+sha256sum -c ugc-pacbio-wgw-0.8.0.tar.sha256
+./install-bundle.sh --bundle ugc-pacbio-wgw-0.8.0.tar --prefix /proj/ugc --verify-only
 ```
 
 Verify-only unpacks into a staging directory, checks every file against the
 bundle manifest, builds a throwaway virtual environment, runs
 `miniwdl check` on every workflow and removes everything again. It ends
-with `verify-only passed for ugc-pacbio-wgw-0.3.0`; a Python mismatch or a
+with `verify-only passed for ugc-pacbio-wgw-0.8.0`; a Python mismatch or a
 corrupt tar stops here, before anything is installed.
 
 Then write the site file. Copy `examples/site.cfg` and set the partition
@@ -57,7 +57,7 @@ to use, `SLURM_PARTITION_GPU` and `SINGULARITY_NV=1` (chapter 04 lists
 every key). Install and activate:
 
 ```bash
-./install-bundle.sh --bundle ugc-pacbio-wgw-0.3.0.tar --prefix /proj/ugc \
+./install-bundle.sh --bundle ugc-pacbio-wgw-0.8.0.tar --prefix /proj/ugc \
     --references /proj/ugc/references --site site.cfg --activate
 export PATH=/proj/ugc/current/code/bin:$PATH      # put this in your profile
 ```
@@ -80,8 +80,11 @@ cd /proj/ugc/projects/cohort2026
 ```
 
 The project stays on the version it was created with, even after another
-bundle is activated later (chapter 10). Two flags worth knowing now:
-`--max-inflight N` sets how many samples run at once by default, and
+bundle is activated later (chapter 10). Add `--profile cpu` (or
+`parabricks`) to start from the site's profile under `/proj/ugc/profiles/`:
+the tuned stage inputs, the DeepVariant flavour and the concurrency in one
+go (chapter 05). Two flags worth knowing on their own: `--max-inflight N`
+sets how many samples run at once by default, and
 `--deepvariant gpu --gpu-type a100` selects GPU DeepVariant if the install
 was prepared for it (chapter 12). Everything else is a key in
 `.ugc-wgw/config.json` (chapter 05).
@@ -100,9 +103,13 @@ ugc-wgw samples add samples.tsv
 ugc-wgw samples list
 ```
 
-`samples add` checks that every BAM exists (`--no-check` for a sheet
-prepared before the data lands), makes the paths absolute and refuses a
-sheet with a duplicated or malformed ID. Registering a sample runs nothing.
+`samples add` opens every BAM: a file that is empty, truncated or has no
+reads refuses the sheet (`--drop-empty` registers the sample without its
+empty files; `--no-check` for a sheet prepared before the data lands), the
+read count and bases are estimated and recorded, and a thin file or sample
+is a warning. It makes the paths absolute and refuses a sheet with a
+duplicated or malformed ID. `ugc-wgw samples check` repeats the look later.
+Registering a sample runs nothing.
 
 ## 4. Freeze the cohort
 
@@ -176,25 +183,29 @@ do about each.
 
 ## 7. Read the results
 
-Every run leaves one directory: `<results>/samples/<id>/0.3.0/<stage>/`
+Every run leaves one directory: `<results>/samples/<id>/0.8.0/<stage>/`
 with `attempt-N/` per attempt and `current` pointing at the latest.
 `current/out/` holds one directory per output; for a sample the ones to
 start with are the haplotagged BAM, the phased small-variant, SV and
 tandem-repeat VCFs, the methylation pileups and `stats_file`, the one-line
 QC table (chapter 07 lists all of them). The cohort's merged VCFs are
-under `<results>/cohorts/C1/0.3.0/cohort_merge/current/out/`, the allele
-frequencies under `cohort_freq`. Two commands give the overview:
+under `<results>/cohorts/C1/0.8.0/cohort_merge/current/out/`, the allele
+frequencies under `cohort_freq`. Three commands give the overview:
 
 ```bash
 ugc-wgw report --mode standalone --cohort C1 --out /proj/ugc/results/cohort2026/report.html
 ugc-wgw summary --cohort C1 --jobs 8
+ugc-wgw usage --sizes
 ```
 
 The report is a technical summary of the campaign (runs, timings, failures,
-provenance); the summary writes one analysis page per sample and one for
-the cohort under `<results>/reports/summary/` (coverage, variants, phasing,
-repeats, methylation, QC flags). All are single self-contained HTML files:
-copy them to a laptop and open them.
+resource usage, provenance); the summary writes one analysis page per
+sample and one for the cohort under `<results>/reports/summary/` (coverage,
+variants, phasing, repeats, methylation, QC flags); `usage` prints the
+core-hours, GPU-hours, memory, queue wait and disk per stage, task and
+sample from SLURM's accounting, with a cost estimate when the project has
+prices. The pages are single self-contained HTML files: copy them to a
+laptop and open them.
 
 ## 8. Samples that arrive later
 

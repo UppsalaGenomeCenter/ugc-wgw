@@ -1,3 +1,4 @@
+import io
 import json
 import tempfile
 import unittest
@@ -6,7 +7,7 @@ from pathlib import Path
 from ugc_wgw import samples
 from ugc_wgw.db import DB
 from ugc_wgw.log import Events
-from ugc_wgw.util import UgcError
+from ugc_wgw.util import Meter, UgcError, hms
 
 from .helpers import make_project, run_cli, write_bam, write_tsv
 
@@ -236,6 +237,64 @@ class SamplesTest(unittest.TestCase):
         code, out, _ = run_cli(["--project", proj, "samples", "check", "S3", "--json"])   # and check fills it in
         self.assertEqual(code, 0)
         self.assertEqual(self.db.get_sample("S3").input_info[self.db.get_sample("S3").hifi_reads[0]]["reads"], 10)
+
+    def test_meter(self):
+        clock = iter([0.0, 1.0, 1.1, 20.0, 30.0, 31.0])
+        out = io.StringIO()
+        m = Meter("inspecting read files", stream=out, interval=10.0, quiet=0.5, clock=lambda: next(clock))
+        m.update(1, 4, "S1 a.bam")                    # t=1.0: first line
+        m.update(2, 4, "S1 b.bam")                    # t=1.1: too soon for a non-tty line
+        m.update(3, 4, "S2 c.bam")                    # t=20: next line
+        m.update(4, 4, "S2 d.bam")                    # done: no line, the summary follows
+        m.close("inspected 4 read file(s) in 31s")
+        lines = out.getvalue().splitlines()
+        self.assertEqual(lines[0], "[ugc-wgw] inspecting read files 1/4 (25%), 1s elapsed, about 3s left: S1 a.bam")
+        self.assertEqual(lines[1], "[ugc-wgw] inspecting read files 3/4 (75%), 20s elapsed, about 7s left: S2 c.bam")
+        self.assertEqual(lines[2:], ["[ugc-wgw] inspected 4 read file(s) in 31s"])
+        self.assertEqual((m.done, m.total), (4, 4))
+        # quiet work prints nothing but the summary
+        out = io.StringIO()
+        m = Meter("x", stream=out, quiet=5.0, clock=iter([0.0, 0.1, 0.2]).__next__)
+        m.update(1, 2); m.close(None)
+        self.assertEqual(out.getvalue(), "")
+
+        class Tty(io.StringIO):
+            def isatty(self):
+                return True
+        out = Tty()
+        m = Meter("inspecting read files", stream=out, quiet=0.0, clock=iter([0.0, 1.0, 2.0, 3.0]).__next__)
+        m.update(1, 3, "S1 a.bam")
+        m.update(2, 3, "S1 b.bam")
+        m.close("inspected 3 read file(s) in 3s")
+        text = out.getvalue()
+        self.assertTrue(text.startswith("\r\x1b[K[ugc-wgw] inspecting read files 1/3 (33%)"), text)
+        self.assertEqual(text.count("\r\x1b[K"), 3)                     # two redraws and the clear before the summary
+        self.assertTrue(text.endswith("\r\x1b[K[ugc-wgw] inspected 3 read file(s) in 3s\n"), text)
+        self.assertNotIn("\n[ugc-wgw] inspecting", text)                 # in place, never a second line
+        self.assertEqual((hms(5), hms(65), hms(3700)), ("5s", "1m05s", "1h01m"))
+
+    def test_add_and_check_print_the_inspection_summary(self):
+        proj = str(self.cfg.project_dir)
+        tsv = write_tsv(self.tmp, [{"sample_id": "S1", "hifi_reads": "a.bam,b.bam"}])
+        code, _, err = run_cli(["--project", proj, "samples", "add", str(tsv)])
+        self.assertEqual(code, 0, err)
+        self.assertRegex(err, r"\[ugc-wgw\] inspected 2 read file\(s\) in \d+s\n\[ugc-wgw\] registered 1 sample\(s\)")
+        code, _, err = run_cli(["--project", proj, "samples", "check"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("inspected 2 read file(s) in", err)
+        code, _, err = run_cli(["--project", proj, "samples", "check", "--stored"])
+        self.assertNotIn("inspected", err)
+        tsv2 = write_tsv(self.tmp, [{"sample_id": "S2", "hifi_reads": "c.bam"}], "s2.tsv")
+        code, _, err = run_cli(["--project", proj, "samples", "add", str(tsv2), "--no-inspect"])
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("inspected", err)
+        # a refused sheet still clears the meter and reports the problem
+        write_bam(self.tmp / "data" / "e.bam", empty=True)
+        tsv3 = write_tsv(self.tmp, [{"sample_id": "S3", "hifi_reads": "e.bam"}], "s3.tsv")
+        code, _, err = run_cli(["--project", proj, "samples", "add", str(tsv3)])
+        self.assertEqual(code, 1)
+        self.assertIn("inspected 1 read file(s) in", err)
+        self.assertIn("e.bam: empty file (0 bytes)", err)
 
     def test_list_via_cli(self):
         tsv = write_tsv(self.tmp, [{"sample_id": "S1", "hifi_reads": "a.bam"}])

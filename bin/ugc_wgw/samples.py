@@ -4,10 +4,11 @@ from __future__ import annotations
 import csv
 import re
 from pathlib import Path
+from typing import Callable, Optional
 
 from . import bam
 from .db import DB, SampleRecord
-from .log import Events
+from .log import LOGGER, Events
 from .stages import mode_stages, stage_spec
 from .util import UgcError, utc_now
 
@@ -21,6 +22,7 @@ INPUT_THRESHOLDS: dict[str, float] = {
     "sample_gbases_min": 30.0,    # HiFi bases per sample (Gb) below which the sample is flagged (~10x of GRCh38)
 }
 DROPPABLE = ("empty file", "no reads")   # the problems `--drop-empty` may remove a file for; anything else is damage
+Progress = Callable[[int, int, str], None]   # (files done, files total, label) after every inspected file
 
 
 def input_thresholds(overrides: dict[str, object] | None) -> dict[str, float]:
@@ -75,7 +77,8 @@ def parse_tsv(path: Path) -> list[SampleRecord]:
 
 
 def validate(records: list[SampleRecord], db: DB, check_paths: bool = True, *, inspect: bool = True,
-             thresholds: dict[str, float] | None = None, drop_empty: bool = False) -> list[str]:
+             thresholds: dict[str, float] | None = None, drop_empty: bool = False,
+             progress: Optional[Progress] = None) -> list[str]:
     """Return warnings; raise UgcError with every hard problem found. With check_paths and inspect, every read
     file is opened (`inspect_inputs`): a truncated, empty or read-less BAM is a hard problem unless drop_empty
     removes the empty ones from the record."""
@@ -106,7 +109,7 @@ def validate(records: list[SampleRecord], db: DB, check_paths: bool = True, *, i
             if parent and parent not in known:
                 warnings.append(f"{rec.sample_id}: parent {parent} is not a registered sample")
     if check_paths and inspect and not problems:
-        more, warned = inspect_inputs(records, input_thresholds(thresholds), drop_empty=drop_empty)
+        more, warned = inspect_inputs(records, input_thresholds(thresholds), drop_empty=drop_empty, progress=progress)
         problems.extend(more)
         warnings.extend(warned)
     if problems:
@@ -125,14 +128,16 @@ def _file_findings(sid: str, kind: str, info: bam.BamInfo, thresholds: dict[str,
     return out
 
 
-def inspect_inputs(records: list[SampleRecord], thresholds: dict[str, float], *, drop_empty: bool = False
-                   ) -> tuple[list[str], list[str]]:
+def inspect_inputs(records: list[SampleRecord], thresholds: dict[str, float], *, drop_empty: bool = False,
+                   progress: Optional[Progress] = None) -> tuple[list[str], list[str]]:
     """Open every read file of every record (`bam.inspect`). Returns (problems, warnings); fills
     `rec.input_info` per kept path and `rec.meta["input_check"]` per sample. With drop_empty, files that are
     empty or have no reads are removed from the record (listed in the warnings and in meta) instead of being
     problems; a truncated or unreadable file is always a problem."""
     problems: list[str] = []
     warnings: list[str] = []
+    n_files = sum(len(r.hifi_reads) + len(r.fail_reads) for r in records)
+    done = 0
     for rec in records:
         total_reads = total_bases = 0
         exact = True
@@ -141,6 +146,9 @@ def inspect_inputs(records: list[SampleRecord], thresholds: dict[str, float], *,
             kept: list[str] = []
             for p in getattr(rec, kind):
                 info = bam.inspect(Path(p))
+                done += 1
+                if progress:
+                    progress(done, n_files, f"{rec.sample_id} {Path(p).name}")
                 if info.problems:
                     if drop_empty and all(pr.startswith(DROPPABLE) for pr in info.problems):
                         dropped.append({"kind": kind, "path": p, "reason": info.problems[0]})
@@ -165,6 +173,9 @@ def inspect_inputs(records: list[SampleRecord], thresholds: dict[str, float], *,
             cov = total_bases / 1e9 / bam.HUMAN_GENOME_GB
             warnings.append(f"{rec.sample_id}: {bam.fmt_bases(total_bases)} of HiFi bases in {len(rec.hifi_reads)} "
                             f"file(s), about {cov:.1f}x of GRCh38, below sample_gbases_min {floor:g}")
+        LOGGER.info("inspected %s: %d read file(s), %s of HiFi bases (about %.1fx)%s", rec.sample_id,
+                    len(rec.hifi_reads) + len(rec.fail_reads), bam.fmt_bases(total_bases),
+                    total_bases / 1e9 / bam.HUMAN_GENOME_GB, "" if exact else ", estimated")
         rec.meta["input_check"] = {
             "checked_at": utc_now(), "hifi_files": len(rec.hifi_reads), "fail_files": len(rec.fail_reads),
             "reads": total_reads, "gbases": round(total_bases / 1e9, 3),
@@ -175,9 +186,11 @@ def inspect_inputs(records: list[SampleRecord], thresholds: dict[str, float], *,
 
 
 def add_samples(db: DB, events: Events, path: Path, check_paths: bool = True, replace: bool = False, *,
-                inspect: bool = True, thresholds: dict[str, object] | None = None, drop_empty: bool = False) -> int:
+                inspect: bool = True, thresholds: dict[str, object] | None = None, drop_empty: bool = False,
+                progress: Optional[Progress] = None) -> int:
     records = parse_tsv(path)
-    for w in validate(records, db, check_paths, inspect=inspect, thresholds=thresholds, drop_empty=drop_empty):
+    for w in validate(records, db, check_paths, inspect=inspect, thresholds=thresholds, drop_empty=drop_empty,
+                      progress=progress):
         events.emit("sample.warning", level="warning", message=w)
     if not replace:
         dup = [r.sample_id for r in records if db.sample_exists(r.sample_id)]
@@ -195,7 +208,8 @@ def add_samples(db: DB, events: Events, path: Path, check_paths: bool = True, re
 
 
 def check_samples(db: DB, ids: list[str], thresholds: dict[str, object] | None, *, stored: bool = False,
-                  update: bool = True) -> tuple[list[dict[str, object]], list[str], list[str]]:
+                  update: bool = True, progress: Optional[Progress] = None
+                  ) -> tuple[list[dict[str, object]], list[str], list[str]]:
     """Inspect the registered read files of `ids` (all samples when empty) again, or show what registration
     recorded (`stored`). Returns (one row per file, problems, warnings); with update the stored info is refreshed."""
     thr = input_thresholds(thresholds)
@@ -206,12 +220,18 @@ def check_samples(db: DB, ids: list[str], thresholds: dict[str, object] | None, 
     unknown = [sid for sid in sample_ids if not db.sample_exists(sid)]
     if unknown:
         raise UgcError("unknown sample(s): " + ", ".join(unknown))
+    recs = {sid: db.get_sample(sid) for sid in sample_ids}
+    n_files = sum(len(r.hifi_reads) + len(r.fail_reads) for r in recs.values() if r is not None)
+    done = 0
     for sid in sample_ids:
-        rec = db.get_sample(sid)
+        rec = recs[sid]
         assert rec is not None
         total_bases = 0
         for kind in ("hifi_reads", "fail_reads"):
             for p in getattr(rec, kind):
+                done += 1
+                if progress and not stored:
+                    progress(done, n_files, f"{sid} {Path(p).name}")
                 if stored:
                     info_d = rec.input_info.get(p)
                     if not info_d:

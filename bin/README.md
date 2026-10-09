@@ -31,7 +31,8 @@ the canonical provenance path of a subject and stage.
 ## Commands
 
 ```
-ugc-wgw init <project_dir> --install <root>/current --ref-map F [--profile cpu|parabricks|FILE] [--deepvariant cpu|gpu|parabricks --gpu-type T]
+ugc-wgw init <project_dir> --install <root>/current --ref-map F [--results DIR] [--profile cpu|parabricks|FILE]
+           [--max-inflight N] [--deepvariant cpu|gpu|parabricks --gpu-type T --parabricks-gpus N] [--no-assembly-parents]
 ugc-wgw init <project_dir> --code <repo> --miniwdl <exe> --cfg <miniwdl.cfg> ...     # dev machine, no install prefix
 ugc-wgw samples add <samples.tsv> [--no-check | --no-inspect] [--drop-empty] [--replace]
 ugc-wgw samples check [<id>...] [--stored] [--json | --tsv]   # size, reads, bases, movie, problems per read file

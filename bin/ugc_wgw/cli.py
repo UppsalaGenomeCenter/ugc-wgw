@@ -16,7 +16,7 @@ from .plan import Selection, compute
 from .reconcile import reconcile
 from .stages import MODES, STAGES, mode_stages, stage_spec
 from .submit import GRACE_SECONDS, Submitter, acquire_lock, dry_run
-from .util import UgcError, diag, utc_stamp
+from .util import diag, hms, Meter, UgcError, utc_stamp
 from . import inputs as inputs_mod
 from . import layout
 
@@ -278,12 +278,24 @@ def cmd_samples(a: argparse.Namespace) -> int:
     cfg, db, events, version = _open(a)
     try:
         if a.samples_command == "add":
-            n = samples.add_samples(db, events, Path(a.tsv), check_paths=not a.no_check, replace=a.replace,
-                                    inspect=not a.no_inspect, thresholds=cfg.input_thresholds, drop_empty=a.drop_empty)
+            meter = Meter("inspecting read files") if not (a.no_check or a.no_inspect) else None
+            try:
+                n = samples.add_samples(db, events, Path(a.tsv), check_paths=not a.no_check, replace=a.replace,
+                                        inspect=not a.no_inspect, thresholds=cfg.input_thresholds, drop_empty=a.drop_empty,
+                                        progress=meter.update if meter else None)
+            finally:
+                if meter:
+                    meter.close(f"inspected {meter.done} read file(s) in {hms(meter.elapsed)}" if meter.done else None)
             diag(f"registered {n} sample(s)")
             return 0
         if a.samples_command == "check":
-            rows, problems, warnings = samples.check_samples(db, list(a.sample_ids), cfg.input_thresholds, stored=a.stored)
+            meter = Meter("inspecting read files") if not a.stored else None
+            try:
+                rows, problems, warnings = samples.check_samples(db, list(a.sample_ids), cfg.input_thresholds, stored=a.stored,
+                                                                 progress=meter.update if meter else None)
+            finally:
+                if meter:
+                    meter.close(f"inspected {meter.done} read file(s) in {hms(meter.elapsed)}" if meter.done else None)
             _print_rows(rows, a.json, tsv=a.tsv)
             for w in warnings:
                 diag(f"warning: {w}")

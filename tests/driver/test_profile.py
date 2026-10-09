@@ -125,5 +125,19 @@ class ProfileTest(unittest.TestCase):
         self.assertIn("unknown key", err)
 
 
+    def test_fs_warnings(self):
+        code, err, cfg = self.init()
+        self.assertEqual(code, 0, err)
+        same_fs = config.device_of(cfg.results_dir) == config.device_of(cfg.code_dir)   # depends on the machine
+        self.assertEqual("different file systems" in err, not same_fs, err)
+        self.assertEqual(len(config.fs_warnings(cfg)), 0 if same_fs else 1)
+        devs = {cfg.results_dir: 1, cfg.code_dir: 2}
+        warnings = config.fs_warnings(cfg, device=lambda p: devs.get(p))
+        self.assertEqual(len(warnings), 1)
+        self.assertIn(f"results {cfg.results_dir} and the install {cfg.code_dir} are on different file systems", warnings[0])
+        self.assertIn("[call_cache] get = false", warnings[0])
+        self.assertEqual(config.fs_warnings(cfg, device=lambda p: None), [])   # unknown devices: no warning
+
+
 if __name__ == "__main__":
     unittest.main()

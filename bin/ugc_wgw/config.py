@@ -5,9 +5,11 @@ See docs/DESIGN.md §8 (driver), §9.1 (layout), §14 (install prefix layout).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from .log import LOGGER
 from .util import UgcError, read_json, sha256_file, write_json
@@ -17,7 +19,7 @@ DEFAULT_REGISTRY = "ghcr.io/uppsalagenomecenter"
 DEEPVARIANT_MODES = ("cpu", "gpu", "parabricks")   # small-variant caller of singleton/upstream (guide chapter 12)
 # the project keys a site profile may set (`ugc-wgw init --profile`, guide chapter 05); `description` is allowed and ignored
 PROFILE_KEYS = ("max_inflight", "poll_interval", "assembly_use_parents", "deepvariant", "gpu_type", "parabricks_gpus",
-                "stage_inputs", "prices", "summary_thresholds")
+                "stage_inputs", "prices", "summary_thresholds", "input_thresholds")
 
 
 @dataclass
@@ -42,6 +44,7 @@ class Config:
     progress_interval: float = 300.0
     stage_inputs: dict[str, dict[str, object]] = field(default_factory=dict)
     summary_thresholds: dict[str, float] = field(default_factory=dict)   # ugc-wgw summary QC thresholds (docs/guide/07-results.md)
+    input_thresholds: dict[str, float] = field(default_factory=dict)     # input BAM check floors (samples.INPUT_THRESHOLDS)
     project_url: str = ""                                                # link printed in the analysis summaries
     deepvariant: str = "cpu"        # cpu | gpu (DeepVariant call_variants on 1 GPU) | parabricks (pbrun deepvariant)
     gpu_type: str = ""              # SLURM gres type (`a100`): --gres gpu:<type>:N; empty = gpu:N
@@ -103,6 +106,7 @@ class Config:
             "progress_interval": self.progress_interval,
             "stage_inputs": self.stage_inputs,
             "summary_thresholds": self.summary_thresholds,
+            "input_thresholds": self.input_thresholds,
             "project_url": self.project_url,
             "deepvariant": self.deepvariant,
             "gpu_type": self.gpu_type,
@@ -149,6 +153,7 @@ class Config:
             progress_interval=float(doc.get("progress_interval", 300.0)),
             stage_inputs=dict(doc.get("stage_inputs", {})),  # type: ignore[arg-type]
             summary_thresholds=dict(doc.get("summary_thresholds", {}) or {}),  # type: ignore[arg-type]
+            input_thresholds=dict(doc.get("input_thresholds", {}) or {}),  # type: ignore[arg-type]
             project_url=str(doc.get("project_url") or ""),
             deepvariant=check_deepvariant(str(doc.get("deepvariant") or "cpu")),
             gpu_type=str(doc.get("gpu_type") or "").strip(),
@@ -229,7 +234,7 @@ def load_profile(path: Path) -> dict[str, object]:
         raise UgcError(f"profile {path}: poll_interval must be a positive number")
     if "assembly_use_parents" in out and not isinstance(out["assembly_use_parents"], bool):
         raise UgcError(f"profile {path}: assembly_use_parents must be true or false")
-    for key in ("stage_inputs", "prices", "summary_thresholds"):
+    for key in ("stage_inputs", "prices", "summary_thresholds", "input_thresholds"):
         if key in out and not isinstance(out[key], dict):
             raise UgcError(f"profile {path}: {key} must be an object")
     for stage, values in (out.get("stage_inputs") or {}).items():  # type: ignore[union-attr]
@@ -324,6 +329,7 @@ def init_project(
     stage_inputs: dict[str, object] | None = None,
     prices: dict[str, object] | None = None,
     summary_thresholds: dict[str, object] | None = None,
+    input_thresholds: dict[str, object] | None = None,
     profile: dict[str, object] | None = None,
 ) -> Config:
     project_dir = project_dir.resolve()
@@ -350,6 +356,7 @@ def init_project(
         stage_inputs=dict(stage_inputs or {}),  # type: ignore[arg-type]
         prices=dict(prices or {}),
         summary_thresholds=dict(summary_thresholds or {}),  # type: ignore[arg-type]
+        input_thresholds=dict(input_thresholds or {}),  # type: ignore[arg-type]
         profile=dict(profile or {}),
     )
     if config.ugc_wgw_dir.exists():
@@ -362,6 +369,28 @@ def init_project(
     config.results_dir.mkdir(parents=True, exist_ok=True)
     save(config)
     return config
+
+
+def device_of(path: Path) -> int | None:
+    """The file system (st_dev) of a path, None when it cannot be stat-ed."""
+    try:
+        return os.stat(path).st_dev
+    except OSError:
+        return None
+
+
+def fs_warnings(cfg: Config, device: Callable[[Path], int | None] = device_of) -> list[str]:
+    """Warn when the results live on another file system than the install, where the call cache and the
+    references sit by default: miniwdl hardlinks outputs, and one it cannot hardlink across (a cached output
+    of a run on the other side, an input passed through) becomes a symlink (guide chapter 04)."""
+    out: list[str] = []
+    results, install = device(cfg.results_dir), device(cfg.code_dir)
+    if results is not None and install is not None and results != install:
+        out.append(f"results {cfg.results_dir} and the install {cfg.code_dir} are on different file systems: an output "
+                   "miniwdl cannot hardlink across (a call-cache hit of a run on the other side, a passed-through "
+                   "input) becomes a symlink into that tree, so keep it, or set [call_cache] get = false for this "
+                   "project (guide chapter 04)")
+    return out
 
 
 def load(project_dir: Path) -> Config:

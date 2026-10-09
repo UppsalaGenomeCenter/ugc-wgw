@@ -35,10 +35,12 @@ class MigrationTest(unittest.TestCase):
         conn.executescript(V1_RUNS)
         conn.close()
         db = DB(self.path)
-        self.assertEqual(db.migrated, [2])
+        self.assertEqual(db.migrated, [2, 3])
         self.assertEqual([r[0] for r in db.conn.execute("SELECT version FROM schema_version")], [db_mod.SCHEMA_VERSION])
         for col in ("error_kind", "error_message", "not_before"):
             self.assertIn(col, self.columns(db.conn, "runs"))
+        for col in ("bytes", "mtime", "info_json"):
+            self.assertIn(col, self.columns(db.conn, "sample_inputs"))
         run = db.get_run("S1-singleton-a1-old")
         self.assertIsNone(run.error_kind)
         self.assertTrue(db.finalize_run(run.run_id, "failed", utc_now(), error_class="CommandFailed", error_kind="tool",

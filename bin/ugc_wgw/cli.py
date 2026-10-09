@@ -59,8 +59,20 @@ def build_parser() -> argparse.ArgumentParser:
     a = ss.add_parser("add", help="register samples from a TSV (sample_id, sex, hifi_reads, fail_reads, father_id, mother_id; "
                                   "father_id/mother_id drive trio binning in assembly mode)")
     a.add_argument("tsv")
-    a.add_argument("--no-check", action="store_true", help="do not require read paths to exist")
+    a.add_argument("--no-check", action="store_true", help="do not require read paths to exist (nothing is inspected)")
+    a.add_argument("--no-inspect", action="store_true",
+                   help="require the paths to exist but do not open the BAMs (default: header, first reads, "
+                        "BGZF end marker and an estimate of the yield per file)")
+    a.add_argument("--drop-empty", action="store_true",
+                   help="register a sample without its empty or read-less BAMs instead of refusing the sheet "
+                        "(truncated files are always refused)")
     a.add_argument("--replace", action="store_true", help="overwrite already registered samples")
+    a = ss.add_parser("check", help="inspect the registered read files again (all samples or the given ids): size, "
+                                    "reads, bases, movie and problems per file; exit 1 on a problem")
+    a.add_argument("sample_ids", nargs="*", metavar="ID")
+    a.add_argument("--stored", action="store_true", help="show what registration recorded instead of reading the files")
+    a.add_argument("--json", action="store_true")
+    a.add_argument("--tsv", action="store_true")
     a = ss.add_parser("remove", help="unregister samples; refused for cohort members and, without --force, "
                                      "for samples with recorded runs (results on disk are never touched)")
     a.add_argument("sample_ids", nargs="+", metavar="ID")
@@ -253,6 +265,8 @@ def cmd_init(a: argparse.Namespace) -> int:
     )
     DB(cfg.db_path).close()
     diag(f"initialised {cfg.ugc_wgw_dir} (ugc-wgw version {config.read_version(cfg.code_dir)}, results {cfg.results_dir})")
+    for w in config.fs_warnings(cfg):
+        diag(f"warning: {w}")
     if meta:
         diag(f"profile {meta['name']} ({meta['path']}) set {', '.join(meta['applied'])}")  # type: ignore[arg-type]
     if not cfg.miniwdl_cfg.exists():
@@ -264,9 +278,20 @@ def cmd_samples(a: argparse.Namespace) -> int:
     cfg, db, events, version = _open(a)
     try:
         if a.samples_command == "add":
-            n = samples.add_samples(db, events, Path(a.tsv), check_paths=not a.no_check, replace=a.replace)
+            n = samples.add_samples(db, events, Path(a.tsv), check_paths=not a.no_check, replace=a.replace,
+                                    inspect=not a.no_inspect, thresholds=cfg.input_thresholds, drop_empty=a.drop_empty)
             diag(f"registered {n} sample(s)")
             return 0
+        if a.samples_command == "check":
+            rows, problems, warnings = samples.check_samples(db, list(a.sample_ids), cfg.input_thresholds, stored=a.stored)
+            _print_rows(rows, a.json, tsv=a.tsv)
+            for w in warnings:
+                diag(f"warning: {w}")
+            for pr in problems:
+                diag(f"problem: {pr}")
+            diag(f"{len(rows)} file(s) of {len({r['sample_id'] for r in rows})} sample(s): {len(problems)} problem(s), "
+                 f"{len(warnings)} warning(s)")
+            return 1 if problems else 0
         if a.samples_command == "remove":
             for r in samples.remove_samples(db, events, list(a.sample_ids), force=a.force, results_dir=cfg.results_dir):
                 diag(f"removed {r['sample_id']} ({r['runs_deleted']} run row(s) deleted; results on disk kept: {r['results_kept']})")

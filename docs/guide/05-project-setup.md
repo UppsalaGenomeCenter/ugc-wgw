@@ -31,7 +31,8 @@ ugc-wgw init /proj/ugc/projects/cohort2026 --install /proj/ugc/current \
 A profile is a JSON file with the project keys that depend on the cluster
 and the sample set: `stage_inputs`, `deepvariant`, `gpu_type`,
 `parabricks_gpus`, `max_inflight`, `poll_interval`, `assembly_use_parents`,
-`prices` and `summary_thresholds`, plus a `description`. `NAME` is looked
+`prices`, `summary_thresholds` and `input_thresholds`, plus a
+`description`. `NAME` is looked
 up as `<prefix>/profiles/NAME.json` (the installer places the examples
 there once and never overwrites them, so a site edits them in place), then
 as `backends/hpc/profiles/NAME.json` in the code; a path to a file works
@@ -64,7 +65,10 @@ report names it under Provenance.
 The command checks that the code directory, the miniwdl executable and the
 reference map exist and that `VERSION` in the code directory is non-empty. A
 missing `miniwdl.cfg` is only a warning at this point; `submit` refuses to run
-without it.
+without it. It also warns when `--results` is on a different file system
+than the install: a call-cache hit whose earlier output lives on the other
+side is then symlinked into that tree rather than hardlinked (chapter 04,
+"Decide where the references live").
 
 ## `.ugc-wgw/config.json`
 
@@ -186,12 +190,56 @@ Rules:
 
 - Paths are made absolute and symlinks resolved. Every path must exist unless
   `--no-check` is given (useful for a sheet prepared before the data lands).
+- Every BAM is opened (below). A file that is empty, truncated or has no
+  reads is an error and nothing is registered; `--drop-empty` registers the
+  sample without its empty or read-less files instead (a truncated file is
+  always refused); `--no-inspect` skips the inspection but keeps the
+  existence check.
 - A sample already registered is an error unless `--replace` is given, which
   overwrites its record and reads; its runs are kept.
 - A duplicate `sample_id` inside one sheet is an error. A blank `sample_id`
   skips the row.
 - A `father_id` or `mother_id` that is not a registered sample (nor in the same
   sheet) is a warning, recorded as a `sample.warning` event.
+
+### What the input check looks at
+
+A delivery sometimes contains a BAM that exists but holds little or nothing:
+an interrupted copy, a header-only file from a failed run of the instrument
+software. Upstream's alignment reads such a file hours into a sample's run
+and fails there, after the other files have been aligned. The driver
+therefore looks at every read file when it is registered, with the standard
+library alone (a BAM is a series of gzip blocks), in about a tenth of a
+second per file:
+
+| Check | Finding | Result |
+|---|---|---|
+| Size | 0 bytes | error (`--drop-empty`: the file is dropped) |
+| Last 28 bytes | the BGZF end-of-file marker is missing | error: an incomplete copy; never dropped |
+| Header | not a BAM, or unreadable | error |
+| Header | reference sequences present (an aligned BAM) | warning; upstream strips the alignments and disables chunking, as its own check does |
+| Header | no `@RG` read group | warning |
+| First records | none | error (`--drop-empty`: dropped) |
+| First 1000 records and the bytes they occupied | an estimate of the read count and bases (exact when a `.pbi` index sits next to the BAM) | recorded per file; a warning below `file_reads_min` |
+| Per sample | HiFi bases over all its files, as a coverage of GRCh38 (3.1 Gb) | a warning below `sample_gbases_min` |
+
+The two floors come from `config.json` `input_thresholds` (also a profile
+key): `file_reads_min` (default 1000 reads; a Revio BAM holds millions) and
+`sample_gbases_min` (default 30 Gb, about 10x). They warn, they never refuse:
+a low-coverage sample stays registered and the analyst decides. `0` disables
+a floor. What was found (bytes, reads, bases, movies) is kept with the sample
+record and shown by:
+
+```bash
+ugc-wgw samples check                 # read every registered file again; exit 1 on a problem
+ugc-wgw samples check S1 S2 --stored  # what registration recorded, without touching the files
+```
+
+Run `samples check` when a sheet was registered with `--no-check` before the
+data landed, or when files were re-copied: it refreshes the record. `submit`
+repeats the cheap part of the check (present, same size as registered, end
+marker in place) just before each run that reads raw BAMs starts (chapter
+06).
 
 A sequencing facility usually delivers one row per BAM file, with a
 PLINK-style pedigree (`family_id`, `paternal_id`, `maternal_id`, sex coded

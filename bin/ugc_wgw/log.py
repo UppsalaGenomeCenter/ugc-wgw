@@ -32,6 +32,7 @@ EVENT_COLOR = {
     "run.created": CYAN, "run.submitted": CYAN,
     "run.blocked": DIM, "run.backoff": DIM,
     "run.auto_retry": MAGENTA, "run.scancel": MAGENTA, "run.reconciled": MAGENTA, "run.accounting": MAGENTA,
+    "run.preflight": DIM, "sample.input_dropped": MAGENTA,
     "submit.start": BOLD, "submit.stop": BOLD, "submit.progress": DIM,
     "progress": BOLD + CYAN,
 }

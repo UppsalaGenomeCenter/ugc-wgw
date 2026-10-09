@@ -3,6 +3,32 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.8.0
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.3.0.
+
+- Input BAM check: `ugc-wgw samples add` opens every read file with a
+  stdlib BGZF reader. An empty, truncated or read-less BAM is refused
+  (`--drop-empty` registers the sample without its empty or read-less
+  files; `--no-inspect` keeps only the existence check); aligned inputs and
+  missing read groups warn; the read count and bases are estimated from
+  the first records (exact from a `.pbi`) and recorded with the sample;
+  `input_thresholds` (`file_reads_min`, `sample_gbases_min`; a config and
+  profile key) warn about thin files and samples. New `ugc-wgw samples
+  check [ID...] [--stored]` lists size, reads, bases, movie and problems
+  per file.
+- `submit` checks the raw read files just before each run that names them
+  (present, same size as registered, BGZF end marker) and fails the attempt
+  as an input error without a SLURM job when they do not hold; `--dry-run`
+  prints the result.
+- Outputs across file systems: a hardlink miniwdl cannot make across file
+  systems (a cached output of a run whose results live elsewhere, an input
+  passed through) becomes a symlink with a warning instead of
+  `Invalid cross-device link`; the installer writes `ugc_wgw_miniwdl.pth`
+  into the venv for it and warns when the prefix, references and call cache
+  are on different file systems, as `ugc-wgw init` does for the results.
+
 ## 0.7.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

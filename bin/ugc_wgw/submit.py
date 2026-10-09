@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass
 from typing import IO
 
-from . import accounting, engine, failures, inputs, layout, manifest, progress, resources, slurm
+from . import accounting, engine, failures, inputs, layout, manifest, preflight, progress, resources, slurm
 from . import lease as lease_mod
 from .config import Config
 from .db import DB, RunRecord
@@ -174,7 +174,8 @@ class Submitter:
         return inputs.BuildContext(self.cfg, self.db, self.sel.mode, self.ugc_wgw_version, cand.subject_type,
                                    cand.subject_id, cohort=cohort, any_version=self.any_version)
 
-    def create_run(self, cand: Candidate) -> RunRecord:
+    def create_run(self, cand: Candidate) -> tuple[RunRecord, dict[str, object]]:
+        """Insert the pending run and write its inputs.json; returns the run and the inputs document."""
         ctx = self._context(cand)
         doc, members = inputs.generate(ctx, cand.stage)   # may raise MissingOutputError
         stage_path = layout.stage_dir(self.cfg.results_dir, cand.subject_type, cand.subject_id, self.ugc_wgw_version, cand.stage)
@@ -193,7 +194,23 @@ class Submitter:
         self.db.insert_run(run)
         self.events.emit("run.created", run_id=run.run_id, subject=run.subject_id, stage=run.stage, attempt=attempt,
                          run_dir=run.run_dir)
-        return run
+        return run, doc
+
+    def preflight(self, run: RunRecord, doc: dict[str, object]) -> bool:
+        """Check the raw read files just before launching; a problem finalizes the run as failed (InputError,
+        kind input) without a SLURM job and returns False."""
+        n_files, _, problems = preflight.check(doc, self.db)
+        if not problems:
+            if n_files:
+                self.events.emit("run.preflight", run_id=run.run_id, subject=run.subject_id, stage=run.stage, files=n_files)
+            return True
+        shown = problems[:3] + ([f"... {len(problems) - 3} more"] if len(problems) > 3 else [])
+        result = engine.RunResult("failed", None, "InputError",
+                                  f"{len(problems)} input file problem(s) before launch: " + "; ".join(shown))
+        finalize_run(self.cfg, self.db, self.events, self.code, self.engine_info, run, result)
+        self.failures += 1
+        self.failed_subjects.add((run.subject_type, run.subject_id, run.stage))
+        return False
 
     def start(self, run: RunRecord) -> Child:
         cmd = engine.miniwdl_cmd(self.cfg, run.stage, run.run_path)
@@ -226,7 +243,9 @@ class Submitter:
             if cand.note:
                 self.events.emit("run.auto_retry", subject=cand.subject_id, stage=cand.stage, reason=cand.note)
             try:
-                run = self.create_run(cand)
+                run, doc = self.create_run(cand)
+                if not self.preflight(run, doc):
+                    continue
                 child = self.start(run)
             except MissingOutputError as exc:
                 self.events.emit("run.blocked", level="warning", subject=cand.subject_id, stage=cand.stage, reason=str(exc))
@@ -390,6 +409,12 @@ def dry_run(cfg: Config, db: DB, ugc_wgw_version: str, sel: Selection, *, any_ve
             print(f"# blocked: {exc}", file=out)
             continue
         print(json.dumps(doc, indent=2, sort_keys=True), file=out)
+        n_files, total, problems = preflight.check(doc, db)
+        if problems:
+            for problem in problems:
+                print(f"# input problem: {problem}", file=out)
+        elif n_files:
+            print(f"# inputs: {n_files} read file(s), {total / 1e9:.1f} GB, present and complete", file=out)
         print(" ".join(engine.miniwdl_cmd(cfg, cand.stage, attempt_path)), file=out)
     for b in plan.blocked:
         print(f"\n# blocked: {b.candidate.label()}: {b.reason}", file=out)

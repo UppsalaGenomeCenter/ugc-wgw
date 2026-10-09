@@ -6,6 +6,8 @@ import io
 import json
 import os
 import pathlib
+import struct
+import zlib
 import sys
 from html.parser import HTMLParser
 
@@ -59,8 +61,65 @@ def make_project(tmp: pathlib.Path, **kw: object) -> config.Config:
     return config.init_project(tmp / "proj", **args)  # type: ignore[arg-type]
 
 
+BGZF_EOF = bytes.fromhex("1f8b08040000000000ff0600424302001b0003000000000000000000")
+
+
+def bgzf_block(payload: bytes) -> bytes:
+    """One BGZF block (gzip member with the BC extra field) holding `payload` (at most 64 KB)."""
+    comp = zlib.compressobj(6, zlib.DEFLATED, -15)
+    cdata = comp.compress(payload) + comp.flush()
+    bsize = 18 + len(cdata) + 8 - 1
+    return (b"\x1f\x8b\x08\x04\x00\x00\x00\x00\x00\xff\x06\x00BC\x02\x00" + struct.pack("<H", bsize) + cdata
+            + struct.pack("<II", zlib.crc32(payload) & 0xFFFFFFFF, len(payload)))
+
+
+def bam_bytes(*, reads: int = 10, read_len: int = 1000, movie: str = "m84000_240101_000000_s1", sample: str = "S",
+              aligned: bool = False, header_only: bool = False, read_group: bool = True) -> bytes:
+    """A small, valid uBAM (BGZF blocks + EOF marker) with `reads` unmapped records of `read_len` bases."""
+    header = "@HD\tVN:1.6\tSO:unknown\n"
+    if read_group:
+        header += f"@RG\tID:rg1\tPL:PACBIO\tPU:{movie}\tSM:{sample}\n"
+    refs = [("chr20", 64444167)] if aligned else []
+    for name, length in refs:
+        header += f"@SQ\tSN:{name}\tLN:{length}\n"
+    parts = [b"BAM\x01" + struct.pack("<i", len(header)) + header.encode() + struct.pack("<i", len(refs))]
+    for name, length in refs:
+        parts.append(struct.pack("<i", len(name) + 1) + name.encode() + b"\0" + struct.pack("<i", length))
+    if not header_only:
+        seq = bytes([0x11] * ((read_len + 1) // 2))   # all-A, 4 bits per base
+        qual = bytes([30]) * read_len
+        for i in range(reads):
+            qname = f"{movie}/{i}/ccs".encode() + b"\0"
+            # refID pos l_read_name mapq bin n_cigar_op flag l_seq next_refID next_pos tlen
+            core = struct.pack("<iiBBHHHIiii", -1, -1, len(qname), 255, 4680, 0, 4, read_len, -1, -1, 0)
+            rec = core + qname + seq + qual
+            parts.append(struct.pack("<i", len(rec)) + rec)
+    data = b"".join(parts)
+    out = b"".join(bgzf_block(data[i:i + 65280]) for i in range(0, len(data), 65280))
+    return out + BGZF_EOF
+
+
+def write_bam(path: pathlib.Path, **kw: object) -> pathlib.Path:
+    """Write `bam_bytes(**kw)` to path; `truncated=True` cuts the file short (no EOF marker), `empty=True`
+    writes zero bytes, `pbi_reads=N` adds a `.pbi` index declaring N reads."""
+    path = pathlib.Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    truncated = bool(kw.pop("truncated", False))
+    empty = bool(kw.pop("empty", False))
+    pbi_reads = kw.pop("pbi_reads", None)
+    data = b"" if empty else bam_bytes(**kw)  # type: ignore[arg-type]
+    if truncated:
+        data = data[: max(1, len(data) * 2 // 3)]
+    path.write_bytes(data)
+    if pbi_reads is not None:
+        pbi = b"PBI\x01" + struct.pack("<I", 0x00000301) + struct.pack("<H", 0) + struct.pack("<I", int(pbi_reads)) + bytes(18)
+        pathlib.Path(str(path) + ".pbi").write_bytes(bgzf_block(pbi) + BGZF_EOF)
+    return path
+
+
 def write_tsv(tmp: pathlib.Path, rows: list[dict[str, str]], name: str = "samples.tsv") -> pathlib.Path:
-    """Write a samples TSV; every path mentioned is created as an empty file under tmp/data."""
+    """Write a samples TSV; every relative path mentioned is created as a small valid uBAM under tmp/data
+    (an existing file is left as it is, so a test may write its own BAM there first)."""
     tmp = pathlib.Path(tmp)
     cols = ["sample_id", "sex", "hifi_reads", "fail_reads", "father_id", "mother_id"]
     extra = sorted({k for r in rows for k in r} - set(cols))
@@ -77,8 +136,8 @@ def write_tsv(tmp: pathlib.Path, rows: list[dict[str, str]], name: str = "sample
                 if not p:
                     continue
                 full = p if p.startswith("/") else str(data / p)
-                pathlib.Path(full).parent.mkdir(parents=True, exist_ok=True)
-                pathlib.Path(full).touch()
+                if not pathlib.Path(full).exists():
+                    write_bam(pathlib.Path(full), sample=str(row.get("sample_id", "S")))
                 paths.append(full)
             row[kind] = ",".join(paths)
         lines.append("\t".join(row.get(c, "") for c in cols))

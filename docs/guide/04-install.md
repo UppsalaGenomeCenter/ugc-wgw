@@ -97,6 +97,24 @@ The archival form of the same data is PacBio's Zenodo tar named in
 `references.lock`; extracting it under `<references>/` gives the same tree
 and is only needed when a bundle was built without images.
 
+One file system for the prefix, the references, the call cache and the
+results is the simplest arrangement. miniwdl builds every run's `out/` with
+hardlinks (so that the work directories of successful runs can be deleted),
+and a hardlink cannot cross file systems. Two outputs can point across:
+the cached output of an earlier run whose results live on another file
+system, and an input file a workflow returns unchanged (none of the current
+workflows does). The bundle's venv therefore carries a fallback
+(`ugc_wgw_miniwdl.pth`, from the plugin's `crossdev` module): a hardlink
+that fails with `Invalid cross-device link` becomes a symlink, logged as a
+WARNING `ugc-wgw cross-device output` in the run's stderr and workflow
+log. Such a result then points into the other tree, which must stay in
+place. The installer warns when the prefix, the references directory or
+the call cache directory are on different file systems, and `ugc-wgw init`
+warns when a project's results are not on the install's file system
+(chapter 05). For a project that must live elsewhere, a copy of
+`miniwdl.cfg` with `[call_cache] get = false` recomputes instead of
+linking across.
+
 ### 2. Write a site file
 
 `KEY=VALUE` lines, no shell expansion; every key is optional. A copy to start
@@ -205,7 +223,7 @@ and the next run picks it up.
 | `[scheduler] fail_fast` | `false` | A failed task does not cancel the run's other tasks; the retry is then cheap through the call cache. |
 | `[file_io] allow_any_input` | `true` | Required: the reference map names files that are not declared inputs. |
 | `[file_io] copy_input_files` | `false` | Never copies the uBAMs. |
-| `[file_io] output_hardlinks`, `delete_work` | `true`, `success` | Work directories of successful runs are reclaimed; failed runs keep theirs for diagnosis. |
+| `[file_io] output_hardlinks`, `delete_work` | `true`, `success` | Work directories of successful runs are reclaimed; failed runs keep theirs for diagnosis. A hardlink that would cross file systems becomes a symlink (section 1). |
 | `[call_cache] dir` | site value | Shared across versions. |
 | `[singularity] exe` | `["apptainer"]` | |
 | `[singularity] image_cache` | `<prefix>/versions/<v>/sif` | Every image must already be here; miniwdl never pulls. |

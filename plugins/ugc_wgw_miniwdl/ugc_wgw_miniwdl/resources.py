@@ -22,7 +22,7 @@ import os
 import re
 from typing import Any, Dict, Iterator, List, Optional
 
-from . import policy
+from . import crossdev, policy  # noqa: F401  (importing crossdev installs the hardlink-else-symlink fallback)
 
 CFG_SECTION = "ugc_wgw"
 CFG_KEY = "resources"

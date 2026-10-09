@@ -15,7 +15,7 @@ from typing import Iterator
 
 from .util import UgcError
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Forward-only migrations applied in order on open; each entry brings an older file to that version.
 MIGRATIONS: dict[int, tuple[str, ...]] = {
@@ -23,6 +23,11 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         "ALTER TABLE runs ADD COLUMN error_kind TEXT",
         "ALTER TABLE runs ADD COLUMN error_message TEXT",
         "ALTER TABLE runs ADD COLUMN not_before TEXT",
+    ),
+    3: (
+        "ALTER TABLE sample_inputs ADD COLUMN bytes INTEGER",
+        "ALTER TABLE sample_inputs ADD COLUMN mtime REAL",
+        "ALTER TABLE sample_inputs ADD COLUMN info_json TEXT NOT NULL DEFAULT '{}'",
     ),
 }
 
@@ -46,6 +51,9 @@ CREATE TABLE IF NOT EXISTS sample_inputs (
   position INTEGER NOT NULL,
   path TEXT NOT NULL,
   checksum TEXT,
+  bytes INTEGER,
+  mtime REAL,
+  info_json TEXT NOT NULL DEFAULT '{}',
   PRIMARY KEY (sample_id, kind, position)
 );
 CREATE TABLE IF NOT EXISTS cohorts (
@@ -108,6 +116,7 @@ class SampleRecord:
     hifi_reads: list[str] = field(default_factory=list)
     fail_reads: list[str] = field(default_factory=list)
     meta: dict[str, object] = field(default_factory=dict)
+    input_info: dict[str, dict[str, object]] = field(default_factory=dict)   # per path: what `bam.inspect` found at registration
 
 
 @dataclass
@@ -194,7 +203,12 @@ class DB:
                 raise UgcError(f"database schema {stored} is newer than this driver ({SCHEMA_VERSION}): {self.path}")
             for version in range(stored + 1, SCHEMA_VERSION + 1):
                 for stmt in MIGRATIONS[version]:
-                    c.execute(stmt)
+                    try:
+                        c.execute(stmt)
+                    except sqlite3.OperationalError as exc:
+                        # a table SCHEMA created fresh (CREATE IF NOT EXISTS) already has the column
+                        if "duplicate column name" not in str(exc):
+                            raise
                 c.execute("DELETE FROM schema_version")
                 c.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
                 self.migrated.append(version)
@@ -228,9 +242,12 @@ class DB:
             )
             for kind, paths in (("hifi_reads", rec.hifi_reads), ("fail_reads", rec.fail_reads)):
                 for i, path in enumerate(paths):
+                    info = rec.input_info.get(path) or {}
                     c.execute(
-                        "INSERT INTO sample_inputs (sample_id, kind, position, path) VALUES (?, ?, ?, ?)",
-                        (rec.sample_id, kind, i, path),
+                        "INSERT INTO sample_inputs (sample_id, kind, position, path, bytes, mtime, info_json) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (rec.sample_id, kind, i, path, info.get("bytes"), info.get("mtime"),
+                         json.dumps(info, sort_keys=True, default=str)),
                     )
 
     def get_sample(self, sample_id: str) -> SampleRecord | None:
@@ -243,10 +260,31 @@ class DB:
         )
         for kind in ("hifi_reads", "fail_reads"):
             rows = self.conn.execute(
-                "SELECT path FROM sample_inputs WHERE sample_id = ? AND kind = ? ORDER BY position", (sample_id, kind)
+                "SELECT path, info_json FROM sample_inputs WHERE sample_id = ? AND kind = ? ORDER BY position",
+                (sample_id, kind)
             ).fetchall()
             setattr(rec, kind, [r["path"] for r in rows])
+            for r in rows:
+                info = json.loads(r["info_json"] or "{}")
+                if info:
+                    rec.input_info[r["path"]] = info
         return rec
+
+    def update_input_info(self, sample_id: str, path: str, info: dict[str, object]) -> None:
+        """Refresh what is recorded about one registered input file (`ugc-wgw samples check`)."""
+        with self.tx() as c:
+            c.execute("UPDATE sample_inputs SET bytes = ?, mtime = ?, info_json = ? WHERE sample_id = ? AND path = ?",
+                      (info.get("bytes"), info.get("mtime"), json.dumps(info, sort_keys=True, default=str), sample_id, path))
+
+    def input_sizes(self, paths: list[str]) -> dict[str, int | None]:
+        """Registered size per input path (None when registered without inspection; absent when not registered)."""
+        out: dict[str, int | None] = {}
+        for i in range(0, len(paths), 500):
+            chunk = paths[i:i + 500]
+            marks = ",".join("?" * len(chunk))
+            for r in self.conn.execute(f"SELECT path, bytes FROM sample_inputs WHERE path IN ({marks})", chunk):
+                out[r["path"]] = r["bytes"]
+        return out
 
     def sample_exists(self, sample_id: str) -> bool:
         return self.conn.execute("SELECT 1 FROM samples WHERE sample_id = ?", (sample_id,)).fetchone() is not None

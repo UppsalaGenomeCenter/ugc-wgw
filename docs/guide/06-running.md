@@ -31,6 +31,7 @@ sequenceDiagram
   U->>D: reconcile runs left active by a previous driver
   loop every poll interval, until nothing is runnable or in flight
     U->>D: plan: done, active, blocked, runnable
+    U->>U: preflight: the raw read files of a candidate are present, complete and unchanged
     U->>M: launch runnable candidates up to max_inflight (attempt-N/, inputs.json)
     M->>S: sbatch --wait per task, up to task_concurrency at once
     S-->>M: task exit
@@ -44,9 +45,13 @@ sequenceDiagram
 In words: the driver takes the project lock, records the miniwdl,
 miniwdl-slurm and Apptainer versions for the manifests, settles any run a
 previous driver left active, then loops. Each iteration recomputes the whole
-plan from the database, launches what is runnable until `--max-inflight`
-processes are in flight, sleeps for the poll interval (waking early when a
-child exits), and finalises every finished child: classifies a failure,
+plan from the database, checks the raw read files a candidate names (present,
+not empty, the size registration recorded, the BGZF end marker in place: a
+problem fails the attempt with class `InputError` and kind `input` before any
+SLURM job exists, see chapter 05), launches what is runnable until
+`--max-inflight` processes are in flight, sleeps for the poll interval
+(waking early when a child exits), and finalises every finished child:
+classifies a failure,
 writes `run_manifest.json`, records the status, repoints `current`. It
 refreshes the project lease on every iteration. When nothing is in flight
 but a subject is backing off after a transient failure, it waits for that
@@ -100,8 +105,10 @@ ugc-wgw submit --mode joint --cohort C1 --dry-run
 
 prints the resource summary (caps and policy rows, chapter 12), a header
 with the counts, then for each runnable candidate of the first wave the
-attempt directory, the generated inputs JSON and the exact `miniwdl run`
-command line, then the blocked list with reasons and the active list. It
+attempt directory, the generated inputs JSON, the result of the input
+preflight (`# inputs: 14 read file(s), 61.2 GB, present and complete`, or one
+`# input problem:` line per file) and the exact `miniwdl run` command line,
+then the blocked list with reasons and the active list. It
 also reconciles first, so the lists reflect what a real `submit` would see.
 Use it to check overrides, paths and the plan before committing a cluster to a
 cohort.
@@ -112,6 +119,7 @@ cohort.
 
 ## sample S1 / upstream -> /proj/ugc/results/c26/samples/S1/0.2.0/upstream/attempt-1
 { "ugc_wgw_upstream.hifi_reads": [...], ... }
+# inputs: 14 read file(s), 61.2 GB, present and complete
 miniwdl run /proj/ugc/versions/0.2.0/code/workflows/ugc_wgw_upstream.wdl -i .../inputs.json \
     --dir .../attempt-1/. -o run.json --cfg /proj/ugc/versions/0.2.0/miniwdl.cfg --no-color --log-json
 ...

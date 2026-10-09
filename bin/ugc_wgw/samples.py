@@ -1,10 +1,11 @@
-"""Sample registration from a TSV and per-stage sample listing (docs/DESIGN.md §8.1)."""
+"""Sample registration from a TSV, input BAM checks and per-stage sample listing (docs/DESIGN.md §8.1)."""
 from __future__ import annotations
 
 import csv
 import re
 from pathlib import Path
 
+from . import bam
 from .db import DB, SampleRecord
 from .log import Events
 from .stages import mode_stages, stage_spec
@@ -14,6 +15,24 @@ COLUMNS = ("sample_id", "sex", "hifi_reads", "fail_reads", "father_id", "mother_
 REQUIRED_COLUMNS = ("sample_id", "hifi_reads")
 SEX_VALUES = ("MALE", "FEMALE")
 ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+# Advisory floors for the input check (config.json `input_thresholds`, guide chapter 05); 0 disables one.
+INPUT_THRESHOLDS: dict[str, float] = {
+    "file_reads_min": 1000.0,     # HiFi reads per BAM below which the file is flagged (a Revio BAM has millions)
+    "sample_gbases_min": 30.0,    # HiFi bases per sample (Gb) below which the sample is flagged (~10x of GRCh38)
+}
+DROPPABLE = ("empty file", "no reads")   # the problems `--drop-empty` may remove a file for; anything else is damage
+
+
+def input_thresholds(overrides: dict[str, object] | None) -> dict[str, float]:
+    """INPUT_THRESHOLDS with the project's overrides; unknown keys and non-numbers are errors."""
+    out = dict(INPUT_THRESHOLDS)
+    for key, value in (overrides or {}).items():
+        if key not in INPUT_THRESHOLDS:
+            raise UgcError(f"input_thresholds: unknown key {key!r} (known: {', '.join(INPUT_THRESHOLDS)})")
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+            raise UgcError(f"input_thresholds.{key}: must be a number >= 0, not {value!r}")
+        out[key] = float(value)
+    return out
 
 
 def _split_paths(cell: str | None) -> list[str]:
@@ -55,8 +74,11 @@ def parse_tsv(path: Path) -> list[SampleRecord]:
     return records
 
 
-def validate(records: list[SampleRecord], db: DB, check_paths: bool = True) -> list[str]:
-    """Return warnings; raise UgcError with every hard problem found."""
+def validate(records: list[SampleRecord], db: DB, check_paths: bool = True, *, inspect: bool = True,
+             thresholds: dict[str, float] | None = None, drop_empty: bool = False) -> list[str]:
+    """Return warnings; raise UgcError with every hard problem found. With check_paths and inspect, every read
+    file is opened (`inspect_inputs`): a truncated, empty or read-less BAM is a hard problem unless drop_empty
+    removes the empty ones from the record."""
     problems: list[str] = []
     warnings: list[str] = []
     seen: set[str] = set()
@@ -83,14 +105,79 @@ def validate(records: list[SampleRecord], db: DB, check_paths: bool = True) -> l
         for parent in (rec.father_id, rec.mother_id):
             if parent and parent not in known:
                 warnings.append(f"{rec.sample_id}: parent {parent} is not a registered sample")
+    if check_paths and inspect and not problems:
+        more, warned = inspect_inputs(records, input_thresholds(thresholds), drop_empty=drop_empty)
+        problems.extend(more)
+        warnings.extend(warned)
     if problems:
         raise UgcError("invalid samples TSV:\n  " + "\n  ".join(problems))
     return warnings
 
 
-def add_samples(db: DB, events: Events, path: Path, check_paths: bool = True, replace: bool = False) -> int:
+def _file_findings(sid: str, kind: str, info: bam.BamInfo, thresholds: dict[str, float]) -> list[str]:
+    """Advisory findings about one usable file, prefixed for the sample."""
+    name = Path(info.path).name
+    out = [f"{sid}: {kind} {name}: {w}" for w in info.warnings]
+    if kind == "hifi_reads" and thresholds["file_reads_min"] and info.reads < thresholds["file_reads_min"]:
+        approx = "" if info.reads_exact else "about "
+        out.append(f"{sid}: {kind} {name}: only {approx}{info.reads:,} reads ({bam.fmt_bases(info.bases)}), "
+                   f"below file_reads_min {thresholds['file_reads_min']:g}")
+    return out
+
+
+def inspect_inputs(records: list[SampleRecord], thresholds: dict[str, float], *, drop_empty: bool = False
+                   ) -> tuple[list[str], list[str]]:
+    """Open every read file of every record (`bam.inspect`). Returns (problems, warnings); fills
+    `rec.input_info` per kept path and `rec.meta["input_check"]` per sample. With drop_empty, files that are
+    empty or have no reads are removed from the record (listed in the warnings and in meta) instead of being
+    problems; a truncated or unreadable file is always a problem."""
+    problems: list[str] = []
+    warnings: list[str] = []
+    for rec in records:
+        total_reads = total_bases = 0
+        exact = True
+        dropped: list[dict[str, object]] = []
+        for kind in ("hifi_reads", "fail_reads"):
+            kept: list[str] = []
+            for p in getattr(rec, kind):
+                info = bam.inspect(Path(p))
+                if info.problems:
+                    if drop_empty and all(pr.startswith(DROPPABLE) for pr in info.problems):
+                        dropped.append({"kind": kind, "path": p, "reason": info.problems[0]})
+                        warnings.append(f"{rec.sample_id}: dropped {kind} {Path(p).name}: {info.problems[0]}")
+                        continue
+                    problems.extend(f"{rec.sample_id}: {kind} {p}: {pr}" for pr in info.problems)
+                    kept.append(p)
+                    continue
+                kept.append(p)
+                rec.input_info[p] = info.to_dict()
+                warnings.extend(_file_findings(rec.sample_id, kind, info, thresholds))
+                if kind == "hifi_reads":
+                    total_reads += info.reads
+                    total_bases += info.bases
+                    exact = exact and info.reads_exact
+            setattr(rec, kind, kept)
+        if not rec.hifi_reads:
+            problems.append(f"{rec.sample_id}: no hifi_reads left after dropping empty files")
+            continue
+        floor = thresholds["sample_gbases_min"]
+        if floor and total_bases / 1e9 < floor and not any(pr.startswith(rec.sample_id + ":") for pr in problems):
+            cov = total_bases / 1e9 / bam.HUMAN_GENOME_GB
+            warnings.append(f"{rec.sample_id}: {bam.fmt_bases(total_bases)} of HiFi bases in {len(rec.hifi_reads)} "
+                            f"file(s), about {cov:.1f}x of GRCh38, below sample_gbases_min {floor:g}")
+        rec.meta["input_check"] = {
+            "checked_at": utc_now(), "hifi_files": len(rec.hifi_reads), "fail_files": len(rec.fail_reads),
+            "reads": total_reads, "gbases": round(total_bases / 1e9, 3),
+            "coverage": round(total_bases / 1e9 / bam.HUMAN_GENOME_GB, 2), "exact": exact,
+            "dropped": dropped,
+        }
+    return problems, warnings
+
+
+def add_samples(db: DB, events: Events, path: Path, check_paths: bool = True, replace: bool = False, *,
+                inspect: bool = True, thresholds: dict[str, object] | None = None, drop_empty: bool = False) -> int:
     records = parse_tsv(path)
-    for w in validate(records, db, check_paths):
+    for w in validate(records, db, check_paths, inspect=inspect, thresholds=thresholds, drop_empty=drop_empty):
         events.emit("sample.warning", level="warning", message=w)
     if not replace:
         dup = [r.sample_id for r in records if db.sample_exists(r.sample_id)]
@@ -98,9 +185,64 @@ def add_samples(db: DB, events: Events, path: Path, check_paths: bool = True, re
             raise UgcError("already registered (use --replace): " + ", ".join(dup))
     for rec in records:
         db.upsert_sample(rec, replace=replace)
+        check = rec.meta.get("input_check") or {}
+        for d in check.get("dropped", []):   # type: ignore[union-attr]
+            events.emit("sample.input_dropped", level="warning", sample_id=rec.sample_id, **d)   # type: ignore[arg-type]
         events.emit("sample.added", sample_id=rec.sample_id, hifi_reads=len(rec.hifi_reads),
-                    fail_reads=len(rec.fail_reads), replaced=replace)
+                    fail_reads=len(rec.fail_reads), replaced=replace,
+                    gbases=check.get("gbases"), reads=check.get("reads"))   # type: ignore[union-attr]
     return len(records)
+
+
+def check_samples(db: DB, ids: list[str], thresholds: dict[str, object] | None, *, stored: bool = False,
+                  update: bool = True) -> tuple[list[dict[str, object]], list[str], list[str]]:
+    """Inspect the registered read files of `ids` (all samples when empty) again, or show what registration
+    recorded (`stored`). Returns (one row per file, problems, warnings); with update the stored info is refreshed."""
+    thr = input_thresholds(thresholds)
+    rows: list[dict[str, object]] = []
+    problems: list[str] = []
+    warnings: list[str] = []
+    sample_ids = ids or db.list_sample_ids()
+    unknown = [sid for sid in sample_ids if not db.sample_exists(sid)]
+    if unknown:
+        raise UgcError("unknown sample(s): " + ", ".join(unknown))
+    for sid in sample_ids:
+        rec = db.get_sample(sid)
+        assert rec is not None
+        total_bases = 0
+        for kind in ("hifi_reads", "fail_reads"):
+            for p in getattr(rec, kind):
+                if stored:
+                    info_d = rec.input_info.get(p)
+                    if not info_d:
+                        rows.append({"sample_id": sid, "kind": kind, "file": Path(p).name, "status": "not inspected"})
+                        continue
+                    info = bam.BamInfo.from_dict(info_d)
+                else:
+                    info = bam.inspect(Path(p))
+                    if update and info.ok:
+                        db.update_input_info(sid, p, info.to_dict())
+                findings = [] if info.problems else _file_findings(sid, kind, info, thr)
+                if info.problems:
+                    problems.extend(f"{sid}: {kind} {p}: {pr}" for pr in info.problems)
+                    status = "problem: " + "; ".join(info.problems)
+                elif findings:
+                    warnings.extend(findings)
+                    status = "warning: " + "; ".join(f.split(": ", 2)[-1] for f in findings)
+                else:
+                    status = "ok"
+                if kind == "hifi_reads" and not info.problems:
+                    total_bases += info.bases
+                rows.append({"sample_id": sid, "kind": kind, "file": Path(p).name, "size": bam.fmt_bytes(info.bytes),
+                             "reads": f"{'' if info.reads_exact else '~'}{info.reads:,}" if info.reads else "",
+                             "bases": bam.fmt_bases(info.bases) if info.bases else "",
+                             "movie": ",".join(info.movies), "status": status})
+        floor = thr["sample_gbases_min"]
+        if not stored and floor and rec.hifi_reads and total_bases / 1e9 < floor \
+                and not any(pr.startswith(sid + ":") for pr in problems):
+            warnings.append(f"{sid}: {bam.fmt_bases(total_bases)} of HiFi bases, about "
+                            f"{total_bases / 1e9 / bam.HUMAN_GENOME_GB:.1f}x of GRCh38, below sample_gbases_min {floor:g}")
+    return rows, problems, warnings
 
 
 def remove_samples(db: DB, events: Events, ids: list[str], *, force: bool, results_dir: Path) -> list[dict[str, object]]:

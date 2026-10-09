@@ -29,7 +29,7 @@ wins. The kind decides whether the driver re-attempts on its own.
 |---|---|---|
 | `version` | class `version_mismatch` | Blocked until fixed. |
 | `transient` | class `driver_lost`, `Interrupted`, `Terminated`, `launch_error`, `killed`, `NoResult`; or `DUE TO PREEMPTION`, `NODE_FAIL`, `Socket timed out`, `Unable to contact slurm controller` in the task's SLURM log | Re-attempted automatically after the backoff, up to `auto_retry_max` times. |
-| `input` | class `InputError`, `DownloadFailed`; or a failed command whose logs say `No such file or directory`, `does not exist`, `Permission denied` | Blocked until the path is fixed and `ugc-wgw retry`. |
+| `input` | class `InputError` (also what the driver's own preflight of the raw read files reports: missing, empty, truncated or resized since registration, chapter 05), `DownloadFailed`; or a failed command whose logs say `No such file or directory`, `does not exist`, `Permission denied`, `EOF marker is absent`, `Invalid BGZF header` | Blocked until the file is fixed and `ugc-wgw retry`. |
 | `resource` | exit status 137 or 253; `oom_kill`, `OUT_OF_MEMORY`, `Out of memory`, `DUE TO TIME LIMIT`, `TIMEOUT` in the task's SLURM log or stderr; or `sbatch` refused the request (`Requested node configuration is not available`, `CPU count per node can not be satisfied`) | Blocked; cap or change the request (chapter 12), then `ugc-wgw retry`. |
 | `tool` | any other `CommandFailed`, `OutputError` or class | Blocked until `ugc-wgw retry`. |
 | `cancelled` | the driver stopped the run | Blocked until `ugc-wgw retry`. |
@@ -64,7 +64,7 @@ flowchart TD
   s -->|"resource, sbatch refused"| ref["the request exceeds a node: set TASK_CPU_MAX and TASK_MEMORY_MAX in site.cfg (chapter 12), retry"]
   s -->|"resource, memory"| oom["cohort task: raise its *_mem_gb in stage_inputs; other task: a policy row, retry"]
   s -->|"resource, time limit"| t["a policy row's time for that task, or TASK_TIME_MINUTES for all, retry"]
-  s -->|"input"| i["fix the path in the sample sheet or reference map; visible on compute nodes?; retry"]
+  s -->|"input"| i["preflight message: re-copy the file, ugc-wgw samples check; else fix the path in the sheet or reference map; visible on compute nodes?; retry"]
   s -->|"cancelled"| cx["you stopped it: ugc-wgw retry when ready"]
   s -->|"tool or unknown"| c{"what does the task's stderr say?"}
   c -->|"apptainer: unable to pull or open image"| sif["SIF missing from image_cache: check the name, repopulate"]
@@ -211,6 +211,21 @@ templates in `<prefix>/versions/<v>/inputs/<stage>.inputs.json`, and run it
 in a fresh directory with the same `--cfg`. The driver does not know about
 such runs; register the outcome by re-running the stage through `ugc-wgw` once
 the cause is fixed, which the call cache turns into a replay.
+
+## Invalid cross-device link
+
+`OSError: [Errno 18] Invalid cross-device link` in `miniwdl.stderr` means
+miniwdl tried to hardlink an output across file systems: results on one,
+the earlier run that the call cache replayed, or a reference file a
+workflow returned, on another. A venv with ugc-wgw-miniwdl 0.3.0 or later
+turns such a link into a symlink and logs `ugc-wgw cross-device output:
+symlinked instead of hardlinked`; the error itself can only appear with an
+older install or a venv without `ugc_wgw_miniwdl.pth` (the installer writes
+and verifies it). Fixes: install the current bundle; keep results, references
+and the call cache on one file system (the installer and `ugc-wgw init`
+warn when they are not); or give a project that must live elsewhere a copy
+of `miniwdl.cfg` with `[call_cache] get = false`. A symlinked result stays
+valid only while the tree it points into exists.
 
 ## Reconciliation surprises
 

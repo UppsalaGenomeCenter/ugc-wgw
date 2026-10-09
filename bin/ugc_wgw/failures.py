@@ -32,7 +32,8 @@ RESOURCE_TEXT = re.compile(r"oom_kill|OUT_OF_MEMORY|Out of memory|DUE TO TIME LI
                            r"|exceeds partition limit")
 TRANSIENT_TEXT = re.compile(r"DUE TO PREEMPTION|PREEMPTED|DUE TO NODE FAILURE|NODE_FAIL|Socket timed out"
                             r"|Unable to contact slurm controller|slurm_load_jobs error")
-INPUT_TEXT = re.compile(r"No such file or directory|does not exist|Permission denied")
+INPUT_TEXT = re.compile(r"No such file or directory|does not exist|Permission denied"
+                        r"|EOF marker is absent|Invalid BGZF header|Invalid BAM binary header|bgzf_read_block")
 
 
 @dataclass

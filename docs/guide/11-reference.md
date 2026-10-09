@@ -33,8 +33,24 @@ when stderr is a terminal and `NO_COLOR` is unset. The file log
 
 | Flag | Meaning |
 |---|---|
-| `--no-check` | Do not require read paths to exist. |
+| `--no-check` | Do not require read paths to exist (nothing is inspected). |
+| `--no-inspect` | Require the paths to exist but do not open the BAMs. |
+| `--drop-empty` | Register a sample without its empty or read-less BAMs instead of refusing the sheet; truncated files are always refused. |
 | `--replace` | Overwrite samples that are already registered. |
+
+Every BAM is otherwise opened: end-of-file marker, header, first records,
+yield estimate (chapter 05). Floors: `config.json` `input_thresholds`.
+
+### `ugc-wgw samples check [ID ...]`
+
+| Flag | Meaning |
+|---|---|
+| `--stored` | Show what registration recorded instead of reading the files. |
+| `--json`, `--tsv` | Output format. |
+
+One row per registered read file (sample, kind, file, size, reads, bases,
+movie, status); the files are read again and the record refreshed; warnings
+and problems on stderr; exit 1 when a file has a problem.
 
 ### `ugc-wgw samples remove <ID>...`
 
@@ -226,6 +242,7 @@ Python.
 | `progress_interval` | `300` | Seconds between progress summaries in the log while `submit` runs (also logged when the counts change); `0` disables. |
 | `stage_inputs` | `{}` | `{"<stage>": {"<input>": value}}`; `ugc_wgw_<stage>` also accepted and wins. `ugc-wgw stage-inputs` lists every input and checks these. |
 | `summary_thresholds` | `{}` | `ugc-wgw summary` QC thresholds, e.g. `{"depth_mean_min": 25}` (chapter 07). |
+| `input_thresholds` | `{}` | Floors of the input BAM check at `samples add` and `samples check`: `file_reads_min` (1000), `sample_gbases_min` (30); `0` disables one (chapter 05). |
 | `project_url` | the public repository | Repository link printed in the analysis summaries. |
 | `deepvariant` | `"cpu"` | `cpu`, `gpu` or `parabricks`: the small-variant caller of `singleton` and `upstream` (chapter 12). |
 | `gpu_type` | `""` | SLURM gres type behind `--gres gpu:<type>:N`; empty = `gpu:N`. |
@@ -311,9 +328,10 @@ States: `pending`, `submitted`, `running` (active); `success`, `failed`,
 `version_mismatch`, `NoResult`, `launch_error`, `killed`; miniwdl classes as
 reported in `error.json` (`CommandFailed` and others). Failure kinds:
 `transient`, `resource`, `input`, `tool`, `version`, `cancelled`, `unknown`
-(chapter 09). Events: `sample.added`, `sample.warning`, `sample.removed`,
-`cohort.frozen`, `submit.start`, `submit.stop`, `run.created`,
-`run.submitted`, `run.running`, `run.blocked`, `run.auto_retry`,
+(chapter 09). Events: `sample.added`, `sample.warning`,
+`sample.input_dropped`, `sample.removed`, `cohort.frozen`, `submit.start`,
+`submit.stop`, `run.created`, `run.preflight`, `run.submitted`,
+`run.running`, `run.blocked`, `run.auto_retry`,
 `run.terminating`, `run.success`, `run.failed`, `run.cancelled`,
 `run.reconciled`, `run.scancel`, `run.accounting`, `submit.progress`.
 miniwdl log lines the report reads: `runtime.cpu adjusted to host limit`

@@ -56,6 +56,9 @@ grep -q '^extra_args = "--qos short"$' "$install_dir/miniwdl.cfg"
 grep -q "^resources = $scratch/prefix/resources.tsv$" "$install_dir/miniwdl.cfg"
 [ -f "$scratch/prefix/resources.tsv" ] && grep -q '^task	cpu	memory	time	partition	constraint$' "$scratch/prefix/resources.tsv"
 echo "$report" | grep -q '^plugin=ugc-wgw-miniwdl '
+# the hardlink-else-symlink wrap is in place at interpreter start (ugc_wgw_miniwdl.pth), before any plugin loads
+ls "$install_dir"/venv/lib/python*/site-packages/ugc_wgw_miniwdl.pth >/dev/null
+"$install_dir/venv/bin/python" -c 'import sys, WDL._util as u; sys.exit(0 if getattr(u.symlink_force, "ugc_wgw_crossdev", False) else 1)'
 # the rendered cfg parses as miniwdl config and the plugin sees the policy path through it
 "$install_dir/venv/bin/python" - "$install_dir/miniwdl.cfg" "$scratch/prefix/resources.tsv" <<'PYEOF'
 import logging, sys

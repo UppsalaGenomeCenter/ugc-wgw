@@ -49,6 +49,14 @@ command -v "$python_exe" >/dev/null || { echo "python not found: $python_exe" >&
 
 log() { echo "[install-bundle] $*" >&2; }
 die() { echo "[install-bundle] error: $*" >&2; exit 1; }
+fs_id() { stat -c %d "$1" 2>/dev/null || echo "?"; }
+warn_fs() {  # $1 label, $2 path, $3 label, $4 path: warn when the two paths are on different file systems
+  local a b
+  a=$(fs_id "$2"); b=$(fs_id "$4")
+  if [ "$a" != "?" ] && [ "$b" != "?" ] && [ "$a" != "$b" ]; then
+    log "   warning: $1 ($2) and $3 ($4) are on different file systems; outputs that miniwdl would hardlink across them become symlinks (guide chapter 04)"
+  fi
+}
 
 mkdir -p "$prefix"
 prefix=$(cd "$prefix" && pwd)
@@ -190,6 +198,14 @@ log "2. venv from bundled wheels"
 make_venv "$dest/venv" "$dest/wheels"
 plugin=$(plugin_version "$dest/venv") || die "ugc_wgw_resources task plugin not registered in the venv (wheel ugc_wgw_miniwdl missing from the bundle?)"
 log "   $("$dest/venv/bin/miniwdl" --version | head -1); miniwdl-slurm $("$dest/venv/bin/python" -c 'import importlib.metadata as m; print(m.version("miniwdl-slurm"))'); ugc-wgw-miniwdl $plugin"
+# outputs on another file system (a cached run elsewhere, a passed-through input) are symlinked instead of
+# failing with "Invalid cross-device link": the plugin's crossdev module wraps miniwdl's link helper, and this
+# .pth imports it at interpreter start so a cached workflow's outputs (linked before any plugin loads) are covered
+site_packages=$("$dest/venv/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
+echo "import ugc_wgw_miniwdl.crossdev" > "$site_packages/ugc_wgw_miniwdl.pth"
+"$dest/venv/bin/python" -c 'import sys, WDL._util as u; sys.exit(0 if getattr(u.symlink_force, "ugc_wgw_crossdev", False) else 1)' \
+  || die "ugc_wgw_miniwdl.crossdev is not active in the venv (ugc_wgw_miniwdl.pth)"
+log "   outputs: hardlinked, symlinked across file systems (ugc_wgw_miniwdl.pth)"
 
 # ---- 3. miniwdl.cfg and the resource policy ---------------------------------
 log "3. miniwdl.cfg"
@@ -321,6 +337,8 @@ else
   log "   warning: $references not writable; copy code/references/{$extras_files} to $references/$extras_subdir/ yourself"
 fi
 # WDL read_map() rejects comment lines, so the template's comments are dropped at render time
+warn_fs "install prefix" "$prefix" "references" "$tree"
+warn_fs "install prefix" "$prefix" "call cache" "$CALL_CACHE_DIR"
 ref_map=$dest/references/ugc_wgw_ref_map.$ref_build.tsv
 sed -e '/^#/d' -e '/^$/d' -e "s|<local_path_prefix>|$references|g" "$dest/code/references/ugc_wgw_ref_map.$ref_build.template.tsv" > "$ref_map"
 if [ -f "$tree/manifest.json" ]; then

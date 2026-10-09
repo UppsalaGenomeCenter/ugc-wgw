@@ -33,7 +33,8 @@ the canonical provenance path of a subject and stage.
 ```
 ugc-wgw init <project_dir> --install <root>/current --ref-map F [--profile cpu|parabricks|FILE] [--deepvariant cpu|gpu|parabricks --gpu-type T]
 ugc-wgw init <project_dir> --code <repo> --miniwdl <exe> --cfg <miniwdl.cfg> ...     # dev machine, no install prefix
-ugc-wgw samples add <samples.tsv> [--no-check] [--replace]
+ugc-wgw samples add <samples.tsv> [--no-check | --no-inspect] [--drop-empty] [--replace]
+ugc-wgw samples check [<id>...] [--stored] [--json | --tsv]   # size, reads, bases, movie, problems per read file
 ugc-wgw samples remove <id>... [--force]                # refused for cohort members; --force deletes run rows too
 ugc-wgw samples list [--mode M] [--stage S] [--status failed,running] [--json]
 ugc-wgw cohort freeze <cohort_id> --samples <ids.txt>
@@ -67,7 +68,12 @@ Header row required. Columns: `sample_id` (`[A-Za-z0-9._-]+`, becomes a director
 name), `sex` (`MALE`, `FEMALE` or blank; advisory, upstream infers the sex),
 `hifi_reads` (one or more uBAM paths, comma-separated), `fail_reads` (optional,
 same form), `father_id`, `mother_id` (optional). Extra columns are kept as metadata.
-Paths must exist unless `--no-check`.
+Paths must exist unless `--no-check`, and every BAM is opened (`ugc_wgw/bam.py`,
+stdlib only): an empty, truncated or read-less file is refused (`--drop-empty`
+drops the empty ones), the read count and bases are estimated from the first
+records and stored, and `input_thresholds` floors warn about thin files and
+samples. `submit` repeats the cheap part (present, same size, BGZF end marker)
+before a run starts and fails the attempt as `InputError` when it does not hold.
 
 ## Modes and gating
 
@@ -100,7 +106,7 @@ failed task's `slurm_singularity.log.txt` and `stderr.txt`
 |---|---|---|
 | `transient` | `driver_lost`, `Interrupted`, `Terminated`, `launch_error`, `killed`, `NoResult`; SLURM preemption / node-failure text | automatic re-attempt after backoff |
 | `resource` | exit status 137 or 253; `oom_kill`, `OUT_OF_MEMORY`, `DUE TO TIME LIMIT`, `TIMEOUT`, or an sbatch refusal (`Requested node configuration is not available`, `CPU count per node can not be satisfied`) in the task's logs | blocked until `ugc-wgw retry` (cap or change the request first: site limits, a policy row, or `stage_inputs`) |
-| `input` | `InputError`, `DownloadFailed`; `No such file`, `does not exist`, `Permission denied` from a failed command | blocked until the input is fixed and `ugc-wgw retry` |
+| `input` | `InputError` (miniwdl's, or the driver's preflight of the raw read files), `DownloadFailed`; `No such file`, `does not exist`, `Permission denied`, `EOF marker is absent`, `Invalid BGZF header` from a failed command | blocked until the input is fixed and `ugc-wgw retry` |
 | `tool` | any other `CommandFailed` / `OutputError` / class | blocked until `ugc-wgw retry` |
 | `version` | `version_mismatch` | blocked; fix the project's install or override |
 | `cancelled` | the run was stopped by the driver | blocked until `ugc-wgw retry` |

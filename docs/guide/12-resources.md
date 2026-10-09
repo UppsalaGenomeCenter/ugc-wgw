@@ -166,7 +166,11 @@ and `upstream`: `deepvariant_call_variants_gpu` (the `call_variants` step
 on one GPU, 8 cores, 44 GiB; `make_examples` and `postprocess_variants`
 stay on CPUs) and `run_parabricks_deepvariant` (NVIDIA Parabricks doing
 all three steps on four GPUs, 48 cores, 192 GiB; needs 16 GB or more per
-GPU). Which of them runs is one project switch, not a stage input:
+GPU). The 192 GiB are a floor: Parabricks' host memory grows with the
+depth and the streams it opens per GPU, 126 GB at 19–25x and more than
+192 GB on deeper samples, where it exits 255 with `cudaErrorMemoryAllocation`
+in `stdout.txt` and no SLURM `OUT_OF_MEMORY` state; the worked policy below
+gives it 256G. Which of them runs is one project switch, not a stage input:
 
 ```bash
 ugc-wgw init ... --deepvariant gpu --gpu-type a100          # or: parabricks [--parabricks-gpus 4]

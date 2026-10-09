@@ -28,6 +28,8 @@ paraphase	-	-	2:00:00	-	-
 ugc_wgw_hifiasm_assemble	-	-	12:00:00	-	-
 ugc_wgw_yak_count	-	-	4:00:00	-	-
 ugc_wgw_minimap2_align_asm	-	64G	2:00:00	-	-
-# GPU: Parabricks with 4 GPUs is one job per GPU node; on the 6-GPU node a 3-GPU, 32-core,
-# 160 GB shape (parabricks_gpus 3 in config.json plus this row) runs two at once
-#run_parabricks_deepvariant	32	160G	2:00:00	-	-
+# GPU: Parabricks with 4 GPUs is one job per GPU node. Its host memory grows with the depth: the
+# declared 192 GB held 126 GB at 19-25x and failed at higher depth (a pinned CUDA allocation that
+# does not fit exits 255, no OOM state), so ask for 256G. A 3-GPU, 32-core shape would run two at
+# once on the 6-GPU node but has no memory to spare at depth; keep the 4-GPU row.
+run_parabricks_deepvariant	-	256G	4:00:00	-	-

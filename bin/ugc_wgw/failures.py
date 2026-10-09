@@ -26,6 +26,9 @@ COMMAND_CLASSES = frozenset({"CommandFailed", "OutputError"})
 RESOURCE_EXIT = frozenset({137, 253})  # 137 = killed by SIGKILL (cgroup OOM), 253 = sbatch --wait out-of-memory
 
 RESOURCE_TEXT = re.compile(r"oom_kill|OUT_OF_MEMORY|Out of memory|DUE TO TIME LIMIT|TIMEOUT|DUE TO MEMORY"
+                           # a CUDA pinned-memory allocation that does not fit the job's memory fails cleanly (no OOM
+                           # kill, no SLURM state): Parabricks then exits 255 with the line in its stdout
+                           r"|cudaErrorMemoryAllocation|CUDA_ERROR_OUT_OF_MEMORY|cudaErrorHostMemoryAlreadyRegistered"
                            # sbatch refused the request outright (node shape, partition limits): docs/guide/12-resources.md
                            r"|Requested node configuration is not available|CPU count per node can not be satisfied"
                            r"|Memory specification can not be satisfied|Requested time limit is invalid"
@@ -57,13 +60,14 @@ def _tail_lines(path: Path) -> list[str]:
 
 
 def evidence_lines(task_dir: str | None, attempt_path: Path) -> list[tuple[str, str]]:
-    """(source file, line) pairs to scan: the failed task's SLURM log and stderr, else miniwdl's stderr."""
+    """(source file, line) pairs to scan: the failed task's SLURM log, stderr and stdout (some tools, Parabricks
+    among them, log to stdout and leave stderr empty), else miniwdl's stderr."""
     out: list[tuple[str, str]] = []
     if task_dir:
         d = Path(task_dir)
         if not d.is_absolute():
             d = attempt_path / d
-        for name in (slurm.LOG_NAME, "stderr.txt"):
+        for name in (slurm.LOG_NAME, "stderr.txt", "stdout.txt"):
             p = d / name
             if p.exists():
                 out.extend((str(p), line) for line in _tail_lines(p))

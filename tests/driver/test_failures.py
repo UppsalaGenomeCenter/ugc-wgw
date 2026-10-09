@@ -57,6 +57,28 @@ class ClassifyTest(unittest.TestCase):
         c = failures.classify(self.result("CommandFailed", exit_status=1), self.attempt)
         self.assertEqual(c.kind, "transient")
 
+    def test_cuda_allocation_in_stdout_is_a_resource_failure(self):
+        """Parabricks logs to stdout, leaves stderr empty and exits 255 when a pinned allocation fails."""
+        (self.task / "slurm_singularity.log.txt").write_text("14353515\n")
+        (self.task / "stderr.txt").write_text("")
+        (self.task / "stdout.txt").write_text(
+            "[Parabricks Options Mesg]: Setting --num-streams-per-gpu based on available device memory.\n"
+            "[PB Error 2026-Oct-09 16:20:11][src/deepvariant.cu:412] cudaErrorMemoryAllocation: out of memory\n"
+            "Process exited with failure. Please check the logs.\nCould not run deepvariant\nExiting pbrun ...\n")
+        c = failures.classify(self.result("CommandFailed", exit_status=255), self.attempt)
+        self.assertEqual(c.kind, "resource")
+        self.assertTrue(str(c.evidence["source"]).endswith("stdout.txt"))
+        self.assertIn("cudaErrorMemoryAllocation", c.message)
+        # stderr is scanned before stdout, and the SLURM log before both
+        (self.task / "stderr.txt").write_text("samtools: /data/x.bam: No such file or directory\n")
+        c = failures.classify(self.result("CommandFailed", exit_status=1), self.attempt)
+        self.assertEqual(c.kind, "resource")              # the first resource match wins over the input text
+        self.assertTrue(str(c.evidence["source"]).endswith("stdout.txt"))
+        (self.task / "stdout.txt").write_text("all fine\n")
+        c = failures.classify(self.result("CommandFailed", exit_status=1), self.attempt)
+        self.assertEqual(c.kind, "input")
+        self.assertTrue(str(c.evidence["source"]).endswith("stderr.txt"))
+
     def test_input_from_stderr_tail(self):
         (self.task / "stderr.txt").write_text("samtools: /data/x.bam: No such file or directory\n")
         c = failures.classify(self.result("CommandFailed", exit_status=1), self.attempt)

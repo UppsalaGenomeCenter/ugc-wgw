@@ -3,6 +3,22 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.8.2
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.3.0,
+unchanged since 0.8.0.
+
+- Failure classification reads the failed task's `stdout.txt` as well
+  (after the SLURM log and `stderr.txt`) and counts a CUDA host-memory
+  failure (`cudaErrorMemoryAllocation`, `CUDA_ERROR_OUT_OF_MEMORY`) as kind
+  `resource`: Parabricks logs to stdout, leaves stderr empty and exits 255
+  without a SLURM out-of-memory state when a pinned allocation does not
+  fit.
+- The worked resource policy gives `run_parabricks_deepvariant` 256G: the
+  declared 192 GiB held at 19–25x and failed on deeper samples. Chapters 09
+  and 12 explain where Parabricks' log is and why SLURM shows nothing.
+
 ## 0.8.1
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

@@ -106,7 +106,7 @@ failed task's `slurm_singularity.log.txt` and `stderr.txt`
 | Kind | Rule | Driver's reaction |
 |---|---|---|
 | `transient` | `driver_lost`, `Interrupted`, `Terminated`, `launch_error`, `killed`, `NoResult`; SLURM preemption / node-failure text | automatic re-attempt after backoff |
-| `resource` | exit status 137 or 253; `oom_kill`, `OUT_OF_MEMORY`, `DUE TO TIME LIMIT`, `TIMEOUT`, or an sbatch refusal (`Requested node configuration is not available`, `CPU count per node can not be satisfied`) in the task's logs | blocked until `ugc-wgw retry` (cap or change the request first: site limits, a policy row, or `stage_inputs`) |
+| `resource` | exit status 137 or 253; `oom_kill`, `OUT_OF_MEMORY`, `DUE TO TIME LIMIT`, `TIMEOUT`, `cudaErrorMemoryAllocation`, or an sbatch refusal (`Requested node configuration is not available`, `CPU count per node can not be satisfied`) in the task's SLURM log, stderr or stdout | blocked until `ugc-wgw retry` (cap or change the request first: site limits, a policy row, or `stage_inputs`) |
 | `input` | `InputError` (miniwdl's, or the driver's preflight of the raw read files), `DownloadFailed`; `No such file`, `does not exist`, `Permission denied`, `EOF marker is absent`, `Invalid BGZF header` from a failed command | blocked until the input is fixed and `ugc-wgw retry` |
 | `tool` | any other `CommandFailed` / `OutputError` / class | blocked until `ugc-wgw retry` |
 | `version` | `version_mismatch` | blocked; fix the project's install or override |

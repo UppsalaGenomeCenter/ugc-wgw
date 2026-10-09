@@ -13,7 +13,11 @@
 4. The failed task's work directory, `current/call-<task>/` (or
    `call-<workflow>/call-<task>/` for a task inside a subworkflow): `stderr.txt`
    and `stdout.txt` are the tool's own output; `command` is the script that
-   ran. Failed runs keep their work directories; successful ones are reclaimed.
+   ran. Parabricks writes its whole log to `stdout.txt` and leaves
+   `stderr.txt` empty; a host-memory failure there (`cudaErrorMemoryAllocation`)
+   ends as `pbrun` exit 255 with no `OUT_OF_MEMORY` state in SLURM, because a
+   pinned allocation that does not fit fails instead of being killed. Failed
+   runs keep their work directories; successful ones are reclaimed.
 5. The task's `slurm_singularity.log.txt`: the job id on the first line and
    slurmd's messages (`DUE TO TIME LIMIT`, `oom_kill`) below it; the ids are
    also in the manifest's `slurm_job_ids`. `sacct -j <id>` shows
@@ -30,7 +34,7 @@ wins. The kind decides whether the driver re-attempts on its own.
 | `version` | class `version_mismatch` | Blocked until fixed. |
 | `transient` | class `driver_lost`, `Interrupted`, `Terminated`, `launch_error`, `killed`, `NoResult`; or `DUE TO PREEMPTION`, `NODE_FAIL`, `Socket timed out`, `Unable to contact slurm controller` in the task's SLURM log | Re-attempted automatically after the backoff, up to `auto_retry_max` times. |
 | `input` | class `InputError` (also what the driver's own preflight of the raw read files reports: missing, empty, truncated or resized since registration, chapter 05), `DownloadFailed`; or a failed command whose logs say `No such file or directory`, `does not exist`, `Permission denied`, `EOF marker is absent`, `Invalid BGZF header` | Blocked until the file is fixed and `ugc-wgw retry`. |
-| `resource` | exit status 137 or 253; `oom_kill`, `OUT_OF_MEMORY`, `Out of memory`, `DUE TO TIME LIMIT`, `TIMEOUT` in the task's SLURM log or stderr; or `sbatch` refused the request (`Requested node configuration is not available`, `CPU count per node can not be satisfied`) | Blocked; cap or change the request (chapter 12), then `ugc-wgw retry`. |
+| `resource` | exit status 137 or 253; `oom_kill`, `OUT_OF_MEMORY`, `Out of memory`, `DUE TO TIME LIMIT`, `TIMEOUT`, or a CUDA host-memory failure (`cudaErrorMemoryAllocation`, `CUDA_ERROR_OUT_OF_MEMORY`) in the task's SLURM log, stderr or stdout; or `sbatch` refused the request (`Requested node configuration is not available`, `CPU count per node can not be satisfied`) | Blocked; cap or change the request (chapter 12), then `ugc-wgw retry`. |
 | `tool` | any other `CommandFailed`, `OutputError` or class | Blocked until `ugc-wgw retry`. |
 | `cancelled` | the driver stopped the run | Blocked until `ugc-wgw retry`. |
 | `unknown` | no error class | Blocked until `ugc-wgw retry`. |
@@ -62,7 +66,7 @@ flowchart TD
   s -->|"transient"| r["nothing to do: the driver re-attempts after the backoff; ugc-wgw retry to skip the wait"]
   s -->|"version"| v["remove the ugc_wgw_version override or re-init the project, retry"]
   s -->|"resource, sbatch refused"| ref["the request exceeds a node: set TASK_CPU_MAX and TASK_MEMORY_MAX in site.cfg (chapter 12), retry"]
-  s -->|"resource, memory"| oom["cohort task: raise its *_mem_gb in stage_inputs; other task: a policy row, retry"]
+  s -->|"resource, memory"| oom["cohort task: raise its *_mem_gb in stage_inputs; other task (Parabricks at depth: 256G): a policy row, retry"]
   s -->|"resource, time limit"| t["a policy row's time for that task, or TASK_TIME_MINUTES for all, retry"]
   s -->|"input"| i["preflight message: re-copy the file, ugc-wgw samples check; else fix the path in the sheet or reference map; visible on compute nodes?; retry"]
   s -->|"cancelled"| cx["you stopped it: ugc-wgw retry when ready"]

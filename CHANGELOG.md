@@ -3,6 +3,25 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.9.0
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.4.0.
+
+- Node-local scratch for tasks. The plugin registers a container backend,
+  `ugc_slurm_singularity`, which the rendered `miniwdl.cfg` selects: it is
+  miniwdl-slurm's `slurm_singularity`, and when the new site key
+  `TASK_SCRATCH_ENV` names the node's per-job scratch variable (`TMPDIR`,
+  `SNIC_TMP`) it binds that directory at `/mnt/scratch` inside every task's
+  container and sets `TMPDIR` to it, so pbmm2's sort spill files, GLnexus's
+  database and other TMPDIR-aware temporaries leave the shared file system.
+  A job whose variable is unset, unwritable or tmpfs runs as before, and
+  one `[ugc-wgw] scratch:` line in the job's `slurm-<jobid>.out` says which.
+  The installer validates the key and prints the setting; `ugc-wgw
+  resources` shows `scratch=` in its summary line. Until now `TMPDIR` was
+  never set inside a container, so GLnexus's database had always been on
+  the shared work directory; the guide is corrected.
+
 ## 0.8.2
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

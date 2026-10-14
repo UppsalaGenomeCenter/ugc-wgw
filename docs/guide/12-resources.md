@@ -253,6 +253,12 @@ Adjust the limits to your queue and coverage; after the first cohort,
 
 ## Checking what will be asked
 
+The summary line of `ugc-wgw resources` ends with `scratch=TMPDIR` or
+`scratch=off`: whether tasks get the node's local disk for their
+temporaries (chapter 04, "Node-local scratch"). With it off, pbmm2's sort
+spill files, GLnexus's database and every other temporary are written to
+the shared file system next to the outputs.
+
 ```bash
 ugc-wgw resources                      # every task: declared, caps, rows, result
 ugc-wgw resources --changed            # only the tasks a cap or a row changes

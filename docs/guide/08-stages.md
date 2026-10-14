@@ -142,7 +142,9 @@ and each GLnexus shard reads only its slices.
 | `cohort_id`, `sample_ids`, `gvcfs`, `gvcf_indices`; with `run_sawfish_joint_call`: `discover_tars`, `aligned_bams`, `aligned_bam_indices` | `split_keep_homref` (true), `run_sawfish_joint_call` (false), `glnexus_threads` (32), `glnexus_mem_gb` (32 + 0.1 N), `split_mem_gb` (8 + 0.02 N), `scatter_regions_file` |
 
 Resources per shard: GLnexus `glnexus_threads` CPUs and `glnexus_mem_gb` GB,
-which is also its `--mem-gbytes` budget; the database lives on `$TMPDIR`.
+which is also its `--mem-gbytes` budget; the database lives on the node's
+local scratch when the site set `TASK_SCRATCH_ENV` (chapter 04), else in
+the task's work directory.
 The split runs one bgzip writer per sample. Outputs: cohort VCF, per-sample
 split VCFs in cohort order, optional joint SV set (chapter 07).
 

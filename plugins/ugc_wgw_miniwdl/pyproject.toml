@@ -1,4 +1,5 @@
-# ugc-wgw-miniwdl: the miniwdl task plugin that applies the site's per-task resource policy.
+# ugc-wgw-miniwdl: the miniwdl task plugin that applies the site's per-task resource policy, and the
+# container backend that gives tasks the node's local scratch.
 # Built into a wheel by scripts/make-bundle.sh (dev machine, network for setuptools) and
 # installed into the bundle's venv by scripts/install-bundle.sh (offline). Bump `version`
 # whenever the plugin's code changes; the bundle version is separate.
@@ -8,8 +9,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ugc-wgw-miniwdl"
-version = "0.3.0"
-description = "miniwdl task plugin: per-task CPU, memory, wall time, partition and constraint from a site policy file"
+version = "0.4.0"
+description = "miniwdl plugins: per-task resources from a site policy file; a SLURM backend with node-local scratch"
 requires-python = ">=3.9"
 dependencies = []
 license = {text = "MIT"}
@@ -17,5 +18,11 @@ license = {text = "MIT"}
 [project.entry-points."miniwdl.plugin.task"]
 ugc_wgw_resources = "ugc_wgw_miniwdl.resources:task"
 
+[project.entry-points."miniwdl.plugin.container_backend"]
+ugc_slurm_singularity = "ugc_wgw_miniwdl.scratch:SlurmSingularityScratch"
+
 [tool.setuptools.packages.find]
 include = ["ugc_wgw_miniwdl*"]
+
+[tool.setuptools.package-data]
+ugc_wgw_miniwdl = ["scripts/*.sh"]

@@ -85,6 +85,8 @@ class EngineCfg:
     defaults: dict[str, Any] = field(default_factory=dict)
     backend: str = ""               # [scheduler] container_backend
     run_options: list[str] = field(default_factory=list)   # [singularity] run_options (--nv for the GPU tasks)
+    scratch_env: str = ""           # [ugc_wgw] scratch_env: job variable naming the node-local scratch (empty = off)
+    scratch_mount: str = "/mnt/scratch"   # [ugc_wgw] scratch_mount: where it is bound inside the container
 
 
 def _strip(value: str) -> str:
@@ -127,6 +129,10 @@ def read_engine_cfg(path: Path) -> EngineCfg:
             eng.defaults = {}
     if cp.has_option("ugc_wgw", "resources"):
         eng.policy_path = _strip(cp.get("ugc_wgw", "resources"))
+    if cp.has_option("ugc_wgw", "scratch_env"):
+        eng.scratch_env = _strip(cp.get("ugc_wgw", "scratch_env"))
+    if cp.has_option("ugc_wgw", "scratch_mount"):
+        eng.scratch_mount = _strip(cp.get("ugc_wgw", "scratch_mount")) or "/mnt/scratch"
     if cp.has_option("slurm", "extra_args"):
         eng.extra_args = _strip(cp.get("slurm", "extra_args"))
     if cp.has_option("scheduler", "container_backend"):
@@ -243,7 +249,10 @@ class Resources:
         gpu = f" deepvariant={self.gpu.deepvariant}"
         if self.gpu.deepvariant != "cpu":
             gpu += f" gpu_type={self.gpu.gpu_type or '-'}"
-        return f"resources: cpu_max={cpu} memory_max={mem} policy={pol}{gpu}"
+        scratch = ""
+        if self.engine.path.exists():
+            scratch = f" scratch={self.engine.scratch_env or 'off'}"
+        return f"resources: cpu_max={cpu} memory_max={mem} policy={pol}{gpu}{scratch}"
 
     def rows(self, *, stage: str | None = None, changed: bool = False) -> list[Effective]:
         out = []

@@ -25,3 +25,9 @@ TASK_CPU_MAX=0
 TASK_MEMORY_MAX=0
 # the per-task resource policy (created from backends/hpc/resources.tsv.example when absent)
 TASK_RESOURCES=<prefix>/resources.tsv
+# node-local scratch: the job environment variable that names the per-job directory on the compute
+# nodes (TMPDIR, SNIC_TMP). Every task's container gets it bound at /mnt/scratch with TMPDIR pointing
+# there, so pbmm2's sort, GLnexus's database and other TMPDIR-aware temporaries leave the shared file
+# system; the scheduler removes the directory with the job. Empty = off (temporaries in the work dir).
+# Only name a variable whose directory is a local disk, not tmpfs (the task falls back when it is).
+TASK_SCRATCH_ENV=

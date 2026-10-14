@@ -274,7 +274,8 @@ token of a line is read; order is significant. Example: `examples/cohort.txt`.
 `SLURM_PARTITION_GPU`, `SLURM_ACCOUNT_GPU`, `SINGULARITY_NV` (0),
 `TASK_CPU_MAX` (0), `TASK_MEMORY_MAX` (0), `TASK_RESOURCES`
 (`<prefix>/resources.tsv`), `TASK_CONCURRENCY` (50), `TASK_TIME_MINUTES`
-(4320), `CALL_CACHE_DIR` (`<prefix>/call_cache`). Example:
+(4320), `CALL_CACHE_DIR` (`<prefix>/call_cache`), `TASK_SCRATCH_ENV` (empty;
+the node's per-job scratch variable, `TMPDIR` or `SNIC_TMP`). Example:
 `examples/site.cfg`; details in chapter 04.
 
 ## Resource policy
@@ -310,8 +311,10 @@ Chapter 12.
 `maxRetries`, `slurm_partition`, `slurm_account`, `slurm_partition_gpu`,
 `slurm_account_gpu`; one JSON line); `[slurm] extra_args`;
 `[singularity] run_options` (`--nv` for the GPU tasks, from
-`SINGULARITY_NV`); `[call_cache] dir`; `[ugc_wgw] resources`. Everything else
-is required as rendered (chapter 04).
+`SINGULARITY_NV`); `[call_cache] dir`; `[ugc_wgw] resources`,
+`scratch_env` (from `TASK_SCRATCH_ENV`) and `scratch_mount`. Everything
+else, `[scheduler] container_backend = ugc_slurm_singularity` included, is
+required as rendered (chapter 04).
 
 ## Attempt directory
 
@@ -355,6 +358,8 @@ miniwdl log lines the report reads: `runtime.cpu adjusted to host limit`
 `python3` 3.9 or newer on `PATH` for the driver (`bin/ugc-wgw` uses
 `/usr/bin/env python3`); `apptainer` on `PATH`; SLURM `sbatch` (and `scancel`,
 optional) on the host running the driver; the results root, `<prefix>` and the
-reference directory readable from compute nodes; `$TMPDIR` on compute nodes
-large enough for GLnexus; one driver per project, whose `.ugc-wgw/state.sqlite`
-is not on plain NFS.
+reference directory readable from compute nodes; one driver per project,
+whose `.ugc-wgw/state.sqlite` is not on plain NFS. Recommended: a local disk
+on the compute nodes with a per-job directory (`TASK_SCRATCH_ENV`), large
+enough for pbmm2's sort spill (the aligned BAM's size) and GLnexus's
+database.

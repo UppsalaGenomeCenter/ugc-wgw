@@ -19,6 +19,7 @@ Layout:
 |---|---|
 | `ugc_wgw_miniwdl/policy.py` | The TSV format: parsing, units, matching, application. Stdlib only; the driver imports it too (`ugc-wgw resources`). |
 | `ugc_wgw_miniwdl/resources.py` | The coroutine miniwdl calls per task (`miniwdl.plugin.task` entry point `ugc_wgw_resources`). |
+| `ugc_wgw_miniwdl/scratch.py`, `ugc_wgw_miniwdl/scripts/exec_scratch.sh` | The `ugc_slurm_singularity` container backend (`miniwdl.plugin.container_backend`): miniwdl-slurm's `slurm_singularity` with the job's node-local scratch bound into every task's container and `TMPDIR` pointing at it, when `[ugc_wgw] scratch_env` names the job variable. |
 | `ugc_wgw_miniwdl/crossdev.py` | Hardlink, else symlink: wraps miniwdl's `symlink_force` so an output on another file system becomes a symlink instead of `Invalid cross-device link`. Imported by `resources.py` and by the `ugc_wgw_miniwdl.pth` the installer writes into the venv. |
 | `pyproject.toml` | Package metadata and the entry point. |
 
@@ -53,3 +54,26 @@ makes anyway when hardlinks are off. The installer writes
 `ugc_wgw_miniwdl.pth` into the venv so the wrap is in place before a
 cached workflow's outputs are linked, which happens before any plugin
 loads.
+
+## Node-local scratch
+
+Apptainer's `--containall` clears the environment, so inside a task's
+container `TMPDIR` and `SLURM_JOB_ID` are unset, and miniwdl binds the
+container's `/tmp` to a directory under the task's run directory, on the
+shared file system; miniwdl-slurm passes the container command to `sbatch`
+as literal script arguments, so a `$TMPDIR` in `run_options` is never
+expanded. Only a script running on the node can find the job's scratch
+directory. `scratch.py` registers `ugc_slurm_singularity`, miniwdl-slurm's
+backend with one override: when `[ugc_wgw] scratch_env` names a job
+variable (`TMPDIR`, `SNIC_TMP`), the trailing `exec_script.sh` of the
+`sbatch` arguments becomes `scripts/exec_scratch.sh <var> <mount> --`.
+On the node that script inserts `--bind <dir>:<mount> --env TMPDIR=<mount>`
+after the `exec` subcommand when the variable names a writable directory
+that is not tmpfs, prints one `[ugc-wgw] scratch:` line to stderr (the
+job's `slurm-<id>.out` in the task directory) and execs the command. pbmm2's
+sort spill files, GLnexus's database (our override) and other
+TMPDIR-aware temporaries then stay on the node's disk, which the scheduler
+removes with the job. With `scratch_env` empty the backend is byte for byte
+`slurm_singularity`. The log file the driver reads keeps its name
+(`cli_name` is inherited).
+

@@ -39,7 +39,7 @@ if scripts/install-bundle.sh --bundle "$tarball" --prefix "$scratch/prefix-bad" 
   echo "installer accepted --partition in SLURM_EXTRA_ARGS next to SLURM_PARTITION" >&2; exit 1
 fi
 [ ! -d "$scratch/prefix-bad/versions" ]
-printf 'SLURM_PARTITION=core\nSLURM_ACCOUNT=acc-1\nSLURM_EXTRA_ARGS=--qos short\nTASK_CPU_MAX=48\nTASK_MEMORY_MAX=360G\nTASK_RESOURCES=<prefix>/resources.tsv\nSLURM_PARTITION_GPU=gpu\nSINGULARITY_NV=1\n' > "$scratch/site.cfg"
+printf 'SLURM_PARTITION=core\nSLURM_ACCOUNT=acc-1\nSLURM_EXTRA_ARGS=--qos short\nTASK_CPU_MAX=48\nTASK_MEMORY_MAX=360G\nTASK_RESOURCES=<prefix>/resources.tsv\nSLURM_PARTITION_GPU=gpu\nSINGULARITY_NV=1\nTASK_SCRATCH_ENV=TMPDIR\n' > "$scratch/site.cfg"
 report=$(scripts/install-bundle.sh --bundle "$tarball" --prefix "$scratch/prefix" --site "$scratch/site.cfg" --activate)
 install_dir=$(echo "$report" | sed -n 's/^install_dir=//p')
 [ -x "$install_dir/venv/bin/miniwdl" ]
@@ -54,8 +54,42 @@ grep -q '^defaults = {"docker": "ubuntu:20.04", "maxRetries": 1, "time_minutes":
 grep -q '^run_options = \["--containall", "--no-mount", "hostfs", "--nv"\]$' "$install_dir/miniwdl.cfg"
 grep -q '^extra_args = "--qos short"$' "$install_dir/miniwdl.cfg"
 grep -q "^resources = $scratch/prefix/resources.tsv$" "$install_dir/miniwdl.cfg"
+grep -q '^container_backend = ugc_slurm_singularity$' "$install_dir/miniwdl.cfg"
+grep -q '^scratch_env = TMPDIR$' "$install_dir/miniwdl.cfg"
+grep -q '^scratch_mount = /mnt/scratch$' "$install_dir/miniwdl.cfg"
 [ -f "$scratch/prefix/resources.tsv" ] && grep -q '^task	cpu	memory	time	partition	constraint$' "$scratch/prefix/resources.tsv"
 echo "$report" | grep -q '^plugin=ugc-wgw-miniwdl '
+# an invalid scratch variable name is refused before anything is installed
+# shellcheck disable=SC2016  # a literal dollar on purpose: variable names are not expanded by the installer
+echo 'TASK_SCRATCH_ENV=$TMPDIR' > "$scratch/bad-scratch.cfg"
+if scripts/install-bundle.sh --bundle "$tarball" --prefix "$scratch/prefix-bad2" --site "$scratch/bad-scratch.cfg" >/dev/null 2>&1; then
+  echo "installer accepted TASK_SCRATCH_ENV=\$TMPDIR" >&2; exit 1
+fi
+[ ! -d "$scratch/prefix-bad2/versions" ]
+# the node-local scratch backend: registered, selected by the rendered cfg, its exec script shipped in the wheel and
+# working: a fake apptainer shows the bind and TMPDIR inserted after `exec`
+"$install_dir/venv/bin/python" - "$install_dir/miniwdl.cfg" "$scratch" <<'PYEOF'
+import logging, os, pathlib, stat, subprocess, sys
+from WDL.runtime.config import Loader
+from WDL.runtime import task_container
+from ugc_wgw_miniwdl import scratch
+cfg = Loader(logging.getLogger("bundle-test"), filenames=[sys.argv[1]])
+assert cfg["scheduler"]["container_backend"] == "ugc_slurm_singularity"
+host = pathlib.Path(sys.argv[2]) / "backend-host"; host.mkdir()
+backend = task_container.new(cfg, logging.getLogger("bundle-test"), "call-x-1", str(host))
+assert type(backend).__name__ == "SlurmSingularityScratch", type(backend)
+args = backend._slurm_invocation()
+assert args[-4:] == [scratch.EXEC_SCRIPT, "TMPDIR", "/mnt/scratch", "--"], args[-4:]
+assert os.path.isfile(scratch.EXEC_SCRIPT) and "site-packages" in scratch.EXEC_SCRIPT, scratch.EXEC_SCRIPT
+fake = pathlib.Path(sys.argv[2]) / "fake-apptainer"
+fake.write_text('#!/usr/bin/env bash\nfor a in "$@"; do printf "%s\\n" "$a"; done\n'); fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+job_scratch = pathlib.Path(sys.argv[2]) / "job-scratch"; job_scratch.mkdir()
+res = subprocess.run(["bash", scratch.EXEC_SCRIPT, "TMPDIR", "/mnt/scratch", "--", str(fake), "exec", "--pwd", "/w", "img", "cmd"],
+                     env={"PATH": os.environ["PATH"], "TMPDIR": str(job_scratch)}, capture_output=True, text=True)
+assert res.returncode == 0, res.stderr
+assert res.stdout.splitlines()[:5] == ["exec", "--bind", f"{job_scratch}:/mnt/scratch", "--env", "TMPDIR=/mnt/scratch"], res.stdout   # the fake prints its arguments
+assert "scratch:" in res.stderr, res.stderr
+PYEOF
 # the hardlink-else-symlink wrap is in place at interpreter start (ugc_wgw_miniwdl.pth), before any plugin loads
 ls "$install_dir"/venv/lib/python*/site-packages/ugc_wgw_miniwdl.pth >/dev/null
 "$install_dir/venv/bin/python" -c 'import sys, WDL._util as u; sys.exit(0 if getattr(u.symlink_force, "ugc_wgw_crossdev", False) else 1)'

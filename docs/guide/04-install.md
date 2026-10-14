@@ -26,8 +26,10 @@ shared by all versions.
 - A writable `<prefix>` on a filesystem that compute nodes can read.
 - SLURM: a partition and account for the tasks. Jobs may submit jobs, since
   the driver and miniwdl run on a login node or in a job of their own.
-- A node-local, large `$TMPDIR` on compute nodes: GLnexus keeps its database
-  there while a shard runs.
+- Optional, recommended: a node-local disk on the compute nodes with a
+  per-job directory named by a job variable (`TMPDIR`, `SNIC_TMP`). With
+  `TASK_SCRATCH_ENV` naming it, every task's temporaries leave the shared
+  file system (section "Node-local scratch" below).
 
 ## Deployment picture
 
@@ -135,6 +137,42 @@ from is in `examples/site.cfg`; the reference is
 | `TASK_CONCURRENCY` | `50` | `[scheduler] task_concurrency`: SLURM jobs one miniwdl process keeps in flight. Total pressure is this times the driver's `--max-inflight`. |
 | `TASK_TIME_MINUTES` | `4320` | `[task_runtime] defaults.time_minutes`: wall time for tasks that set none (all upstream tasks); three days. A policy row can set it per task. |
 | `CALL_CACHE_DIR` | `<prefix>/call_cache` | `[call_cache] dir`, shared by all versions. Keep it on fast shared storage. |
+| `TASK_SCRATCH_ENV` | empty | `[ugc_wgw] scratch_env`: the job environment variable naming the per-job directory on the node's local disk (`TMPDIR`, `SNIC_TMP`). Every task's container gets it bound at `/mnt/scratch` with `TMPDIR` pointing there (section "Node-local scratch"). Empty = temporaries stay in the work directory. |
+
+### Node-local scratch
+
+Every task runs in an Apptainer container whose working directory, and
+whose `/tmp`, are directories under the task's run directory, on the
+shared file system. `--containall` clears the environment, so a tool
+inside the container does not see the job's `TMPDIR`; everything it writes
+lands on the shared file system, including temporaries that never leave
+the task: pbmm2's sort spill files (as large as the aligned BAM, 21 of
+them at the default 4 GB sort memory), GLnexus's database, bcftools' sort
+chunks. At twenty samples in flight that is a large share of the traffic a
+campaign puts on the file system, and all of it is avoidable.
+
+When the compute nodes have a local disk with a per-job directory that the
+scheduler creates and removes (SLURM's `TmpDisk`; the variable is usually
+`TMPDIR` or `SNIC_TMP`; check in a job with `echo $TMPDIR; df -h $TMPDIR`),
+set `TASK_SCRATCH_ENV` to the variable's name. The rendered `miniwdl.cfg`
+then selects the `ugc_slurm_singularity` backend of our plugin: on the
+node, just before the container starts, the job's directory is bound at
+`/mnt/scratch` and `TMPDIR=/mnt/scratch` is set inside the container, so
+every tool that honours `TMPDIR` writes its temporaries to the local disk.
+Nothing else changes: inputs are still read from and outputs still written
+to the shared file system, the task's `stderr.txt`, `stdout.txt` and
+`command` stay where they are, and a job whose variable is unset, or names
+a directory that is not writable or is tmpfs (memory), runs as before.
+The decision is recorded as one line in the job's `slurm-<jobid>.out` in
+the task directory:
+
+```
+[ugc-wgw] scratch: /scratch/14423300 -> /mnt/scratch (TMPDIR)
+```
+
+`ugc-wgw resources` shows `scratch=TMPDIR` or `scratch=off` in its summary
+line. What the data flowing between tasks costs the file system, and which
+tasks would need more than this, is in chapter 12.
 
 ### 3. Verify without installing
 
@@ -228,6 +266,8 @@ and the next run picks it up.
 | `[singularity] exe` | `["apptainer"]` | |
 | `[singularity] image_cache` | `<prefix>/versions/<v>/sif` | Every image must already be here; miniwdl never pulls. |
 | `[singularity] run_options` | `--containall --no-mount hostfs`, plus `--nv` with `SINGULARITY_NV=1` | `--nv` is what lets the GPU DeepVariant and Parabricks tasks see a device (chapter 12). |
+| `[scheduler] container_backend` | `ugc_slurm_singularity` | miniwdl-slurm's `slurm_singularity` plus the node-local scratch below; identical to it when `scratch_env` is empty. |
+| `[ugc_wgw] scratch_env`, `scratch_mount` | `TASK_SCRATCH_ENV`, `/mnt/scratch` | The job variable naming the node's per-job scratch directory and where it is bound inside the containers. |
 | `[slurm] extra_args` | site value | Qos, reservation and the like; never the partition (chapter 12). |
 | `[task_runtime] command_shell` | `/bin/bash` | Upstream commands use bash arrays. |
 | `[task_runtime] cpu_max`, `memory_max` | site values, default `0` | Caps on any task's request; miniwdl rounds larger requests down and logs it (chapter 12). Memory is rendered in bytes. |

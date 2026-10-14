@@ -121,13 +121,21 @@ make_venv() {  # $1 = venv dir, $2 = wheels dir
   "$1/bin/python" -m pip install --quiet --no-index --find-links "$2" -r "$2/requirements.txt"
 }
 
-plugin_version() {  # $1 = venv dir; prints the ugc-wgw-miniwdl version, fails when the task plugin is not registered
+plugin_version() {  # $1 = venv dir; prints the ugc-wgw-miniwdl version, fails when the task plugin, the
+                    # ugc_slurm_singularity backend or its exec script is not in place
   "$1/bin/python" - <<'PYEOF'
-import importlib.metadata as m, sys
+import importlib.metadata as m, os, sys
 eps = m.entry_points()
-eps = eps.select(group="miniwdl.plugin.task") if hasattr(eps, "select") else eps.get("miniwdl.plugin.task", [])
-hit = [e for e in eps if e.name == "ugc_wgw_resources"]
+def group(name):
+    return eps.select(group=name) if hasattr(eps, "select") else eps.get(name, [])
+hit = [e for e in group("miniwdl.plugin.task") if e.name == "ugc_wgw_resources"]
 if not hit or hit[0].value != "ugc_wgw_miniwdl.resources:task" or not callable(hit[0].load()):
+    sys.exit(1)
+hit = [e for e in group("miniwdl.plugin.container_backend") if e.name == "ugc_slurm_singularity"]
+if not hit or hit[0].value != "ugc_wgw_miniwdl.scratch:SlurmSingularityScratch" or not callable(hit[0].load()):
+    sys.exit(1)
+import ugc_wgw_miniwdl.scratch as scratch
+if not os.path.isfile(scratch.EXEC_SCRIPT) or scratch.SlurmSingularity is None:
     sys.exit(1)
 print(m.version("ugc-wgw-miniwdl"))
 PYEOF
@@ -152,9 +160,9 @@ if [ "$verify_only" -eq 1 ]; then
     log "   reference data container: not in the bundle (images mode $("$python_exe" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("images_mode"))' "$src/manifest.json")); the install needs an existing reference tree"
   fi
   if pv=$(plugin_version "$staging/venv"); then
-    log "   plugin: ugc-wgw-miniwdl $pv (task plugin ugc_wgw_resources registered)"
+    log "   plugin: ugc-wgw-miniwdl $pv (task plugin ugc_wgw_resources and container backend ugc_slurm_singularity registered)"
   else
-    log "   FAIL ugc_wgw_resources task plugin not registered in the venv"; status=1
+    log "   FAIL ugc-wgw-miniwdl incomplete in the venv (task plugin, container backend or exec script missing)"; status=1
   fi
   rm -rf "$staging"
   [ "$status" -eq 0 ] || die "verify-only failed"
@@ -165,14 +173,14 @@ fi
 # ---- site values (read before anything is installed, so a bad site file costs nothing) ------
 TASK_CONCURRENCY=50; CALL_CACHE_DIR="$prefix/call_cache"; SLURM_EXTRA_ARGS=""; TASK_TIME_MINUTES=4320
 SLURM_PARTITION=""; SLURM_ACCOUNT=""; TASK_CPU_MAX=0; TASK_MEMORY_MAX=0; TASK_RESOURCES="$prefix/resources.tsv"
-SLURM_PARTITION_GPU=""; SLURM_ACCOUNT_GPU=""; SINGULARITY_NV=0
+SLURM_PARTITION_GPU=""; SLURM_ACCOUNT_GPU=""; SINGULARITY_NV=0; TASK_SCRATCH_ENV=""
 if [ -n "$site" ]; then
   [ -f "$site" ] || die "site file not found: $site"
   while IFS='=' read -r key value; do
     key=$(echo "$key" | tr -d '[:space:]')
     case "$key" in
       ''|'#'*) ;;
-      TASK_CONCURRENCY|CALL_CACHE_DIR|SLURM_EXTRA_ARGS|TASK_TIME_MINUTES|SLURM_PARTITION|SLURM_ACCOUNT|TASK_CPU_MAX|TASK_MEMORY_MAX|TASK_RESOURCES|SLURM_PARTITION_GPU|SLURM_ACCOUNT_GPU|SINGULARITY_NV)
+      TASK_CONCURRENCY|CALL_CACHE_DIR|SLURM_EXTRA_ARGS|TASK_TIME_MINUTES|SLURM_PARTITION|SLURM_ACCOUNT|TASK_CPU_MAX|TASK_MEMORY_MAX|TASK_RESOURCES|SLURM_PARTITION_GPU|SLURM_ACCOUNT_GPU|SINGULARITY_NV|TASK_SCRATCH_ENV)
         printf -v "$key" '%s' "${value//<prefix>/$prefix}" ;;
       *) log "   warning: unknown site key $key ignored" ;;
     esac
@@ -184,6 +192,9 @@ fi
 case "$TASK_CPU_MAX" in ''|*[!0-9-]*) die "TASK_CPU_MAX must be an integer (0 = no cap), got '$TASK_CPU_MAX'" ;; esac
 case "$SINGULARITY_NV" in 0|1) ;; *) die "SINGULARITY_NV must be 0 or 1, got '$SINGULARITY_NV'" ;; esac
 case "$TASK_TIME_MINUTES" in ''|*[!0-9]*) die "TASK_TIME_MINUTES must be a positive integer, got '$TASK_TIME_MINUTES'" ;; esac
+if [ -n "$TASK_SCRATCH_ENV" ] && ! printf '%s' "$TASK_SCRATCH_ENV" | grep -qE '^[A-Za-z_][A-Za-z0-9_]*$'; then
+  die "TASK_SCRATCH_ENV must be an environment variable name (TMPDIR, SNIC_TMP) or empty, got '$TASK_SCRATCH_ENV'"
+fi
 
 # ---- 2. place and venv ---------------------------------------------------
 dest="$prefix/versions/$version"
@@ -196,7 +207,7 @@ mv "$src" "$dest"
 rm -rf "$staging"
 log "2. venv from bundled wheels"
 make_venv "$dest/venv" "$dest/wheels"
-plugin=$(plugin_version "$dest/venv") || die "ugc_wgw_resources task plugin not registered in the venv (wheel ugc_wgw_miniwdl missing from the bundle?)"
+plugin=$(plugin_version "$dest/venv") || die "ugc-wgw-miniwdl is not complete in the venv: task plugin ugc_wgw_resources, container backend ugc_slurm_singularity and its exec script are all required (wheel ugc_wgw_miniwdl missing from the bundle?)"
 log "   $("$dest/venv/bin/miniwdl" --version | head -1); miniwdl-slurm $("$dest/venv/bin/python" -c 'import importlib.metadata as m; print(m.version("miniwdl-slurm"))'); ugc-wgw-miniwdl $plugin"
 # outputs on another file system (a cached run elsewhere, a passed-through input) are symlinked instead of
 # failing with "Invalid cross-device link": the plugin's crossdev module wraps miniwdl's link helper, and this
@@ -210,12 +221,14 @@ log "   outputs: hardlinked, symlinked across file systems (ugc_wgw_miniwdl.pth)
 # ---- 3. miniwdl.cfg and the resource policy ---------------------------------
 log "3. miniwdl.cfg"
 mkdir -p "$CALL_CACHE_DIR"
+log "   node-local scratch: ${TASK_SCRATCH_ENV:-off}${TASK_SCRATCH_ENV:+ (bound at /mnt/scratch, TMPDIR inside every task)}"
 "$python_exe" - "$dest/code/backends/hpc/miniwdl.cfg.template" "$dest/miniwdl.cfg" \
   "SIF_CACHE_DIR=$dest/sif" "CALL_CACHE_DIR=$CALL_CACHE_DIR" "TASK_CONCURRENCY=$TASK_CONCURRENCY" \
   "SLURM_EXTRA_ARGS=$SLURM_EXTRA_ARGS" "TASK_TIME_MINUTES=$TASK_TIME_MINUTES" \
   "SLURM_PARTITION=$SLURM_PARTITION" "SLURM_ACCOUNT=$SLURM_ACCOUNT" "TASK_CPU_MAX=$TASK_CPU_MAX" \
   "TASK_MEMORY_MAX=$TASK_MEMORY_MAX" "TASK_RESOURCES=$TASK_RESOURCES" \
-  "SLURM_PARTITION_GPU=$SLURM_PARTITION_GPU" "SLURM_ACCOUNT_GPU=$SLURM_ACCOUNT_GPU" "SINGULARITY_NV=$SINGULARITY_NV" <<'PYEOF'
+  "SLURM_PARTITION_GPU=$SLURM_PARTITION_GPU" "SLURM_ACCOUNT_GPU=$SLURM_ACCOUNT_GPU" "SINGULARITY_NV=$SINGULARITY_NV" \
+  "TASK_SCRATCH_ENV=$TASK_SCRATCH_ENV" <<'PYEOF'
 import json, os, sys
 tpl, out, *pairs = sys.argv[1:]
 kv = dict(pair.split("=", 1) for pair in pairs)

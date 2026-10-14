@@ -7,7 +7,9 @@
 # work dirs deleted on success, outputs hardlinked rather than copied.
 
 [scheduler]
-container_backend = slurm_singularity
+# miniwdl-slurm's slurm_singularity plus the node-local scratch of [ugc_wgw] scratch_env
+# (plugins/ugc_wgw_miniwdl/ugc_wgw_miniwdl/scratch.py); identical to slurm_singularity when that is empty
+container_backend = ugc_slurm_singularity
 # per miniwdl process; the driver caps runs in flight, so total SLURM pressure is
 # max_inflight x task_concurrency
 task_concurrency = {{TASK_CONCURRENCY}}
@@ -69,3 +71,9 @@ defaults = {{TASK_RUNTIME_DEFAULTS}}
 # The site resource policy (docs/guide/12-resources.md), applied per task by the ugc_wgw_resources
 # plugin from plugins/ugc_wgw_miniwdl: cpu, memory, wall time, partition, constraint. Empty = none.
 resources = {{TASK_RESOURCES}}
+# Node-local scratch: the job environment variable that names the per-job directory on the node (TMPDIR,
+# SNIC_TMP; empty = off). The ugc_slurm_singularity backend binds it at scratch_mount inside every task's
+# container and sets TMPDIR to it, so pbmm2's sort, GLnexus's database and other TMPDIR-aware temporaries
+# leave the shared file system. Site value TASK_SCRATCH_ENV.
+scratch_env = {{TASK_SCRATCH_ENV}}
+scratch_mount = /mnt/scratch

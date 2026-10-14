@@ -186,13 +186,21 @@ column from `AllocTRES`. On the plain Singularity backend (dev machine)
 there is no NOTICE, since that backend ignores `gpuCount`; the task's
 `stderr.txt` shows TensorFlow creating the GPU devices instead.
 
-## GLnexus scratch
+## GLnexus scratch, and temporaries in general
 
-The GLnexus override keeps its database on `$TMPDIR` (falling back to the
-task's working directory). A shard that fails with disk errors or is very slow
-usually ran on a node whose `$TMPDIR` is small or on shared storage; ask for
-node-local scratch in `SLURM_EXTRA_ARGS` (for example a `--gres` or
-`--constraint` your site uses) or lower the shard size with a finer
+The GLnexus override keeps its database on `$TMPDIR` when that is set inside
+the container, else in the task's working directory on the shared file
+system. Inside a container `TMPDIR` is set only by the `ugc_slurm_singularity`
+backend when the site file names the node's per-job scratch variable
+(`TASK_SCRATCH_ENV`, chapter 04); without it, every temporary of every task,
+GLnexus's database and pbmm2's sort spill files included, goes to the
+shared file system. A shard that fails with disk errors, or a campaign that
+makes `ls` on the shared file system crawl, is the sign. Check a task
+directory's `slurm-<jobid>.out` for the `[ugc-wgw] scratch:` line: `none
+(TMPDIR is unset)` means the install has no `TASK_SCRATCH_ENV`; `none (... is
+not a writable directory)` or `is tmpfs` means the variable does not name a
+local disk on that node. `ugc-wgw resources` prints `scratch=` in its
+summary line. A shard still too big for the node's disk needs a finer
 `scatter_regions_file` for `cohort_call`.
 
 ## Lock held

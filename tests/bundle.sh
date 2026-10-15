@@ -26,6 +26,8 @@ echo "== bundle test in $scratch"
 images=none; bundle_args=()
 if ls bundle/out/sif-cache/*workflow-data-container-hifi-human-wgs-wdl-grch38_giabv3*.sif >/dev/null 2>&1; then
   images=data; bundle_args=(--sif-cache "$(pwd)/bundle/out/sif-cache")
+  # with the pbmm2 image cached too, the installer's index build runs (about a minute, 12 GB of memory)
+  if ls bundle/out/sif-cache/*pbmm2@sha256_86e39aa6*.sif >/dev/null 2>&1; then images=install; fi
 fi
 echo "== images mode $images"
 tarball=$(scripts/make-bundle.sh --version HEAD --out "$scratch/out" --images "$images" "${bundle_args[@]}")
@@ -107,20 +109,30 @@ assert cfg["singularity"].get_list("run_options") == ["--containall", "--no-moun
 PYEOF
 ref_map=$install_dir/references/ugc_wgw_ref_map.GRCh38_GIABv3.tsv
 grep -q "^name	GRCh38_GIABv3$" "$ref_map"
-grep -q "^scatter_regions	$scratch/prefix/references/ugc-wgw-extras-0.2.0/scatter_regions.GRCh38_GIABv3.tsv$" "$ref_map"
+grep -q "^scatter_regions	$scratch/prefix/references/ugc-wgw-extras-0.3.0/scatter_regions.GRCh38_GIABv3.tsv$" "$ref_map"
+mmi=$scratch/prefix/references/ugc-wgw-extras-0.3.0/human_GRCh38_GIABv3_no_alt_analysis_set_maskedGRC_decoys_MAP2K3_KMT2C_KCNJ18.mmi
+grep -q "^pbmm2_index	$mmi$" "$ref_map"
 grep -q "^run_starphase	true$" "$ref_map"
-[ -f "$scratch/prefix/references/ugc-wgw-extras-0.2.0/scatter_regions.GRCh38_GIABv3.tsv" ]
+[ -f "$scratch/prefix/references/ugc-wgw-extras-0.3.0/scatter_regions.GRCh38_GIABv3.tsv" ]
 echo "$report" | grep -q "^ref_map=$ref_map$"
-if [ "$images" = data ]; then
+if [ "$images" = data ] || [ "$images" = install ]; then
   # the tree was copied out of the container and every file verified against references.lock
   tree=$scratch/prefix/references/hifi-wdl-resources-v4.0.0-GRCh38_GIABv3
   [ -f "$tree/manifest.json" ] && [ -f "$tree/GRCh38_GIABv3/trgt/adotto_strchive_20250827.hg38.bed.gz" ]
   echo "$report" | grep -q "^references=$tree$"
-  while read -r f; do [ -f "$f" ] || { echo "map names a missing file: $f" >&2; exit 1; }; done < <(cut -f2 "$ref_map" | grep '^/')
-  # a second install must reuse the tree (no copy) and still verify it
+  if [ "$images" = install ]; then
+    # the reference's pbmm2 index was built with the bundled image and matches references.lock
+    [ -f "$mmi" ]
+    [ "$(md5sum "$mmi" | cut -d' ' -f1)" = "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["bundles"]["ugc-wgw-extras"]["built"][0]["md5"])' references.lock)" ]
+    while read -r f; do [ -f "$f" ] || { echo "map names a missing file: $f" >&2; exit 1; }; done < <(cut -f2 "$ref_map" | grep '^/')
+  else
+    [ ! -f "$mmi" ]   # no pbmm2 image in the bundle: the installer says how to build it and the map still names it
+  fi
+  # a second install must reuse the tree (no copy), verify it and keep the index
   scripts/install-bundle.sh --bundle "$tarball" --prefix "$scratch/prefix" --site "$scratch/site.cfg" --force > "$scratch/reinstall.log" 2>&1
   grep -q 'reference tree present' "$scratch/reinstall.log"
   grep -q 'profile kept' "$scratch/reinstall.log"
+  if [ "$images" = install ]; then grep -q 'pbmm2 index present and verified' "$scratch/reinstall.log"; else grep -q 'no pbmm2 index built' "$scratch/reinstall.log"; fi
 fi
 if grep -rq 'v3p1p0\|tertiary' "$install_dir/references" "$install_dir/inputs"; then echo "v3 map names survive in the install" >&2; exit 1; fi
 # WDL read_map() needs exactly two fields per line: no comments, no blank lines, in any rendered map

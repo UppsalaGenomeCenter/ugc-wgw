@@ -53,7 +53,9 @@ flowchart TD
 | `sample_id`, `hifi_reads`, `fail_reads` | `use_alignment_chunking` (true), `use_gpu` (false), `use_parabricks_deepvariant` (false) |
 
 Outputs: the 96 upstream outputs by name plus the two ugc-wgw ones (chapter 07).
-Task set: catalog preparation, pbmm2 per BAM (16 chunks), pbsamoa merge,
+Task set: catalog preparation, pbmm2 per BAM (16 chunks) against the
+prebuilt reference index of the reference map (upstream would build the
+5.8 GB index once per BAM), pbsamoa merge,
 mosdepth, DeepVariant (8 shards), sawfish discover and call, Paraphase,
 mitorsaw, kivvi (KIV-2 and D4Z4), optional fail-reads baiting, HiPhase, TRGT,
 pbjam BAM stats, variant stats, MethBat pileup and profile, StarPhase,

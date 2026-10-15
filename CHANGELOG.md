@@ -3,6 +3,25 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.9.1
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.4.0,
+unchanged since 0.9.0.
+
+- The pbmm2 reference index is built once at install instead of once per
+  input BAM. Upstream's alignment subworkflow and its fail-reads path build
+  the same 5.8 GB index for every BAM; the call cache catches it only after
+  the first build, so a campaign's first wave starts hundreds of identical
+  builds. `install-bundle.sh` builds it once with the bundled pbmm2 image
+  (about a minute, 12 GB of memory, verified against the md5 in
+  `references.lock`; it says how to build it in a job when the login node
+  cannot), the reference map gains `pbmm2_index`, and two derived files,
+  `workflows/overrides/pbmm2.wdl` and `workflows/overrides/upstream.wdl`,
+  pass it to every alignment in the `singleton` and `upstream` stages;
+  without an index they behave as upstream. Alignment inputs change, so a
+  sample replayed into a project on this version aligns once more.
+
 ## 0.9.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

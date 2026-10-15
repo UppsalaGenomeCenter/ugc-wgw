@@ -10,7 +10,8 @@
 # with htslib https support, curl, md5sum, python3, tar, apptainer; about 25 GB of disk.
 # Writes:
 #   $UGC_WGW_SMOKE_DIR/references/hifi-wdl-resources-v4.0.0-GRCh38_GIABv3/   the container's data tree + manifest.json
-#   $UGC_WGW_SMOKE_DIR/references/ugc-wgw-extras-0.2.0/                          scatter_regions.GRCh38_GIABv3.tsv
+#   $UGC_WGW_SMOKE_DIR/references/ugc-wgw-extras-0.3.0/                          scatter_regions.GRCh38_GIABv3.tsv and the
+#                                                                                reference's pbmm2 index, built as the installer does
 #   $UGC_WGW_SMOKE_DIR/data/<ID>.chr20.hifi_reads.bam           HG002, HG003, HG004, HG002ds
 #   $UGC_WGW_SMOKE_DIR/data/samples.tsv, cohort.txt, data.lock  driver inputs and provenance
 set -euo pipefail
@@ -38,14 +39,17 @@ mkdir -p "$smoke/references" "$smoke/data" "$smoke/downloads"
 
 # ---- 1. references from the data container (background while the BAM slices download) ----
 prepare_references() {
-  local image subdir data_path manifest_path extras extras_file
-  image=""; subdir=""; data_path=""; manifest_path=""; extras=""; extras_file=""
+  local image subdir data_path manifest_path extras extras_file built_name built_md5 built_source built_image
+  image=""; subdir=""; data_path=""; manifest_path=""; extras=""; extras_file=""; built_name=""; built_md5=""; built_source=""; built_image=""
   eval "$(python3 - "$repo/references.lock" <<'PY'
 import json, shlex, sys
 b = json.load(open(sys.argv[1]))["bundles"]
 r, x = b["hifi-wdl-resources"], b["ugc-wgw-extras"]
+built = (x.get("built") or [{}])[0]
 for k, v in {"image": r["source"], "subdir": r["install_subdir"], "data_path": r["container_paths"]["data"],
-             "manifest_path": r["container_paths"]["manifest"], "extras": x["install_subdir"], "extras_file": x["files"][0]["name"]}.items():
+             "manifest_path": r["container_paths"]["manifest"], "extras": x["install_subdir"], "extras_file": x["files"][0]["name"],
+             "built_name": built.get("name", ""), "built_md5": built.get("md5", ""), "built_source": built.get("source_file", ""),
+             "built_image": built.get("image", "")}.items():
     print(f"{k}={shlex.quote(v)}")
 PY
 )"
@@ -86,6 +90,28 @@ PY
   fi
   mkdir -p "$smoke/references/$extras"
   cp "$repo/references/$extras_file" "$smoke/references/$extras/"
+  # the reference's pbmm2 index, built once as install-bundle.sh does (references.lock ugc-wgw-extras.built), md5-verified
+  if [ -n "$built_name" ]; then
+    local mmi=$smoke/references/$extras/$built_name
+    if [ -f "$mmi" ] && [ "$(md5sum "$mmi" | cut -d' ' -f1)" = "$built_md5" ] && [ "$force" -eq 0 ]; then
+      log "references: pbmm2 index present and verified"
+    else
+      local isif=$sif_cache/docker___${built_image//[\/:]/_}.sif
+      if [ ! -f "$isif" ]; then
+        log "references: pulling the pbmm2 image into $sif_cache"
+        printf '%s\n' "$built_image" > "$smoke/downloads/pbmm2-manifest.txt"
+        "$repo/scripts/populate-sif-cache.sh" --dir "$sif_cache" "$smoke/downloads/pbmm2-manifest.txt"
+      fi
+      log "references: building the pbmm2 index with $(basename "$isif") (about a minute, 12 GB of memory)"
+      local tmp_mmi=${built_name%.mmi}.building.mmi   # pbmm2 index insists on the .mmi suffix
+      rm -f "$mmi" "$smoke/references/$extras/$tmp_mmi"
+      apptainer exec --bind "$smoke/references/$extras:/mnt/ugc-extras" --bind "$tree:/mnt/ugc-references:ro" "$isif" \
+        pbmm2 index --num-threads "$threads" --preset HIFI "/mnt/ugc-references/$built_source" "/mnt/ugc-extras/$tmp_mmi" > "$smoke/downloads/pbmm2-index.log" 2>&1
+      [ "$(md5sum "$smoke/references/$extras/$tmp_mmi" | cut -d' ' -f1)" = "$built_md5" ] || { echo "[prepare] built pbmm2 index differs from references.lock" >&2; exit 1; }
+      mv "$smoke/references/$extras/$tmp_mmi" "$mmi"
+      log "references: pbmm2 index built and verified"
+    fi
+  fi
   log "references: ready"
 }
 

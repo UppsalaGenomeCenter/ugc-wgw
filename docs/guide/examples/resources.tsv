@@ -12,6 +12,7 @@ task	cpu	memory	time	partition	constraint
 pbmm2_align_wgs	24	-	3:00:00	-	-
 pbsamoa_merge	24	64G	2:00:00	-	-
 index_input_bam	-	-	1:00:00	-	-
+# create_pbmm2_index runs only when the reference map has no pbmm2_index (the installer builds one)
 create_pbmm2_index	-	-	1:00:00	-	-
 # small variants: make_examples 8 x 8 cores (six per node), call_variants a whole node (the cap)
 deepvariant_make_examples	-	-	4:00:00	-	-

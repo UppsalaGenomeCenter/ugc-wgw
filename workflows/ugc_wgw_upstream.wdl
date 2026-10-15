@@ -5,7 +5,7 @@ version 1.0
 # see docs/DESIGN.md §5, docs/ENTRYPOINTS.md §4
 
 import "../vendor/hifi-human-wgs-wdl/workflows/process_trgt_catalog/process_trgt_catalog.wdl" as ProcessTrgtCatalog
-import "../vendor/hifi-human-wgs-wdl/workflows/upstream/upstream.wdl" as Upstream
+import "overrides/upstream.wdl" as Upstream
 import "../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/backend_configuration/backend_configuration.wdl" as BackendConfiguration
 import "../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/filter_messages/filter_messages.wdl" as FilterMessages
 import "ugc_wgw/provenance.wdl" as Provenance
@@ -29,7 +29,7 @@ workflow ugc_wgw_upstream {
       description: "Unaligned fail_reads BAMs (used only for TRGT at INCLUDE_FAIL_READS loci, in the downstream stage)"
     }
     ref_map_file: {
-      description: "ugc-wgw reference map (docs/DESIGN.md §10.4): the files and scalars of upstream's workflow data container for one reference build, plus scatter_regions"
+      description: "ugc-wgw reference map (docs/DESIGN.md §10.4): the files and scalars of upstream's workflow data container for one reference build, plus scatter_regions and pbmm2_index (ugc-wgw-extras)"
     }
     use_alignment_chunking: {
       description: "Whether to chunk BAM files for alignment. If false, all reads will be aligned in a single chunk."
@@ -108,6 +108,7 @@ workflow ugc_wgw_upstream {
   String ref_name = ref_map["name"]
   File ref_fasta = ref_map["fasta"]  # !FileCoercion
   File ref_index = ref_map["fasta_index"]  # !FileCoercion
+  File pbmm2_index = ref_map["pbmm2_index"]  # !FileCoercion
   Float max_norm_female_chrY_depth = ref_map["max_norm_female_chrY_depth"]  # !StringCoercion
   File trgt_tandem_repeat_bed = ref_map["trgt_tandem_repeat_bed"]  # !FileCoercion
   File sawfish_exclude_bed = ref_map["sawfish_exclude_bed"]  # !FileCoercion
@@ -132,6 +133,7 @@ workflow ugc_wgw_upstream {
     fail_reads_bait_index = process_trgt_catalog.fail_reads_bait_index,
     ref_name = ref_name,
     ref_fasta = ref_fasta,
+    pbmm2_index = pbmm2_index,
     ref_index = ref_index,
     max_norm_female_chrY_depth = max_norm_female_chrY_depth,
     paraphase_genome_build = paraphase_genome_build,

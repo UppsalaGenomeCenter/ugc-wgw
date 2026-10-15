@@ -32,8 +32,10 @@ container (`quay.io/pacbio/workflow-data-container-hifi-human-wgs-wdl-grch38_gia
 digest and md5s in `references.lock`; the SIF the bundle ships), copied out
 with `apptainer exec` exactly as `install-bundle.sh` does on the HPC
 (`docs/guide/04-installing.md`), plus this repository's
-`scatter_regions.GRCh38_GIABv3.tsv` as `ugc-wgw-extras-0.2.0/`. Nothing is
-downloaded from Zenodo.
+`scatter_regions.GRCh38_GIABv3.tsv` as `ugc-wgw-extras-0.3.0/`, where the
+reference's pbmm2 index is also built with the pbmm2 image (pulled into the
+SIF cache when absent), exactly as the installer does. Nothing is downloaded
+from Zenodo.
 
 ## Running it
 
@@ -54,7 +56,7 @@ $UGC_WGW_SMOKE_DIR/
 ├── downloads/                 references.log
 ├── references/
 │   ├── hifi-wdl-resources-v4.0.0-GRCh38_GIABv3/   GRCh38_GIABv3/ (fasta, trgt/, sawfish/, methbat/) + manifest.json
-│   └── ugc-wgw-extras-0.2.0/scatter_regions.GRCh38_GIABv3.tsv
+│   └── ugc-wgw-extras-0.3.0/        scatter_regions.GRCh38_GIABv3.tsv, human_GRCh38_GIABv3_..._KCNJ18.mmi
 └── data/
     ├── HG002.chr20.hifi_reads.bam   HG003..., HG004..., HG002ds...
     ├── samples.tsv                  driver sample sheet with the pedigree

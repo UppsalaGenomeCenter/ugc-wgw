@@ -12,12 +12,13 @@
 #      ({{SIF_CACHE_DIR}}, {{CALL_CACHE_DIR}}, {{TASK_CONCURRENCY}}, {{SLURM_EXTRA_ARGS}},
 #      {{TASK_RUNTIME_DEFAULTS}} from TASK_TIME_MINUTES + SLURM_PARTITION + SLURM_ACCOUNT (+ the _GPU pair),
 #      {{SINGULARITY_RUN_OPTIONS}} from SINGULARITY_NV,
-#      {{TASK_CPU_MAX}}, {{TASK_MEMORY_MAX}}, {{TASK_RESOURCES}}; site values from --site KEY=VALUE
+#      {{TASK_CPU_MAX}}, {{TASK_MEMORY_MAX}}, {{TASK_RESOURCES}}, {{TASK_SCRATCH_ENV}}; site values from --site KEY=VALUE
 #      lines, see backends/hpc/site.cfg.example); create <root>/resources.tsv from the example when
 #      absent, validate it when present
 #   4. references: copy the build's tree and manifest.json out of the bundled reference data
 #      container SIF into <references>/<install_subdir>/ (--references, default <root>/references)
-#      unless present, verify every md5 in references.lock, install ugc-wgw-extras (scatter regions),
+#      unless present, verify every md5 in references.lock, install ugc-wgw-extras (scatter regions; the
+#      reference's pbmm2 index is built there once with the bundled pbmm2 image and verified by md5),
 #      render references/ugc_wgw_ref_map.<build>.template.tsv into <root>/versions/<version>/references/
 #      and check it against the manifest, render the inputs templates into .../inputs/
 #   5. --verify-only: step 1, a temporary venv, the ugc_wgw_resources plugin entry point, `miniwdl check
@@ -50,6 +51,7 @@ command -v "$python_exe" >/dev/null || { echo "python not found: $python_exe" >&
 log() { echo "[install-bundle] $*" >&2; }
 die() { echo "[install-bundle] error: $*" >&2; exit 1; }
 fs_id() { stat -c %d "$1" 2>/dev/null || echo "?"; }
+md5_is() { [ "$(md5sum "$1" | cut -d' ' -f1)" = "$2" ]; }
 warn_fs() {  # $1 label, $2 path, $3 label, $4 path: warn when the two paths are on different file systems
   local a b
   a=$(fs_id "$2"); b=$(fs_id "$4")
@@ -294,15 +296,19 @@ mkdir -p "$dest/references" "$dest/inputs"
 # references.lock names the build, the container paths, the install subdirs and every file's md5;
 # manifest.json names the SIF of the reference data container when the bundle carries it
 ref_build=""; ref_subdir=""; ref_sif=""; ref_data_path=""; ref_manifest_path=""; extras_subdir=""; extras_files=""
+built_name=""; built_md5=""; built_source=""; built_sif=""; built_image=""
 eval "$("$python_exe" - "$dest/code/references.lock" "$dest/manifest.json" <<'PYEOF'
 import json, shlex, sys
 b = json.load(open(sys.argv[1]))["bundles"]
 r, x = b["hifi-wdl-resources"], b["ugc-wgw-extras"]
 m = json.load(open(sys.argv[2]))
-sif = next((i["sif"] for i in m.get("images", []) if i.get("image") == r["source"]), "")
-for k, v in {"ref_build": r["build"], "ref_subdir": r["install_subdir"], "ref_sif": sif,
+images = {i.get("image"): i["sif"] for i in m.get("images", [])}
+built = (x.get("built") or [{}])[0]   # the reference's pbmm2 index: built by this installer, not shipped
+for k, v in {"ref_build": r["build"], "ref_subdir": r["install_subdir"], "ref_sif": images.get(r["source"], ""),
              "ref_data_path": r["container_paths"]["data"], "ref_manifest_path": r["container_paths"]["manifest"],
-             "extras_subdir": x["install_subdir"], "extras_files": " ".join(f["name"] for f in x["files"])}.items():
+             "extras_subdir": x["install_subdir"], "extras_files": " ".join(f["name"] for f in x["files"]),
+             "built_name": built.get("name", ""), "built_md5": built.get("md5", ""), "built_source": built.get("source_file", ""),
+             "built_image": built.get("image", ""), "built_sif": images.get(built.get("image"), "")}.items():
     print(f"{k}={shlex.quote(v)}")
 PYEOF
 )"
@@ -348,6 +354,37 @@ if mkdir -p "$references/$extras_subdir" 2>/dev/null && [ -w "$references/$extra
   log "   ugc-wgw-extras installed to $references/$extras_subdir"
 else
   log "   warning: $references not writable; copy code/references/{$extras_files} to $references/$extras_subdir/ yourself"
+fi
+# the reference's pbmm2 index (references.lock ugc-wgw-extras.built): built once per references directory from the
+# container's fasta with the bundled pbmm2 image, verified by md5 (the build is deterministic). The workflows read it
+# from the map's pbmm2_index key instead of rebuilding the 5.8 GB index once per input BAM.
+if [ -n "$built_name" ]; then
+  mmi=$references/$extras_subdir/$built_name
+  tmp_mmi=${built_name%.mmi}.building.mmi   # pbmm2 index insists on the .mmi suffix; renamed once verified
+  if [ -f "$mmi" ] && md5_is "$mmi" "$built_md5"; then
+    log "   pbmm2 index present and verified: $mmi"
+  elif [ -f "$mmi" ]; then
+    die "$mmi does not match references.lock (md5 $built_md5); remove it and run the installer again to rebuild it"
+  elif [ ! -f "$tree/$built_source" ]; then
+    log "   warning: no pbmm2 index built: the reference fasta $tree/$built_source is not present"
+  elif [ -z "$built_sif" ] || [ ! -f "$dest/sif/$built_sif" ]; then
+    log "   warning: no pbmm2 index built: the bundle carries no pbmm2 image ($built_image). Build it with that image:"
+    log "   pbmm2 index --preset HIFI $tree/$built_source $mmi   (md5 must be $built_md5), then run the installer again"
+  elif [ ! -w "$references/$extras_subdir" ]; then
+    log "   warning: no pbmm2 index built: $references/$extras_subdir is not writable"
+  else
+    command -v apptainer >/dev/null || die "apptainer is needed to build the pbmm2 index with $built_sif"
+    log "   building the reference's pbmm2 index with $built_sif (about a minute; 12 GB of memory)"
+    rm -f "$references/$extras_subdir/$tmp_mmi"
+    if ! apptainer exec --bind "$references/$extras_subdir:/mnt/ugc-extras" --bind "$tree:/mnt/ugc-references:ro" "$dest/sif/$built_sif" \
+        pbmm2 index --num-threads 8 --preset HIFI "/mnt/ugc-references/$built_source" "/mnt/ugc-extras/$tmp_mmi" > "$dest/pbmm2-index.log" 2>&1; then
+      rm -f "$references/$extras_subdir/$tmp_mmi"
+      die "pbmm2 index failed (log: $dest/pbmm2-index.log). If the login node killed it for memory, build it in a job: sbatch --mem=16G --cpus-per-task=8 --wrap 'apptainer exec --bind $references/$extras_subdir:/mnt/ugc-extras --bind $tree:/mnt/ugc-references:ro $dest/sif/$built_sif pbmm2 index --num-threads 8 --preset HIFI /mnt/ugc-references/$built_source /mnt/ugc-extras/$built_name' and run the installer again (it verifies the file)"
+    fi
+    md5_is "$references/$extras_subdir/$tmp_mmi" "$built_md5" || { rm -f "$references/$extras_subdir/$tmp_mmi"; die "the built pbmm2 index does not match references.lock (md5 $built_md5): wrong pbmm2 image or reference?"; }
+    mv "$references/$extras_subdir/$tmp_mmi" "$mmi"
+    log "   pbmm2 index built and verified: $mmi"
+  fi
 fi
 # WDL read_map() rejects comment lines, so the template's comments are dropped at render time
 warn_fs "install prefix" "$prefix" "references" "$tree"

@@ -2,7 +2,7 @@
 # Build the offline code bundle for the HPC. See docs/DESIGN.md §14. Dev machine only.
 #
 # Usage: scripts/make-bundle.sh --version <git ref> --out <dir>
-#            [--images all|ugc-wgw|data|none] [--sif-cache <dir>] [--python-version X.Y]
+#            [--images all|ugc-wgw|data|install|none] [--sif-cache <dir>] [--python-version X.Y]
 #            [--with-references <dir-with-tars>] [--keep-build]
 #
 # Steps:
@@ -10,7 +10,8 @@
 #   2. union of code/vendor/hifi-human-wgs-wdl/image_manifest.txt + code/image_manifest.ugc-wgw.txt
 #      -> scripts/populate-sif-cache.sh into --sif-cache (incremental), hardlinked into build/sif/;
 #      tag-form references are resolved to registry digests with scripts/image-digest.py;
-#      --images data takes only upstream's reference data container(s), for tests of the install
+#      --images data takes only upstream's reference data container(s), for tests of the install;
+#      --images install adds the image the installer builds the reference's pbmm2 index with (references.lock)
 #   3. pip download -r code/bundle/requirements.txt (+ pip itself) for --python-version
 #      into build/wheels/ (binary wheels only, manylinux x86_64; no build tools needed offline);
 #      pip wheel of code/plugins/ugc_wgw_miniwdl (our miniwdl task plugin, pure python) into the same
@@ -42,7 +43,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 if [ -z "$ref" ] || [ -z "$out" ]; then echo "--version <git ref> and --out <dir> are required" >&2; exit 2; fi
-case "$images" in all|ugc-wgw|data|none) ;; *) echo "--images must be all, ugc-wgw, data or none" >&2; exit 2 ;; esac
+case "$images" in all|ugc-wgw|data|install|none) ;; *) echo "--images must be all, ugc-wgw, data, install or none" >&2; exit 2 ;; esac
 [ -n "$pyver" ] || pyver=$(python3 -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')
 out=$(mkdir -p "$out" && cd "$out" && pwd)
 sif_cache=${sif_cache:-$out/sif-cache}
@@ -74,6 +75,10 @@ case "$images" in
   all) manifests=("$build/code/vendor/hifi-human-wgs-wdl/image_manifest.txt" "$build/code/image_manifest.ugc-wgw.txt") ;;
   ugc-wgw) manifests=("$build/code/image_manifest.ugc-wgw.txt") ;;
   data) grep 'workflow-data-container' "$build/code/vendor/hifi-human-wgs-wdl/image_manifest.txt" > "$out/build/data-manifest.txt"
+        manifests=("$out/build/data-manifest.txt") ;;
+  install) grep 'workflow-data-container' "$build/code/vendor/hifi-human-wgs-wdl/image_manifest.txt" > "$out/build/data-manifest.txt"
+        python3 -c 'import json,sys; [print(b["image"]) for b in json.load(open(sys.argv[1]))["bundles"]["ugc-wgw-extras"].get("built", [])]' \
+          "$build/code/references.lock" >> "$out/build/data-manifest.txt"
         manifests=("$out/build/data-manifest.txt") ;;
 esac
 sif_list="$out/build/sif-list.tsv"

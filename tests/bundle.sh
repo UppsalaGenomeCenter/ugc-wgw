@@ -3,6 +3,7 @@
 # reference data container, so the installer's copy-and-verify step runs; --images none otherwise)
 # -> install-bundle.sh --verify-only and a real install into a scratch prefix, then `ugc-wgw init --install`.
 # Needs network for pip download (dev machine or CI). Usage: tests/bundle.sh [<scratch dir>]
+# UGC_WGW_BUNDLE_IMAGES=none|data|install forces the images mode (CI has no SIF cache and no Apptainer: `none`).
 # A scratch dir it made itself (about 8 GB) is removed after a passing run and kept, with its path printed, after
 # a failing one or when UGC_WGW_KEEP_SCRATCH=1; a scratch dir given as the argument is always kept.
 set -euo pipefail
@@ -29,6 +30,12 @@ if ls bundle/out/sif-cache/*workflow-data-container-hifi-human-wgs-wdl-grch38_gi
   # with the pbmm2 image cached too, the installer's index build runs (about a minute, 12 GB of memory)
   if ls bundle/out/sif-cache/*pbmm2@sha256_86e39aa6*.sif >/dev/null 2>&1; then images=install; fi
 fi
+case "${UGC_WGW_BUNDLE_IMAGES:-}" in
+  '') ;;
+  none) images=none; bundle_args=() ;;
+  data|install) images=$UGC_WGW_BUNDLE_IMAGES ;;
+  *) echo "UGC_WGW_BUNDLE_IMAGES must be none, data or install" >&2; exit 2 ;;
+esac
 echo "== images mode $images"
 tarball=$(scripts/make-bundle.sh --version HEAD --out "$scratch/out" --images "$images" "${bundle_args[@]}")
 [ -f "$tarball" ] && [ -f "$tarball.sha256" ]
@@ -69,17 +76,21 @@ if scripts/install-bundle.sh --bundle "$tarball" --prefix "$scratch/prefix-bad2"
 fi
 [ ! -d "$scratch/prefix-bad2/versions" ]
 # the node-local scratch backend: registered, selected by the rendered cfg, its exec script shipped in the wheel and
-# working: a fake apptainer shows the bind and TMPDIR inserted after `exec`
+# working: a fake apptainer shows the bind and TMPDIR inserted after `exec`. The class is resolved through miniwdl's
+# plugin registry but instantiated directly: task_container.new() would run the backend's global_init, which probes
+# `apptainer --version`, and CI has no Apptainer
 "$install_dir/venv/bin/python" - "$install_dir/miniwdl.cfg" "$scratch" <<'PYEOF'
 import logging, os, pathlib, stat, subprocess, sys
 from WDL.runtime.config import Loader
-from WDL.runtime import task_container
+from WDL.runtime import config as wdlcfg
 from ugc_wgw_miniwdl import scratch
 cfg = Loader(logging.getLogger("bundle-test"), filenames=[sys.argv[1]])
 assert cfg["scheduler"]["container_backend"] == "ugc_slurm_singularity"
+backends = dict(wdlcfg.load_plugins(cfg, "container_backend"))
+backend_cls = backends[cfg["scheduler"]["container_backend"]]
+assert backend_cls is scratch.SlurmSingularityScratch, backend_cls
 host = pathlib.Path(sys.argv[2]) / "backend-host"; host.mkdir()
-backend = task_container.new(cfg, logging.getLogger("bundle-test"), "call-x-1", str(host))
-assert type(backend).__name__ == "SlurmSingularityScratch", type(backend)
+backend = backend_cls(cfg, "call-x-1", str(host))
 args = backend._slurm_invocation()
 assert args[-4:] == [scratch.EXEC_SCRIPT, "TMPDIR", "/mnt/scratch", "--"], args[-4:]
 assert os.path.isfile(scratch.EXEC_SCRIPT) and "site-packages" in scratch.EXEC_SCRIPT, scratch.EXEC_SCRIPT

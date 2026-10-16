@@ -55,6 +55,8 @@ class ReportTest(unittest.TestCase):
         env, _ = sacct_env(tmp, "31337|call-fake|COMPLETED|0:0|2026-09-25T10:00:00|2026-09-25T10:00:30|2026-09-25T10:05:30|300|8|8|2400|"
                                 "30:00.000|16000M||billing=8,cpu=8,mem=16000M,node=1|core|m1|120||\n")
         env.update({"UGC_WGW_FAKE_FAIL": "S2", "UGC_WGW_FAKE_SLURM_LOG": "31337", "UGC_WGW_FAKE_TASK_LOG": "1"})
+        cfg.miniwdl_cfg.write_text("[scheduler]\ncontainer_backend = ugc_slurm_singularity\n[ugc_wgw]\nscratch_env = TMPDIR\n"
+                                   "scratch_mount = /mnt/scratch\nresources = /site/resources.tsv\n")
         code, _, err = run_cli(["--project", proj, "submit", "--mode", "standalone", "--cohort", "C1"], env=env)
         self.assertEqual(code, 1, err)
         out = tmp / "report.html"
@@ -72,7 +74,9 @@ class ReportTest(unittest.TestCase):
                        "CommandFailed", "singleton", "Driver sessions", "31337", "hifi-human-wgs-wdl", "<svg",
                        "SLURM accounting (sacct) for 2 of 2 attempt(s)", "core-hours allocated", "prices: cpu_hour 0.05 EUR",
                        "estimated compute cost", "Core-hours per task", "fake_task", "mean per sample, clean",
-                       "results on disk, all attempts", "sacct (ok), 1 jobs"):
+                       "results on disk, all attempts", "sacct (ok), 1 jobs",
+                       "container backend", "ugc_slurm_singularity", "node-local scratch",
+                       "TMPDIR (bound at /mnt/scratch, TMPDIR inside every task)", "resource policy", "/site/resources.tsv"):
             self.assertIn(needle, text, needle)
         self.assertIn("EUR", text)
         self.assertNotIn("src=\"http", text)
@@ -106,6 +110,9 @@ class ReportTest(unittest.TestCase):
         checker = _Checker()
         checker.feed(text)
         self.assertEqual((checker.errors, checker.stack, checker.titles), ([], [], 1))
+        self.assertIn("node-local scratch", text)
+        self.assertIn("off (temporaries in the task", text)   # the plain test cfg has no scratch_env
+        self.assertIn("(miniwdl default)", text)              # and no container_backend line
 
 
 if __name__ == "__main__":

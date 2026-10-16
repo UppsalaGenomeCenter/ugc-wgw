@@ -21,7 +21,7 @@ from .manifest import CodeInfo
 from .stages import mode_stages
 from .util import parse_utc, read_json, utc_now
 from . import usage as usage_mod
-from .resources import Effective, GpuChoice
+from .resources import Effective, GpuChoice, read_engine_cfg
 from .usage import Prices
 from .wdllog import TaskStat, parse_workflow_log  # noqa: F401  (re-exported for the tests)
 
@@ -484,6 +484,16 @@ def render(cfg: Config, code: CodeInfo, reports: list[RunReport], *, ugc_wgw_ver
             prov_rows.append([f"reference bundle {name}", str(b.get("version", ""))])
     for k, v in sorted(engine.items()):
         prov_rows.append([f"engine {k}", str(v)])
+    # what the install's miniwdl.cfg says about where tasks run: the container backend, the node-local scratch
+    # (guide chapter 04) and the resource policy file; sacct cannot tell local-disk writes from shared ones
+    if cfg.miniwdl_cfg.exists():
+        eng = read_engine_cfg(cfg.miniwdl_cfg)
+        prov_rows.append(["container backend", eng.backend or "(miniwdl default)"])
+        prov_rows.append(["node-local scratch", f"{eng.scratch_env} (bound at {eng.scratch_mount}, TMPDIR inside every task)"
+                          if eng.scratch_env else "off (temporaries in the task's work directory)"])
+        prov_rows.append(["resource policy", eng.policy_path or "none"])
+    else:
+        prov_rows.append(["container backend", f"unknown ({cfg.miniwdl_cfg} is missing)"])
     prov_rows.append(["hosts", ", ".join(hosts)])
     if cfg.profile:
         prov_rows.append(["profile", f"{cfg.profile.get('name')} ({str(cfg.profile.get('sha256', ''))[:12]}) from {cfg.profile.get('path')}"])

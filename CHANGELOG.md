@@ -3,6 +3,22 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.9.2
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.4.0,
+unchanged since 0.9.0. No workflow changed since 0.9.1.
+
+- The run report's Provenance names the container backend, the node-local
+  scratch (`scratch_env` and its mount, or `off`) and the resource policy
+  file of the install's `miniwdl.cfg`, so a report says whether tasks had
+  the node's local disk.
+- `tests/bundle.sh` runs without Apptainer again: its check of the
+  `ugc_slurm_singularity` backend resolves the class through miniwdl's
+  plugin registry instead of constructing it, whose initialisation probes
+  `apptainer --version`. This is what failed the CI of 0.9.0 and 0.9.1
+  after every other step had passed.
+
 ## 0.9.1
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

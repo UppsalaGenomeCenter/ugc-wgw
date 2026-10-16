@@ -188,7 +188,10 @@ found. Sections:
 - Cards: samples, cohorts, runs by status, automatic retries, tasks and
   call-cache hits, summed run time and campaign span.
 - Provenance: ugc-pacbio-wgw version and commit, upstream tags, reference
-  bundle, engine versions, hosts.
+  bundles, engine versions, the container backend, the node-local scratch
+  (`TMPDIR (bound at /mnt/scratch, ...)` or `off`) and the resource policy
+  file of the install's `miniwdl.cfg`, hosts, the profile the project was
+  created from.
 - Stages: per stage the runs, subjects done, statuses, re-attempts, median,
   mean, max and total wall time, tasks and cache hits.
 - Resource usage: core-hours, CPU-hours used, GPU-hours, memory GB-hours,

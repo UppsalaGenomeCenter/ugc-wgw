@@ -25,10 +25,22 @@ def miniwdl_cmd(cfg: Config, stage: str, attempt_path: Path) -> list[str]:
     ]
 
 
-def launch(cmd: list[str], attempt_path: Path) -> subprocess.Popen:
+GPU_TYPE_ENV = "MINIWDL__UGC_WGW__GPU_TYPE"   # miniwdl's environment override of [ugc_wgw] gpu_type
+
+
+def run_env(cfg: Config) -> dict[str, str]:
+    """Environment the driver adds to every miniwdl run: the project's GPU type for the plugin (a GPU
+    flavour only; '' = any GPU of the partition). Not a workflow input, so changing it keeps the call cache."""
+    if cfg.deepvariant == "cpu":
+        return {}
+    return {GPU_TYPE_ENV: cfg.gpu_type}
+
+
+def launch(cmd: list[str], attempt_path: Path, extra_env: dict[str, str] | None = None) -> subprocess.Popen:
     files = run_files(attempt_path)
     env = dict(os.environ)
     env["NO_COLOR"] = "1"
+    env.update(extra_env or {})
     out = open(files.stdout, "ab")
     err = open(files.stderr, "ab")
     try:

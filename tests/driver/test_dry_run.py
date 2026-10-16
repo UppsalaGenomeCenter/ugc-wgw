@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from ugc_wgw import engine
 from ugc_wgw.db import DB
 
 from .helpers import VERSION, make_project, run_cli, write_bam, write_ids, write_tsv
@@ -44,6 +45,37 @@ class DryRunTest(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn("runnable=2 blocked=0", out)
         self.assertEqual(len([l for l in out.splitlines() if " run " in l and "ugc_wgw_assembly.wdl" in l]), 2)
+
+    def test_gpu_type_goes_to_the_plugin_not_the_inputs(self):
+        tmp = Path(tempfile.mkdtemp())
+        cfg = make_project(tmp, deepvariant="parabricks", gpu_type="l40s")
+        proj = str(cfg.project_dir)
+        run_cli(["--project", proj, "samples", "add", str(write_tsv(tmp, [{"sample_id": "S1", "hifi_reads": "a.bam"}]))])
+        code, out, err = run_cli(["--project", proj, "submit", "--mode", "standalone", "--samples", "S1", "--dry-run"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("# env: MINIWDL__UGC_WGW__GPU_TYPE='l40s'", out)
+        self.assertNotIn("gpuType", out)
+        env_log = tmp / "env.txt"
+        code, out, err = run_cli(["--project", proj, "submit", "--mode", "standalone", "--samples", "S1"],
+                                 env={"UGC_WGW_FAKE_ENV_LOG": str(env_log)})
+        self.assertEqual(code, 0, err)
+        self.assertIn("MINIWDL__UGC_WGW__GPU_TYPE='l40s'", env_log.read_text())
+        db = DB(cfg.db_path)
+        run = db.latest_run("sample", "S1", "singleton", VERSION)
+        manifest = json.loads((run.run_path / "run_manifest.json").read_text())
+        self.assertEqual(manifest["gpu_type"], "l40s")
+        inputs_doc = json.loads((run.run_path / "inputs.json").read_text())
+        self.assertFalse(any(k.endswith(".gpuType") for k in inputs_doc), inputs_doc.keys())
+        submitted = [json.loads(l) for l in (cfg.logs_dir / "events.jsonl").read_text().splitlines() if '"run.submitted"' in l][0]
+        self.assertEqual(submitted["detail"]["env"], {"MINIWDL__UGC_WGW__GPU_TYPE": "l40s"})
+        db.close()
+        # the cpu flavour sets nothing: no environment line, no manifest type
+        (tmp / "cpu").mkdir()
+        (tmp / "any").mkdir()
+        cfg2 = make_project(tmp / "cpu")
+        self.assertEqual(engine.run_env(cfg2), {})
+        cfg3 = make_project(tmp / "any", deepvariant="parabricks", gpu_type="")
+        self.assertEqual(engine.run_env(cfg3), {"MINIWDL__UGC_WGW__GPU_TYPE": ""})   # any GPU of the partition
 
     def test_preflight_fails_the_run_without_a_launch(self):
         tmp = Path(tempfile.mkdtemp())

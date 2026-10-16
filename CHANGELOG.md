@@ -3,6 +3,28 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.9.3
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.5.0. No
+workflow changed since 0.9.1.
+
+- The GPU type is applied by the plugin at submit instead of being passed
+  as the workflow's `gpuType` input. That input reached every task through
+  `RuntimeAttributes`, so the type was part of every call-cache key and
+  moving a project between GPU node types re-aligned every sample. The
+  driver now hands the project's `gpu_type` to the plugin per run
+  (`MINIWDL__UGC_WGW__GPU_TYPE`, miniwdl's override of `[ugc_wgw]
+  gpu_type`); an empty type requests any GPU of the partition, so one
+  project can use nodes of different GPU types; alignments are shared across
+  flavours. The run manifest records `gpu_type`; `--dry-run` prints the
+  environment line. Projects created before this release align once more.
+- `parabricks_gpus` must be even: upstream's task runs `pbrun deepvariant
+  --run-partition`, which refuses an odd GPU count; `init`, `config.json`
+  and profiles refuse it before a job is submitted. Chapter 12 explains the
+  shapes a 6-GPU node allows and how a project shapes its Parabricks jobs
+  through stage inputs.
+
 ## 0.9.2
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

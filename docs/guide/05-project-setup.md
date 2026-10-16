@@ -60,7 +60,7 @@ report names it under Provenance.
 | `--no-assembly-parents` | off | Assembly mode never trio-bins. |
 | `--deepvariant cpu\|gpu\|parabricks` | `cpu` | Small-variant caller of `singleton` and `upstream`: DeepVariant on CPUs, its `call_variants` step on one GPU, or NVIDIA Parabricks (chapter 12, "GPU tasks"). |
 | `--gpu-type TYPE` | empty | SLURM gres type of the GPU tasks (`a100`: `--gres gpu:a100:N`); empty asks for any GPU (`gpu:N`). |
-| `--parabricks-gpus N` | `4` | GPUs per Parabricks task; must not exceed one node's. |
+| `--parabricks-gpus N` | `4` | GPUs per Parabricks task; even (Parabricks' partition mode refuses an odd count) and not more than one node's. |
 
 The command checks that the code directory, the miniwdl executable and the
 reference map exist and that `VERSION` in the code directory is non-empty. A
@@ -87,8 +87,8 @@ sorted by key.
 | `max_inflight` | `4` | Concurrency cap for `submit` unless overridden on the command line. |
 | `poll_interval` | `30.0` | Seconds between polls. |
 | `assembly_use_parents` | `true` | Master switch for trio binning in assembly mode. |
-| `deepvariant` | `"cpu"` | `cpu`, `gpu` or `parabricks`: fills `use_gpu`, `use_parabricks_deepvariant`, `gpuType` and Parabricks' GPU count for `singleton` and `upstream` (chapter 12). |
-| `gpu_type`, `parabricks_gpus` | `""`, `4` | The gres type and the Parabricks GPU count behind that switch. |
+| `deepvariant` | `"cpu"` | `cpu`, `gpu` or `parabricks`: fills `use_gpu`, `use_parabricks_deepvariant` and Parabricks' GPU count for `singleton` and `upstream`; the GPU type goes to the plugin at submit (chapter 12). |
+| `gpu_type`, `parabricks_gpus` | `""`, `4` | The gres type (applied by the plugin at submit, not an input: changing it keeps the call cache; empty = any GPU of the partition) and the Parabricks GPU count (even) behind that switch. |
 | `stage_inputs` | `{}` | Per-stage input overrides, below. |
 | `profile` | `{}` | The profile `init --profile` applied: `name`, `path`, `sha256`, `applied` (the keys it set). Informational. |
 
@@ -144,9 +144,10 @@ entrypoint (the driver itself sets
 Parabricks); the driver checks only that the first segment is a call of the
 entrypoint, miniwdl checks the rest when the run starts, and
 `ugc-wgw stage-inputs --nested` checks it before. The DeepVariant flavour is not a stage input but
-the `deepvariant` key above, which sets `use_gpu`, `use_parabricks_deepvariant`
-and `gpuType` consistently for both stages; `stage_inputs` still win over
-it.
+the `deepvariant` key above, which sets `use_gpu` and
+`use_parabricks_deepvariant` consistently for both stages (the GPU type
+reaches the plugin outside the inputs, chapter 12); `stage_inputs` still
+win over it.
 
 ```mermaid
 flowchart TD

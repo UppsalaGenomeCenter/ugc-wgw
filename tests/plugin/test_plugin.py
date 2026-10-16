@@ -180,6 +180,30 @@ class PluginTests(unittest.TestCase):
         self.assertIsNone(resources.gpu_request({"cpu": 8}))
         self.assertEqual(resources.gpu_request({"gpuCount": 2, "gpuType": " "}), "gpu:2")
 
+    def test_gpu_type_from_config_applied_to_gpu_tasks(self):
+        """[ugc_wgw] gpu_type (the driver's MINIWDL__UGC_WGW__GPU_TYPE override) sets gpuType on GPU tasks."""
+        cfg = FakeCfg(ugc_wgw={"gpu_type": "l40s"})
+        c = FakeContainer(cpu=48, gpuCount=4, gpuType="")       # upstream's backend: unset type rendered as ""
+        drive(cfg, "run_parabricks_deepvariant", c, self.logger)
+        self.assertEqual(c.runtime_values["gpuType"], "l40s")
+        notice = [m for m in self.messages(resources.NOTICE_LEVEL) if getattr(m, "message", "") == "ugc-wgw gpu request"][-1]
+        self.assertEqual((notice.kwargs["gres"], notice.kwargs["gpu_type_from"]), ("gpu:l40s:4", "config"))
+        c = FakeContainer(cpu=8, gpuCount=1)                      # no gpuType key at all
+        drive(cfg, "deepvariant_call_variants_gpu", c, self.logger)
+        self.assertEqual(c.runtime_values["gpuType"], "l40s")
+        c = FakeContainer(cpu=48, gpuCount=4, gpuType="a100")     # an explicit workflow value wins
+        drive(cfg, "run_parabricks_deepvariant", c, self.logger)
+        self.assertEqual(c.runtime_values["gpuType"], "a100")
+        self.assertEqual(self.messages(resources.NOTICE_LEVEL)[-1].kwargs["gpu_type_from"], "workflow")
+        c = FakeContainer(cpu=8)                                  # a task without GPUs is untouched
+        drive(cfg, "pbmm2_align_wgs", c, self.logger)
+        self.assertEqual(c.runtime_values, {"cpu": 8})
+        c = FakeContainer(cpu=48, gpuCount=4, gpuType="")         # empty configured type: any GPU
+        drive(FakeCfg(ugc_wgw={"gpu_type": " "}), "run_parabricks_deepvariant", c, self.logger)
+        self.assertEqual(c.runtime_values, {"cpu": 48, "gpuCount": 4})
+        self.assertEqual(self.messages(resources.NOTICE_LEVEL)[-1].kwargs["gres"], "gpu:4")
+        self.assertEqual(resources.gpu_type(FakeCfg()), "")
+
     def test_partition_row_reaches_the_gpu_partition_key(self):
         with open(self.path, "w") as fh:
             fh.write(HEADER + "run_parabricks_deepvariant\t-\t-\t-\tgpu\t-\nugc_wgw_hifiasm_assemble\t-\t-\t-\tfat\t-\n")

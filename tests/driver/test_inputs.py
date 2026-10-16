@@ -7,6 +7,7 @@ from ugc_wgw.db import DB
 from ugc_wgw.log import Events
 from ugc_wgw.outputs import MissingOutputError
 from ugc_wgw.stages import declared_inputs, wdl_path
+from ugc_wgw.util import UgcError
 
 from .helpers import FAKE, REPO, VERSION, make_project, run_cli, seed_success, write_ids, write_tsv
 
@@ -70,7 +71,8 @@ class InputsTest(unittest.TestCase):
         self.cfg.deepvariant, self.cfg.gpu_type, self.cfg.parabricks_gpus = "parabricks", "a100", 2
         doc = inputs.generate(self.ctx("sample", "S1"), "singleton")[0]
         d = self.check_doc("singleton", doc)
-        self.assertEqual((d["use_gpu"], d["use_parabricks_deepvariant"], d["gpuType"]), (True, True, "a100"))
+        self.assertEqual((d["use_gpu"], d["use_parabricks_deepvariant"]), (True, True))
+        self.assertNotIn("gpuType", d)   # the type reaches the plugin through the run's environment, not the inputs
         self.assertEqual(d[inputs.PARABRICKS_GPUS_INPUT], 2)
         self.assertIn("ugc_wgw_singleton." + inputs.PARABRICKS_GPUS_INPUT, doc)
         self.cfg.stage_inputs = {"ugc_wgw_singleton": {"use_gpu": False}}   # overrides still win
@@ -106,6 +108,15 @@ class InputsTest(unittest.TestCase):
         self.assertEqual(code, 0, err)
         c = config.load(proj)
         self.assertEqual((c.deepvariant, c.gpu_type, c.parabricks_gpus), ("parabricks", "a100", 2))
+        # pbrun's partition mode wants an even GPU count: refused at init, in config.json and in a profile
+        code, _, err = run_cli(["init", str(self.tmp / "odd"), "--code", str(REPO), "--miniwdl", str(FAKE), "--cfg", str(self.cfg.miniwdl_cfg),
+                                "--ref-map", str(self.cfg.ref_map_file), "--deepvariant", "parabricks", "--parabricks-gpus", "3"])
+        self.assertEqual(code, 1)
+        self.assertIn("parabricks_gpus must be even", err)
+        for odd in (1, 3, 5):
+            with self.assertRaisesRegex(UgcError, "must be even"):
+                config.check_gpus(odd)
+        self.assertEqual([config.check_gpus(n) for n in (2, 4, 6)], [2, 4, 6])
         code, out, err = run_cli(["init", str(self.tmp / "p3"), "--code", str(REPO), "--miniwdl", str(FAKE), "--cfg", str(self.cfg.miniwdl_cfg),
                                   "--ref-map", str(self.cfg.ref_map_file), "--parabricks-gpus", "0"])
         self.assertEqual(code, 1)

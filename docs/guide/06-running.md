@@ -107,7 +107,8 @@ prints the resource summary (caps and policy rows, chapter 12), a header
 with the counts, then for each runnable candidate of the first wave the
 attempt directory, the generated inputs JSON, the result of the input
 preflight (`# inputs: 14 read file(s), 61.2 GB, present and complete`, or one
-`# input problem:` line per file) and the exact `miniwdl run` command line,
+`# input problem:` line per file), for a GPU flavour the environment line
+carrying the GPU type to the plugin, and the exact `miniwdl run` command line,
 then the blocked list with reasons and the active list. It
 also reconciles first, so the lists reflect what a real `submit` would see.
 Use it to check overrides, paths and the plan before committing a cluster to a
@@ -120,6 +121,7 @@ cohort.
 ## sample S1 / upstream -> /proj/ugc/results/c26/samples/S1/0.8.0/upstream/attempt-1
 { "ugc_wgw_upstream.hifi_reads": [...], ... }
 # inputs: 14 read file(s), 61.2 GB, present and complete
+# env: MINIWDL__UGC_WGW__GPU_TYPE='l40s'  (the plugin's gres type; not an input, so not part of the call cache)
 miniwdl run /proj/ugc/versions/0.8.0/code/workflows/ugc_wgw_upstream.wdl -i .../inputs.json \
     --dir .../attempt-1/. -o run.json --cfg /proj/ugc/versions/0.8.0/miniwdl.cfg --no-color --log-json
 ...

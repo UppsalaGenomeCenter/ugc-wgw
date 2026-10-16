@@ -77,3 +77,7 @@ resources = {{TASK_RESOURCES}}
 # leave the shared file system. Site value TASK_SCRATCH_ENV.
 scratch_env = {{TASK_SCRATCH_ENV}}
 scratch_mount = /mnt/scratch
+# GPU gres type for tasks that ask for GPUs (l40s, a100; empty = any GPU of the partition). The driver passes
+# the project's config.json gpu_type per run as MINIWDL__UGC_WGW__GPU_TYPE, which outranks this line; set it
+# here only for runs started by hand. Not a workflow input, so changing it keeps the call cache.
+gpu_type =

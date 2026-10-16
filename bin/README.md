@@ -136,8 +136,10 @@ and the policy changes miniwdl logged. Guide: chapter 12.
 GPU DeepVariant is a project switch: `ugc-wgw init --deepvariant gpu|parabricks
 [--gpu-type a100] [--parabricks-gpus 4]` (or the `deepvariant`, `gpu_type`,
 `parabricks_gpus` keys of `config.json`) sets `use_gpu`,
-`use_parabricks_deepvariant`, `gpuType` and Parabricks' GPU count for
-`singleton` and `upstream`; the install needs `SINGULARITY_NV=1` and
+`use_parabricks_deepvariant` and Parabricks' GPU count for `singleton` and
+`upstream`, and hands `gpu_type` to the plugin through the run's environment
+(`MINIWDL__UGC_WGW__GPU_TYPE`) rather than as a workflow input, so changing
+the GPU node type keeps the call cache; the install needs `SINGULARITY_NV=1` and
 `SLURM_PARTITION_GPU` in its site file, and `ugc-wgw resources` shows the
 resulting gres per task and warns when either is missing (guide chapter 12).
 

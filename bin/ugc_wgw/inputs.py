@@ -79,12 +79,12 @@ PARABRICKS_GPUS_INPUT = "upstream.parabricks_deepvariant.run_parabricks_deepvari
 
 
 def _deepvariant_inputs(ctx: BuildContext) -> dict[str, object]:
-    """`use_gpu`, `use_parabricks_deepvariant`, `gpuType` and Parabricks' GPU count from config.json's
-    `deepvariant` switch (guide chapter 12); `stage_inputs` still override them."""
+    """`use_gpu`, `use_parabricks_deepvariant` and Parabricks' GPU count from config.json's `deepvariant`
+    switch (guide chapter 12); `stage_inputs` still override them. The GPU type is deliberately not an
+    input: `RuntimeAttributes.gpuType` reaches every task and would be part of every call-cache key, so the
+    plugin applies config.json `gpu_type` at submit time instead (engine.run_env)."""
     mode = ctx.cfg.deepvariant
     doc: dict[str, object] = {"use_gpu": mode != "cpu", "use_parabricks_deepvariant": mode == "parabricks"}
-    if mode != "cpu" and ctx.cfg.gpu_type:
-        doc["gpuType"] = ctx.cfg.gpu_type
     if mode == "parabricks":
         doc[PARABRICKS_GPUS_INPUT] = ctx.cfg.parabricks_gpus
     return doc

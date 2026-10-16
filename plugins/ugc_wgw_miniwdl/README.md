@@ -77,3 +77,17 @@ removes with the job. With `scratch_env` empty the backend is byte for byte
 `slurm_singularity`. The log file the driver reads keeps its name
 (`cli_name` is inherited).
 
+## The GPU type
+
+`[ugc_wgw] gpu_type` names the SLURM gres type (`l40s`, `a100`) that every
+task with a `gpuCount` is submitted with; empty means any GPU of the
+partition (`--gres gpu:N`). The driver passes the project's `gpu_type`
+per run through miniwdl's environment override
+(`MINIWDL__UGC_WGW__GPU_TYPE`), which outranks the configuration file.
+Why not a workflow input: upstream's `RuntimeAttributes.gpuType` is an
+input of every task, so a type given that way is part of every task's
+call-cache key and switching between GPU nodes would re-align every
+sample. A non-empty `gpuType` the workflow set itself (an explicit stage
+input) wins over the configuration. The `ugc-wgw gpu request` NOTICE says
+where the type came from (`gpu_type_from`).
+

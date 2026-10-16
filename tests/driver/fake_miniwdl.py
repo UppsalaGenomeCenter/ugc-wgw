@@ -12,6 +12,7 @@ Environment knobs:
   UGC_WGW_FAKE_HANG=1         ignore completion; on SIGTERM write an Interrupted error and exit 143
   UGC_WGW_FAKE_VERSION=STR    echo this as ugc_wgw_workflow_version instead of the input
   UGC_WGW_FAKE_TRACE=FILE     append "start <id> <t>" / "end <id> <t>" lines
+  UGC_WGW_FAKE_ENV_LOG=FILE   append "<id> MINIWDL__UGC_WGW__GPU_TYPE=<repr>" per run (the driver's GPU-type override)
   UGC_WGW_FAKE_FAIL_CLASS=<class>[:<exit_status>]   error class of a failure (default CommandFailed:1); CommandFailed
                           mimics miniwdl 1.15 (no message, exit_status/stderr_file/node/dir, top-level from_dir)
   UGC_WGW_FAKE_FAIL_ATTEMPTS=1,2   fail only when the attempt directory is attempt-<n> for n in the list
@@ -47,6 +48,10 @@ def _trace(line: str) -> None:
     if path:
         with open(path, "a") as fh:
             fh.write(f"{line} {time.time():.3f}\n")
+    env_log = os.environ.get("UGC_WGW_FAKE_ENV_LOG")
+    if env_log and line.startswith("start "):   # what the driver put in the engine's environment
+        with open(env_log, "a") as fh:
+            fh.write(f"{line.split()[1]} MINIWDL__UGC_WGW__GPU_TYPE={os.environ.get('MINIWDL__UGC_WGW__GPU_TYPE', '-')!r}\n")
 
 
 def _inferred_sex(sid: str, v: dict[str, object]) -> str:

@@ -27,7 +27,7 @@ when stderr is a terminal and `NO_COLOR` is unset. The file log
 | `--no-assembly-parents` | off | Assembly never trio-bins. |
 | `--deepvariant cpu\|gpu\|parabricks` | `cpu` | Small-variant caller of `singleton`/`upstream` (chapter 12). |
 | `--gpu-type TYPE` | empty | SLURM gres type of the GPU tasks; empty = any GPU. |
-| `--parabricks-gpus N` | `4` | GPUs per Parabricks task. |
+| `--parabricks-gpus N` | `4` | GPUs per Parabricks task; even. |
 
 ### `ugc-wgw samples add <tsv>`
 
@@ -246,8 +246,8 @@ SIGINT or SIGTERM.
 | `input_thresholds` | `{}` | Floors of the input BAM check at `samples add` and `samples check`: `file_reads_min` (1000), `sample_gbases_min` (30); `0` disables one (chapter 05). |
 | `project_url` | the public repository | Repository link printed in the analysis summaries. |
 | `deepvariant` | `"cpu"` | `cpu`, `gpu` or `parabricks`: the small-variant caller of `singleton` and `upstream` (chapter 12). |
-| `gpu_type` | `""` | SLURM gres type behind `--gres gpu:<type>:N`; empty = `gpu:N`. |
-| `parabricks_gpus` | `4` | GPUs per Parabricks task. |
+| `gpu_type` | `""` | SLURM gres type behind `--gres gpu:<type>:N`; empty = `gpu:N`, any GPU of the partition. Passed to the plugin per run (`MINIWDL__UGC_WGW__GPU_TYPE`), not a workflow input, so changing it keeps the call cache (chapter 12). |
+| `parabricks_gpus` | `4` | GPUs per Parabricks task; even (partition mode). |
 | `prices` | `{}` | Unit prices for `usage` and `report` cost figures, e.g. `{"cpu_hour": 0.04, "gpu_hour": 2.5, "currency": "EUR"}` (chapter 07). |
 | `accounting` | `true` | Read `sacct` for every finished run into `accounting.json` (nothing happens without `sacct`). |
 | `accounting_timeout` | `120` | Seconds allowed per `sacct` call. |
@@ -312,7 +312,8 @@ Chapter 12.
 `slurm_account_gpu`; one JSON line); `[slurm] extra_args`;
 `[singularity] run_options` (`--nv` for the GPU tasks, from
 `SINGULARITY_NV`); `[call_cache] dir`; `[ugc_wgw] resources`,
-`scratch_env` (from `TASK_SCRATCH_ENV`) and `scratch_mount`. Everything
+`scratch_env` (from `TASK_SCRATCH_ENV`), `scratch_mount` and `gpu_type`
+(empty; the driver overrides it per run from the project). Everything
 else, `[scheduler] container_backend = ugc_slurm_singularity` included, is
 required as rendered (chapter 04).
 

@@ -176,17 +176,39 @@ gives it 256G. Which of them runs is one project switch, not a stage input:
 ugc-wgw init ... --deepvariant gpu --gpu-type a100          # or: parabricks [--parabricks-gpus 4]
 ```
 
-`config.json` keeps it as `deepvariant`, `gpu_type` and `parabricks_gpus`,
-and the driver fills `use_gpu`, `use_parabricks_deepvariant`, `gpuType`
-and Parabricks' GPU count (a call-qualified input the WDL does not expose
-otherwise) for both stages; `stage_inputs` can still override any of
-them. Two things in the install carry the request to SLURM:
+The Parabricks GPU count must be even: the task runs `pbrun deepvariant
+--run-partition`, and partition mode refuses an odd count ("Cannot run
+partition with 3 gpus"), so a 6-GPU node holds one job of 6, one of 4 plus
+one of 2, or three of 2; the driver refuses an odd `parabricks_gpus`. The
+task's `threads` (48) and `mem_gb` (192) are call-qualified stage inputs
+(`upstream.parabricks_deepvariant.run_parabricks_deepvariant.threads`, the
+same for `mem_gb`; `ugc-wgw stage-inputs --nested` lists them), so a
+project can shape its jobs to share a node without touching the site's
+policy.
+
+`config.json` keeps it as `deepvariant`, `gpu_type` and `parabricks_gpus`.
+The driver fills `use_gpu`, `use_parabricks_deepvariant` and Parabricks'
+GPU count (a call-qualified input the WDL does not expose otherwise) for
+both stages; `stage_inputs` can still override them. The GPU type takes
+another road: upstream's `RuntimeAttributes.gpuType` is an input of every
+task, so a type passed as a workflow input is part of every task's
+call-cache key, and switching a project from the L40S to the A100 nodes
+would re-align every sample. The driver therefore hands `gpu_type` to the
+`ugc_wgw_resources` plugin through the run's environment
+(`MINIWDL__UGC_WGW__GPU_TYPE`, miniwdl's override of `[ugc_wgw] gpu_type`),
+and the plugin sets it on every task that asks for GPUs just before
+submission. Changing `gpu_type`, or leaving it empty so that a project
+uses whichever GPU node is free, costs no cache hits; the workflow's own
+`gpuType` input stays unset, and an explicit `stage_inputs` value for it
+wins over the configuration. Two things in the install carry the request
+to SLURM:
 
 1. **The gres.** miniwdl-slurm turns the task's `gpuCount` and `gpuType`
-   into `sbatch --gres gpu:<type>:N`, `gpu:N` when the type is empty. The
-   type must be one of the partition's (`sinfo -o "%P %G"` prints
-   `gpu:a100:4`). Upstream's HPC backend fills an unset type with `""`,
-   which would render as `gpu::N`; the `ugc_wgw_resources` plugin drops it.
+   into `sbatch --gres gpu:<type>:N`, `gpu:N` when the type is empty, which
+   SLURM satisfies with any GPU type in the partition. The type must be one
+   of the partition's (`sinfo -o "%P %G"` prints `gpu:a100:4`). Upstream's
+   HPC backend fills an unset type with `""`, which would render as
+   `gpu::N`; the plugin drops it.
 2. **The partition and `--nv`.** GPU jobs need the GPU partition:
    `SLURM_PARTITION_GPU` in the site file (chapter 04) becomes
    `slurm_partition_gpu`, which miniwdl-slurm uses for every task with a

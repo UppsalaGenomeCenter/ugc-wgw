@@ -189,7 +189,8 @@ class Submitter:
             subject_type=cand.subject_type, subject_id=cand.subject_id, stage=cand.stage, mode=self.sel.mode,
             ugc_wgw_version=self.ugc_wgw_version, run_dir=str(attempt_path), status="pending", attempt=attempt,
             cohort_id=cand.cohort_id, inputs_path=str(files.inputs), inputs_sha256=sha, host=hostname(),
-            meta={"members": members, "resource_policy": resources.policy_ref(self.cfg)},
+            meta={"members": members, "resource_policy": resources.policy_ref(self.cfg),
+                  **({"gpu_type": self.cfg.gpu_type} if self.cfg.deepvariant != "cpu" else {})},
         )
         self.db.insert_run(run)
         self.events.emit("run.created", run_id=run.run_id, subject=run.subject_id, stage=run.stage, attempt=attempt,
@@ -214,8 +215,9 @@ class Submitter:
 
     def start(self, run: RunRecord) -> Child:
         cmd = engine.miniwdl_cmd(self.cfg, run.stage, run.run_path)
+        extra_env = engine.run_env(self.cfg)
         try:
-            proc = engine.launch(cmd, run.run_path)
+            proc = engine.launch(cmd, run.run_path, extra_env)
         except OSError as exc:
             result = engine.RunResult("failed", None, "launch_error", str(exc))
             finalize_run(self.cfg, self.db, self.events, self.code, self.engine_info, run, result)
@@ -224,7 +226,7 @@ class Submitter:
         run.pid, run.started_at, run.status = proc.pid, utc_now(), "submitted"
         self.db.set_status(run.run_id, "submitted", pid=proc.pid, host=hostname(), started_at=run.started_at)
         self.events.emit("run.submitted", run_id=run.run_id, subject=run.subject_id, stage=run.stage, pid=proc.pid,
-                         cmd=" ".join(cmd))
+                         cmd=" ".join(cmd), **({"env": extra_env} if extra_env else {}))
         self.launched += 1
         return Child(run, proc)
 
@@ -415,6 +417,8 @@ def dry_run(cfg: Config, db: DB, ugc_wgw_version: str, sel: Selection, *, any_ve
                 print(f"# input problem: {problem}", file=out)
         elif n_files:
             print(f"# inputs: {n_files} read file(s), {total / 1e9:.1f} GB, present and complete", file=out)
+        for k, v in engine.run_env(cfg).items():
+            print(f"# env: {k}={v!r}  (the plugin's gres type; not an input, so not part of the call cache)", file=out)
         print(" ".join(engine.miniwdl_cmd(cfg, cand.stage, attempt_path)), file=out)
     for b in plan.blocked:
         print(f"\n# blocked: {b.candidate.label()}: {b.reason}", file=out)

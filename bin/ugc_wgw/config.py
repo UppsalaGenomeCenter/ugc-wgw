@@ -179,6 +179,10 @@ def check_gpus(value: object) -> int:
         raise UgcError(f"parabricks_gpus must be a positive integer, not {value!r}") from None
     if n < 1:
         raise UgcError(f"parabricks_gpus must be a positive integer, not {value!r}")
+    if n % 2:
+        # upstream's task runs `pbrun deepvariant --run-partition` (no regions BED in our stages), and partition mode
+        # refuses an odd GPU count: "Cannot run partition with 3 gpus, make gpu number mulitple of 2"
+        raise UgcError(f"parabricks_gpus must be even (pbrun deepvariant --run-partition refuses an odd GPU count), not {n}")
     return n
 
 

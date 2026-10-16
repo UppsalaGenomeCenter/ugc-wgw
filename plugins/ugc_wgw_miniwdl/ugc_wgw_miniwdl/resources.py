@@ -8,11 +8,15 @@ but not yet submitted, stage 3 sees the outputs. Only stage 2 does anything here
 Configuration: `[ugc_wgw] resources = <path>` in miniwdl.cfg (rendered by scripts/install-bundle.sh).
 Unset or empty means no policy; a missing file is an empty policy. See docs/guide/12-resources.md.
 
-GPU tasks (runtime `gpuCount`, `gpuType`): upstream's HPC backend fills `gpuType` with "" when no type is
-given, which miniwdl-slurm would render as `--gres gpu::N`; the empty type is dropped here so the request
-becomes `gpu:N` (or `gpu:<type>:N` when a type is set). A policy row that moves a GPU task to a partition
-also sets `slurm_partition_gpu`, the key miniwdl-slurm prefers for tasks with `gpuCount` (it is otherwise
-the site default `SLURM_PARTITION_GPU`, which would win over the row).
+GPU tasks (runtime `gpuCount`, `gpuType`): the gres type comes from `[ugc_wgw] gpu_type`, which the driver
+passes per run through miniwdl's environment override (MINIWDL__UGC_WGW__GPU_TYPE, the project's config.json
+`gpu_type`), not through a workflow input: upstream's `RuntimeAttributes.gpuType` is an input of every task,
+so a type given that way changes every task's call-cache key and switching GPU nodes re-aligns everything.
+A non-empty `gpuType` the WDL set itself (an explicit stage input) wins. Upstream's HPC backend fills
+`gpuType` with "" when no type is given, which miniwdl-slurm would render as `--gres gpu::N`; an empty type
+is dropped so the request becomes `gpu:N` (any GPU of the partition) or `gpu:<type>:N`. A policy row that
+moves a GPU task to a partition also sets `slurm_partition_gpu`, the key miniwdl-slurm prefers for tasks with
+`gpuCount` (it is otherwise the site default `SLURM_PARTITION_GPU`, which would win over the row).
 """
 from __future__ import annotations
 
@@ -26,6 +30,7 @@ from . import crossdev, policy  # noqa: F401  (importing crossdev installs the h
 
 CFG_SECTION = "ugc_wgw"
 CFG_KEY = "resources"
+GPU_TYPE_KEY = "gpu_type"
 NOTICE_LEVEL = 25
 VERBOSE_LEVEL = 15
 MESSAGE = "ugc-wgw resource policy applied"
@@ -64,6 +69,24 @@ def policy_path(cfg: Any) -> str:
     return cfg_get(cfg, CFG_SECTION, CFG_KEY, "").strip()
 
 
+def gpu_type(cfg: Any) -> str:
+    """`[ugc_wgw] gpu_type`: the SLURM gres type for tasks that ask for GPUs ('' = any type in the partition)."""
+    return cfg_get(cfg, CFG_SECTION, GPU_TYPE_KEY, "").strip()
+
+
+def apply_gpu_type(cfg: Any, runtime_values: Dict[str, Any]) -> Optional[str]:
+    """Set `gpuType` from the configuration on a task with `gpuCount` whose WDL gave none (or ""); returns the
+    type applied, None when nothing changed. Read for every task so the driver's per-run override counts as used."""
+    configured = gpu_type(cfg)
+    if "gpuCount" not in runtime_values or not configured:
+        return None
+    current = runtime_values.get("gpuType")
+    if current is not None and str(current).strip():
+        return None   # the workflow (an explicit stage input) set a type: it wins
+    runtime_values["gpuType"] = configured
+    return configured
+
+
 def gpu_request(runtime_values: Dict[str, Any]) -> Optional[str]:
     """The gres miniwdl-slurm will ask for (`gpu:N` or `gpu:<type>:N`), None for a task without gpuCount.
     Drops an empty `gpuType` in place: upstream's HPC backend sets "" when no type is configured, and
@@ -80,11 +103,14 @@ def gpu_request(runtime_values: Dict[str, Any]) -> Optional[str]:
 
 def apply_policy(cfg: Any, logger: logging.Logger, task_name: str, container: Any) -> Dict[str, Any]:
     """Apply the configured policy to `container.runtime_values`; returns the changes (empty when none).
-    Also normalises the GPU request (gpu_request) and logs it, policy or not."""
+    Also applies the configured GPU type (apply_gpu_type), normalises the GPU request (gpu_request) and logs
+    it, policy or not."""
+    applied = apply_gpu_type(cfg, container.runtime_values)
     gres = gpu_request(container.runtime_values)
     changes = _apply_rows(cfg, logger, task_name, container, gres)
     if gres is not None:
         logger.log(NOTICE_LEVEL, _structured("ugc-wgw gpu request", task=task_name, gres=gres,
+                                             gpu_type_from="config" if applied else "workflow",
                                              partition=container.runtime_values.get("slurm_partition_gpu",
                                                                                     container.runtime_values.get("slurm_partition"))))
     return changes

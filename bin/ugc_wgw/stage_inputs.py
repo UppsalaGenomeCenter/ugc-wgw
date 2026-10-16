@@ -40,7 +40,6 @@ _SAMPLE: dict[str, Source] = {
 _DEEPVARIANT: dict[str, Source] = {
     "use_gpu": (CONFIG, "deepvariant"),
     "use_parabricks_deepvariant": (CONFIG, "deepvariant"),
-    "gpuType": (CONFIG, "gpu_type, GPU flavours only"),
 }
 _COHORT: dict[str, Source] = {
     "cohort_id": (DRIVER, "frozen cohort"),
@@ -151,9 +150,16 @@ class Row:
         return d
 
 
+# notes for inputs nobody fills (FREE) that deserve a word in the listing
+FREE_NOTES: dict[str, str] = {
+    "gpuType": "leave unset: the plugin applies config.json gpu_type at submit, outside the inputs, so a change keeps "
+               "the call cache; an explicit value here wins and is cached (chapter 12)",
+}
+
+
 def source(stage: str, name: str, *, nested: bool) -> Source:
     table = NESTED_SOURCES if nested else SOURCES
-    return table.get(stage, {}).get(name, (FREE, ""))
+    return table.get(stage, {}).get(name, (FREE, FREE_NOTES.get(name, "") if not nested else ""))
 
 
 def own_rows(cfg: Config, stage: str) -> list[Row]:

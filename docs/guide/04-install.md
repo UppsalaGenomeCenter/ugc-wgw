@@ -279,6 +279,7 @@ and the next run picks it up.
 | `[singularity] run_options` | `--containall --no-mount hostfs`, plus `--nv` with `SINGULARITY_NV=1` | `--nv` is what lets the GPU DeepVariant and Parabricks tasks see a device (chapter 12). |
 | `[scheduler] container_backend` | `ugc_slurm_singularity` | miniwdl-slurm's `slurm_singularity` plus the node-local scratch below; identical to it when `scratch_env` is empty. |
 | `[ugc_wgw] scratch_env`, `scratch_mount` | `TASK_SCRATCH_ENV`, `/mnt/scratch` | The job variable naming the node's per-job scratch directory and where it is bound inside the containers. |
+| `[ugc_wgw] gpu_type` | empty | The gres type of GPU tasks; the driver overrides it per run with the project's `gpu_type` (chapter 12), so it matters only for runs started by hand. |
 | `[slurm] extra_args` | site value | Qos, reservation and the like; never the partition (chapter 12). |
 | `[task_runtime] command_shell` | `/bin/bash` | Upstream commands use bash arrays. |
 | `[task_runtime] cpu_max`, `memory_max` | site values, default `0` | Caps on any task's request; miniwdl rounds larger requests down and logs it (chapter 12). Memory is rendered in bytes. |

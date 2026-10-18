@@ -38,12 +38,13 @@ there once and never overwrites them, so a site edits them in place), then
 as `backends/hpc/profiles/NAME.json` in the code; a path to a file works
 too. The bundle ships `cpu` (no alignment chunking, pbmm2 on 24 threads so
 two alignments share a 48-core node, 20 runs in flight) and `parabricks`
-(the same with Parabricks on 4 GPUs). Flags given on the command line win
-over the profile. The profile's values are copied into `config.json`, and
-`profile` there records its name, path, checksum and the keys it set, so a
-project stays self-contained while the site's profile evolves;
-`ugc-wgw stage-inputs` marks the overrides that came from it, and the run
-report names it under Provenance.
+(the same with Parabricks on 4 GPUs of any type and 256 GiB of host
+memory). Flags given on the command line win over the profile. The
+profile's values are copied into `config.json`, and `profile` there
+records its name, path, checksum and the keys it set, so a project stays
+self-contained while the site's profile evolves; `ugc-wgw stage-inputs`
+marks the overrides that came from it, and the run report names it under
+Provenance.
 
 | Flag | Default | Meaning |
 |---|---|---|

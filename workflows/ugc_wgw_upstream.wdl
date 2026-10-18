@@ -59,7 +59,7 @@ workflow ugc_wgw_upstream {
       description: "Optional minimum CPU platform to use for tasks on GCP"
     }
     gpuType: {
-      description: "GPU type of the GPU tasks (sbatch --gres gpu:<type>:N under miniwdl-slurm); the driver fills it from config.json gpu_type for the gpu and parabricks flavours"
+      description: "GPU type of the GPU tasks (sbatch --gres gpu:<type>:N under miniwdl-slurm). Leave unset: the ugc_wgw_resources plugin applies config.json gpu_type at submit, so the type stays out of the call cache; a value given here wins over it"
     }
     container_registry: {
       description: "Container registry for upstream images; default quay.io/pacbio"

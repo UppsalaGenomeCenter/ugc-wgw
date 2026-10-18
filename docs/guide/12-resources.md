@@ -184,7 +184,22 @@ task's `threads` (48) and `mem_gb` (192) are call-qualified stage inputs
 (`upstream.parabricks_deepvariant.run_parabricks_deepvariant.threads`, the
 same for `mem_gb`; `ugc-wgw stage-inputs --nested` lists them), so a
 project can shape its jobs to share a node without touching the site's
-policy.
+policy. Measured on five 19–22x samples (a 6-GPU L40S node with 64 cores
+and a 4-GPU A100 node): a 4-GPU job takes 11.5 minutes on the L40S node
+and 16.7 on the A100 node, a 6-GPU job 11.8 minutes (1.5 times the
+GPU-hours for nothing: above four GPUs the job waits on its serial phases
+and the file system, with 31 of 48 cores busy), a 2-GPU job on 21 threads
+26 minutes, and three of those give the 6-GPU node 6.9 samples an hour
+against 5.3 with one 4-GPU job at a time. The calls were identical across
+4 and 6 GPUs and both GPU models. So four GPUs per job with an empty
+`gpu_type`, which lets a project use every GPU node, is the shape to run;
+`--parabricks-gpus 2` with `threads` 21 and `mem_gb` 120 is the better use
+of a 6-GPU node when the time per sample does not matter. Host memory
+grows with the GPU count (81, 126 and 168 GB peak for 2, 4 and 6 GPUs at
+this depth) as well as with depth, hence the 256G row for 4-GPU jobs. Keep
+`threads` within `TASK_CPU_MAX`: the cap clamps the allocation, not the
+command's `--threads`, so 64 threads under a 48-core cap oversubscribe the
+job.
 
 `config.json` keeps it as `deepvariant`, `gpu_type` and `parabricks_gpus`.
 The driver fills `use_gpu`, `use_parabricks_deepvariant` and Parabricks'

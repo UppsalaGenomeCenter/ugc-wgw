@@ -1,11 +1,13 @@
 {
-  "description": "As cpu, with Parabricks DeepVariant on 4 GPUs of an L40S node (12 minutes per sample on the GPU instead of 65 core-hours; jobs serialise on a single GPU node, and Parabricks calls about 10 % fewer indels than CPU DeepVariant, so benchmark against a truth set before production). gpu_type sets the gres type and travels into every task's inputs: projects with different gpu_type values share no call cache.",
+  "description": "As cpu, with Parabricks DeepVariant on 4 GPUs of any type (gpu_type \"\": the plugin applies the type at submit, so the jobs use every GPU node and the call cache is shared; measured 2026-10-16: 11-12 minutes per sample on a 6-GPU L40S node, 17 on a 4-GPU A100 node, instead of 65 core-hours; six GPUs are no faster, three 2-GPU jobs per node give more samples an hour at 26 minutes each). mem_gb 256 because Parabricks' host memory passes the task's 192 GiB default on deeper samples. Parabricks calls about 10 % fewer indels than CPU DeepVariant, so benchmark against a truth set before production.",
   "max_inflight": 20,
   "deepvariant": "parabricks",
-  "gpu_type": "l40s",
+  "gpu_type": "",
   "parabricks_gpus": 4,
   "stage_inputs": {
-    "singleton": {"use_alignment_chunking": false, "upstream.pbmm2.pbmm2_align_wgs.threads": 24},
-    "upstream": {"use_alignment_chunking": false, "upstream.pbmm2.pbmm2_align_wgs.threads": 24}
+    "singleton": {"use_alignment_chunking": false, "upstream.pbmm2.pbmm2_align_wgs.threads": 24,
+                  "upstream.parabricks_deepvariant.run_parabricks_deepvariant.mem_gb": 256},
+    "upstream": {"use_alignment_chunking": false, "upstream.pbmm2.pbmm2_align_wgs.threads": 24,
+                 "upstream.parabricks_deepvariant.run_parabricks_deepvariant.mem_gb": 256}
   }
 }

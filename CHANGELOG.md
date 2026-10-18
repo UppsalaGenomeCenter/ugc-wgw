@@ -3,6 +3,25 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.9.4
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.5.0,
+unchanged. The only workflow change is a parameter description.
+
+- The `parabricks` profile asks for 4 GPUs of any type (`gpu_type` empty)
+  and gives `run_parabricks_deepvariant` 256 GiB through the `mem_gb` stage
+  input of `singleton` and `upstream`, after measuring the GPU shapes on
+  five samples: four GPUs per job with an empty type use every GPU node,
+  six GPUs take as long as four, three 2-GPU jobs give a 6-GPU node its
+  best throughput, and the calls do not depend on the GPU count or model.
+  Site copies of the profile under `<prefix>/profiles/` are never
+  overwritten by the installer and need the same edit. Chapter 12 and the
+  HPC checklist carry the numbers.
+- The `gpuType` descriptions of `ugc_wgw_singleton` and `ugc_wgw_upstream`
+  say the plugin applies the type at submit; they still described the
+  behaviour before 0.9.3.
+
 ## 0.9.3
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

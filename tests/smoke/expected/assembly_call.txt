@@ -1,0 +1,23 @@
+# Expected outputs of ugc_wgw_assembly_call, one glob per line relative to out/ (arrays: name/<i>/file).
+asm_bams/*/*.asm.*.bam
+asm_bam_indices/*/*.bam.bai
+asm_pafs/*/*.asm.*.paf.gz
+chrom_coverage/*.asm.chrom_coverage.tsv
+karyotype_json/*.asm.karyotype.json
+regroup_log/*.asm.regroup.tsv
+dipcall_vcf/*.dipcall.*.vcf.gz
+dipcall_vcf_index/*.dipcall.*.vcf.gz.tbi
+dipcall_vcf_stats/*.dipcall.*.vcf.gz.stats.txt
+dipcall_raw_vcf/*.dip.vcf.gz
+dipcall_bed/*.dip.bed
+dipcall_hap_beds/*/*.hap[12].bed
+pav_vcf/*.pav.*.vcf.gz
+pav_vcf_index/*.pav.*.vcf.gz.tbi
+pav_vcf_stats/*.pav.*.vcf.gz.stats.txt
+pav_raw_vcf/*.pav.raw.vcf.gz
+pav_raw_vcf_index/*.pav.raw.vcf.gz.csi
+pav_callable_beds/*/*.pav.callable_ref_*.bed
+unreliable_beds/*/*.asm.unreliable.bed
+reliable_bed/*.asm.reliable.bed
+reliable_summary/*.asm.reliable.summary.tsv
+ugc_wgw_manifest/*.assembly_call.ugc_wgw_manifest.json

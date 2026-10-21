@@ -251,6 +251,79 @@ class InputsTest(unittest.TestCase):
         self.assertEqual(d["hifiasm_extra_params"], "--telo-m CCCTAA")
         self.assertEqual(d["hifiasm_mem_gb"], 200)
 
+    def test_assembly_call(self):
+        seed_success(self.cfg, self.db, "assembly", "sample", "K1", {"sample_id": "K1", "hifi_reads": ["/k"], "father_id": "S1", "mother_id": "S3",
+                                                                      "father_hifi_reads": ["/f"], "mother_hifi_reads": ["/m"]}, mode="assembly")
+        seed_success(self.cfg, self.db, "assembly", "sample", "S1", {"sample_id": "S1", "hifi_reads": ["/s"]}, mode="assembly")
+        # trio-binned, no read-based run: the contract travels, nothing optional
+        ctx = self.ctx("sample", "K1", "assembly")
+        doc, members = inputs.generate(ctx, "assembly_call")
+        d = self.check_doc("assembly_call", doc)
+        self.assertTrue(d["trio"])
+        self.assertEqual(d["haplotype_labels"], ["pat", "mat"])
+        self.assertEqual(len(d["hap_fastas"]), 2)
+        self.assertTrue(d["hap_fastas"][0].endswith("K1.asm.dip.hap1.p_ctg.fasta.gz"))
+        self.assertNotIn("read_small_variant_vcf", d)
+        self.assertTrue(d["flagger_bed"].endswith("K1.asm.flagger.bed"))
+        self.assertEqual([m["stage"] for m in members], ["assembly"])
+        # not trio-binned, with a singleton of an older version: its phased VCF is passed and recorded, never required
+        seed_success(self.cfg, self.db, "singleton", "sample", "S1", {"sample_id": "S1", "hifi_reads": ["/s"]}, version="0.0.9")
+        doc, members = inputs.generate(self.ctx("sample", "S1", "assembly"), "assembly_call")
+        d = self.check_doc("assembly_call", doc)
+        self.assertFalse(d["trio"])
+        self.assertEqual(d["haplotype_labels"], ["hap1", "hap2"])
+        self.assertTrue(d["read_small_variant_vcf"].endswith("phased.vcf.gz") or "small_variants" in d["read_small_variant_vcf"], d["read_small_variant_vcf"])
+        self.assertTrue(d["read_small_variant_vcf_index"].endswith(".tbi"))
+        self.assertEqual([(m["stage"], m["ugc_wgw_version"]) for m in members], [("assembly", VERSION), ("singleton", "0.0.9")])
+        # downstream (joint) serves when there is no singleton
+        seed_success(self.cfg, self.db, "assembly", "sample", "S2", {"sample_id": "S2", "hifi_reads": ["/s2"]}, mode="assembly")
+        seed_success(self.cfg, self.db, "downstream", "sample", "S2", {"sample_id": "S2", "sex": "MALE"}, mode="joint")
+        d = self.check_doc("assembly_call", inputs.generate(self.ctx("sample", "S2", "assembly"), "assembly_call")[0])
+        self.assertIn("read_small_variant_vcf", d)
+        # no assembly yet: a prerequisite, not optional
+        with self.assertRaises(MissingOutputError):
+            inputs.generate(self.ctx("sample", "S3", "assembly"), "assembly_call")
+
+    def test_cohort_pangenome(self):
+        for sid in ("S2", "S1", "S3"):
+            seed_success(self.cfg, self.db, "assembly", "sample", sid, {"sample_id": sid, "hifi_reads": ["/s"]}, mode="assembly")
+        # assembly_call of every member is a prerequisite (the karyotype strata), like the assembly itself
+        with self.assertRaises(MissingOutputError):
+            inputs.generate(self.ctx("cohort", "C1", "assembly"), "cohort_pangenome")
+        for sid in ("S2", "S1", "S3"):
+            seed_success(self.cfg, self.db, "assembly_call", "sample", sid, {"sample_id": sid, "hap_fastas": ["/a", "/b"], "haplotype_labels": ["hap1", "hap2"], "trio": False}, mode="assembly")
+        doc, members = inputs.generate(self.ctx("cohort", "C1", "assembly"), "cohort_pangenome")
+        d = self.check_doc("cohort_pangenome", doc)
+        self.assertEqual(d["sample_ids"], ["S2", "S1", "S3"])                       # the frozen order
+        self.assertEqual([p.split("/")[-1] for p in d["hap1_fastas"]], [f"{s}.asm.bp.hap1.p_ctg.fasta.gz" for s in ("S2", "S1", "S3")])
+        self.assertEqual([p.split("/")[-1] for p in d["hap2_fastas"]], [f"{s}.asm.bp.hap2.p_ctg.fasta.gz" for s in ("S2", "S1", "S3")])
+        self.assertEqual(d["trios"], [False, False, False])
+        self.assertEqual(d["sample_sexes"], ["", "", ""])                           # the fake infers karyotype unknown
+        self.assertEqual(d["sample_sex_sources"], ["", "", ""])
+        self.assertNotIn("sv_vcf", d)                                               # no cohort_merge: truvari is skipped, not required
+        self.assertNotIn("chromosomes", d)                                          # the map's list applies
+        self.assertEqual([(m["sample_id"], m["stage"]) for m in members],
+                         [(s, st) for s in ("S2", "S1", "S3") for st in ("assembly", "assembly_call")])
+        # the cohort's own SV merge (any mode, any version) is compared with; pangenome_sv_cohort points elsewhere
+        seed_success(self.cfg, self.db, "cohort_merge", "cohort", "C1", {"cohort_id": "C1", "sample_ids": ["S2", "S1", "S3"]}, version="0.0.9")
+        doc, members = inputs.generate(self.ctx("cohort", "C1", "assembly"), "cohort_pangenome")
+        d = self.check_doc("cohort_pangenome", doc)
+        self.assertTrue(d["sv_vcf"].endswith("C1.merged.GRCh38_GIABv3.structural_variants.vcf.gz"))
+        self.assertTrue(d["sv_vcf_index"].endswith(".tbi"))
+        self.assertEqual(members[-1], {"cohort_id": "C1", "stage": "cohort_merge", "ugc_wgw_version": "0.0.9", "run_id": "C1-cohort_merge-a1-seed"})
+        self.cfg.pangenome_sv_cohort = "ELSEWHERE"
+        d = self.check_doc("cohort_pangenome", inputs.generate(self.ctx("cohort", "C1", "assembly"), "cohort_pangenome")[0])
+        self.assertNotIn("sv_vcf", d)
+        self.cfg.pangenome_sv_cohort = ""
+        # a trio-binned member keeps its phase; the chromosomes override travels
+        seed_success(self.cfg, self.db, "assembly", "sample", "S1", {"sample_id": "S1", "hifi_reads": ["/s"], "father_id": "S2", "mother_id": "S3",
+                                                                      "father_hifi_reads": ["/f"], "mother_hifi_reads": ["/m"]}, mode="assembly", attempt=2)
+        self.cfg.stage_inputs = {"cohort_pangenome": {"chromosomes": ["chr20"]}}
+        d = self.check_doc("cohort_pangenome", inputs.generate(self.ctx("cohort", "C1", "assembly"), "cohort_pangenome")[0])
+        self.assertEqual(d["trios"], [False, True, False])
+        self.assertEqual(d["chromosomes"], ["chr20"])
+        self.cfg.stage_inputs = {}
+
     def test_any_version(self):
         seed_success(self.cfg, self.db, "singleton", "sample", "S1", {"sample_id": "S1"}, version="0.0.9")
         ctx = inputs.BuildContext(self.cfg, self.db, "standalone", VERSION, "cohort", "C1", cohort=self.cohort)

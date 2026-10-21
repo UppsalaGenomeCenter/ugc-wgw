@@ -84,7 +84,7 @@ flags besides `--samples`.
 | `--mode M` | `standalone` | `standalone`, `joint` or `assembly`. |
 | `--stage S` | all stages of the mode | One stage. Required for `retry`. |
 | `--samples ID ...` / `--samples-file FILE` | all | Sample selection (mutually exclusive). |
-| `--cohort ID` | | Cohort context; required from the first stage in `joint`. |
+| `--cohort ID` | | Cohort context; required from the first stage in `joint`, and for `cohort_pangenome` in `assembly` (without it the per-sample stages run and the cohort stage is reported blocked). |
 | `--max-inflight N` | config | Concurrent miniwdl runs. |
 | `--poll-interval SEC` | config | Seconds between polls. |
 | `--any-version` | off | Accept prerequisites from any version. |
@@ -154,11 +154,12 @@ the workflow log.
 |---|---|---|
 | `--samples ID...` / `--samples-file F` | every registered sample | Samples to summarise. |
 | `--cohort ID` | none | Also write the cohort page; covers the cohort's members. |
-| `--mode M` | `standalone` | `standalone` (singleton) or `joint` (upstream + downstream). |
+| `--mode M` | `standalone` | `standalone` (singleton), `joint` (upstream + downstream) or `assembly` (the assembly stages alone, and the cohort page from `cohort_pangenome`). The assembly stages join every mode's pages. |
 | `--any-version` | current | Runs of every ugc-wgw version. |
 | `--out-dir DIR` | `<results>/reports/summary` | Where `<id>.summary.html` and `<id>.summary.json` go. |
 | `--force` | off | Rebuild the per-sample digests even when their runs are unchanged. |
-| `--threshold KEY=VALUE` | config or defaults | QC threshold override; repeatable. Keys: `depth_mean_min`, `mapped_read_percent_min`, `read_quality_median_min`. |
+| `--threshold KEY=VALUE` | config or defaults | QC threshold override; repeatable. Keys: `depth_mean_min`, `mapped_read_percent_min`, `read_quality_median_min`; assembly: `asm_flagger_err_pct_max` (10), `asm_hap_length_min` (2.5e9), `asm_hap_length_max` (3.5e9), `asm_reliable_fraction_min` (0.5), `asm_het_loss_max` (0.2), `asm_switch_error_max` (0.05), placeholders until the per-sample pilot sets them. |
+| `--pass-list FILE` | none | Also write the IDs whose assembly QC has no `fail` flag (the `asm_*` flags), in sample-sheet order: the input of `cohort freeze` for a pangenome cohort (chapter 06). |
 | `--jobs N` | `1` | Build digests in N processes. |
 
 Exit 1 when nothing could be written (no sample has a successful run of the
@@ -230,12 +231,13 @@ SIGINT or SIGTERM.
 | `venv_dir` | `null` | Engine venv. |
 | `results_dir` | project dir | Results root. |
 | `ref_map_file` | | Every stage. |
-| `ugc_wgw_container_registry` | `ghcr.io/uppsalagenomecenter` | `cohort_merge`, `assembly`. |
+| `ugc_wgw_container_registry` | `ghcr.io/uppsalagenomecenter` | `cohort_merge`, `assembly`, `assembly_call`. |
 | `backend` | `"HPC"` | Every stage. |
 | `preemptible` | `true` | Every stage; no effect on the HPC. |
 | `max_inflight` | `4` | |
 | `poll_interval` | `30.0` | |
 | `assembly_use_parents` | `true` | |
+| `pangenome_sv_cohort` | `""` | Cohort whose `cohort_merge` SV VCF `cohort_pangenome` compares the graph's variants with (truvari); empty = the pangenome cohort's own merge, when it has one. A profile key. |
 | `auto_retry_max` | `2` | Automatic re-attempts of transient failures while the attempt number is at most this; `0` disables. |
 | `backoff_seconds` | `300` | Wait before the first automatic re-attempt; doubles per attempt, capped at 3600. |
 | `cancel_orphans` | `true` | Run `scancel` on the SLURM jobs of runs settled as `driver_lost` or killed after the stop grace. |

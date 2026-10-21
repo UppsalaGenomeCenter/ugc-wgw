@@ -25,10 +25,11 @@ hiphase	-	32G	3:00:00	-	-
 trgt_genotype	-	-	2:00:00	-	-
 paraphase	-	-	2:00:00	-	-
 # assembly: hifiasm takes a whole standard node (81 GB peak at 21x); the fat partition only for
-# outliers (uncomment the partition cell); minimap2 asks 128 GB for a 32 GB peak
+# outliers (uncomment the partition cell); assembly_call's tasks (minimap2 32G, dipcall 48G, PAV 40G declared) get
+# their rows from the per-sample pilot
 ugc_wgw_hifiasm_assemble	-	-	12:00:00	-	-
 ugc_wgw_yak_count	-	-	4:00:00	-	-
-ugc_wgw_minimap2_align_asm	-	64G	2:00:00	-	-
+ugc_wgw_minimap2_align_asm	-	-	2:00:00	-	-
 # GPU: Parabricks with 4 GPUs is one job per GPU node. Its host memory grows with the depth: the
 # declared 192 GB held 126 GB at 19-25x and failed at higher depth (a pinned CUDA allocation that
 # does not fit exits 255, no OOM state), so ask for 256G. Smaller shapes for sharing the 6-GPU node take an

@@ -20,7 +20,11 @@ two. Choose `joint` only when genotypes must be cohort-consistent and the
 cohort will not change; otherwise `standalone`. Joint mode is about
 consistency, not sensitivity: it finds no variant that standalone mode
 misses (below). Pedigree-aware phasing of a trio is not a driver mode; see
-the end of the chapter.
+the end of the chapter. Within it, `assembly` (hifiasm, up to a day per
+sample) and `assembly_call` (alignment and calling, an hour or two) are two
+stages, so a change to the callers never repeats the assembly; after an
+upgrade, `--any-version` lets `assembly_call` build on the assemblies of the
+previous version (chapter 10).
 
 ## What each mode gives and costs
 

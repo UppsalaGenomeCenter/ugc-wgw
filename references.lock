@@ -89,15 +89,57 @@
         }
       ],
       "install_subdir": "ugc-wgw-extras-0.3.0",
-      "notes": "scatter_regions.GRCh38_GIABv3.tsv: scripts/make-scatter-regions.py --rest-shard rest on the container's fasta.fai (md5 a5bf6abc1f5efecc0a510f3120d08a3b): 26 shards = 25 primary contigs + rest (193 contigs: the 170 GRCh38 unplaced/unlocalized/decoy contigs plus the 23 GIABv3 decoys MAP2K3, KCNJ18 and KMT2C). 0.1.0 was the GRCh38 (v3.1.0 bundle) table. 0.3.0 adds the reference's pbmm2 index (human_GRCh38_GIABv3_no_alt_analysis_set_maskedGRC_decoys_MAP2K3_KMT2C_KCNJ18.mmi): not shipped, built by install-bundle.sh (and tests/smoke/prepare.sh) with the bundled pbmm2 image named in `built[].image` (the one upstream's create_pbmm2_index task uses), `pbmm2 index --preset HIFI` on the container's fasta, 64 s and 12 GB of memory at 8 threads, deterministic (the same md5 on three builds with 8 and 16 threads, 2026-10-15), verified against `built[].md5`; the map's pbmm2_index key names it and workflows/overrides/{pbmm2,upstream}.wdl pass it to every alignment instead of rebuilding it per BAM (DERIVED_FILES.md).",
+      "notes": "scatter_regions.GRCh38_GIABv3.tsv: scripts/make-scatter-regions.py --rest-shard rest on the container's fasta.fai (md5 a5bf6abc1f5efecc0a510f3120d08a3b): 26 shards = 25 primary contigs + rest (193 contigs: the 170 GRCh38 unplaced/unlocalized/decoy contigs plus the 23 GIABv3 decoys MAP2K3, KCNJ18 and KMT2C). 0.1.0 was the GRCh38 (v3.1.0 bundle) table. 0.3.0 adds the reference's pbmm2 index (human_GRCh38_GIABv3_no_alt_analysis_set_maskedGRC_decoys_MAP2K3_KMT2C_KCNJ18.mmi): not shipped, built by install-bundle.sh (and tests/smoke/prepare.sh) with the bundled pbmm2 image named in `built[].image` (the one upstream's create_pbmm2_index task uses), `pbmm2 index --preset HIFI` on the container's fasta, 64 s and 12 GB of memory at 8 threads, deterministic (the same md5 on three builds with 8 and 16 threads, 2026-10-15), verified against `built[].md5`; the map's pbmm2_index key names it and workflows/overrides/{pbmm2,upstream}.wdl pass it to every alignment instead of rebuilding it per BAM (DERIVED_FILES.md). Since 0.11.0 `built[].source_file` is relative to the references directory and `built[].command` is the exact command the installer runs in the image, with {source}, {out} (a temporary name, renamed once the md5 matches) and {dir} (the entry's own install subdirectory) substituted.",
       "built": [
         {
           "name": "human_GRCh38_GIABv3_no_alt_analysis_set_maskedGRC_decoys_MAP2K3_KMT2C_KCNJ18.mmi",
           "md5": "032c42be1c165452f6cbc38511fb40a9",
           "bytes": 5756014479,
           "image": "quay.io/pacbio/pbmm2@sha256:86e39aa67fa5d385769d5f119739e8811ce550163e3b9dfc42bd58d1fecdf3a8",
-          "source_file": "GRCh38_GIABv3/human_GRCh38_GIABv3_no_alt_analysis_set_maskedGRC_decoys_MAP2K3_KMT2C_KCNJ18.fasta",
-          "command": "pbmm2 index --preset HIFI <fasta> <mmi>"
+          "source_file": "hifi-wdl-resources-v4.0.0-GRCh38_GIABv3/GRCh38_GIABv3/human_GRCh38_GIABv3_no_alt_analysis_set_maskedGRC_decoys_MAP2K3_KMT2C_KCNJ18.fasta",
+          "command": "pbmm2 index --num-threads 8 --preset HIFI {source} {out}",
+          "resources": "about a minute; 8 threads, 12 GB of memory"
+        }
+      ]
+    },
+    "ugc-wgw-asm": {
+      "version": "0.1.0",
+      "source": "this repository (references/); asm_par.GRCh38.bed is dipcall v0.3 data/hs38.PAR.bed",
+      "files": [
+        {
+          "name": "asm_keep_contigs.GRCh38_GIABv3.txt",
+          "sha256": "9b3b198964b3c06e231c28e97cc0ada730c3ac738b9d970bc2ca983d5dc78e63"
+        },
+        {
+          "name": "asm_graph_chromosomes.GRCh38.txt",
+          "sha256": "5b3c87df1d6404c9f7dfc263000ffeefb08ca97b98b0b7fee703d9b98669476c"
+        },
+        {
+          "name": "asm_par.GRCh38.bed",
+          "sha256": "96c37401aa0d0d00facdfd933dcd9ee52ce260beff6f346c5ca95a7c5829c1b2",
+          "md5": "25276f1418127b3971f3d84495639b29"
+        }
+      ],
+      "install_subdir": "ugc-wgw-asm-0.1.0",
+      "notes": "References of the assembly stages (assembly_call, cohort_pangenome; docs/DESIGN.md §13). asm_keep_contigs: scripts/make-asm-contigs.py keep on the container's fasta.fai (md5 a5bf6abc1f5efecc0a510f3120d08a3b): the 194 contigs of GIABv3 without chrEBV and the 23 decoys KMT2C/KCNJ18/MAP2K3 (PAV's authors advise against ALT, PATCH and decoy contigs; every kept contig is byte-identical to the shipped build, so coordinates match the read-based callsets). asm_graph_chromosomes: chr1-22, chrX, chrY, the per-chromosome scatter of the pangenome. asm_par.GRCh38.bed: dipcall's hs38.PAR.bed (chrX 0 2781479; chrX 155701383 156030895), its male mode's -x. built[]: the decoy-free fasta derived from the container's fasta with samtools faidx -r in the bundled pb_wdl_base image (12 s, deterministic: the same md5 on two builds 2026-10-20) and its .fai; the map's asm_fasta, asm_fasta_index, asm_par_bed and asm_graph_chromosomes keys name them. A separate entry, not a bump of ugc-wgw-extras: moving the extras subdirectory would change the pbmm2_index and scatter_regions paths, which are task inputs and therefore part of every call-cache key (miniwdl digests the inputs JSON).",
+      "built": [
+        {
+          "name": "human_GRCh38_GIABv3_asm.fasta",
+          "md5": "1210a749eee62f28de18ba906ae7198f",
+          "bytes": 3144036440,
+          "image": "quay.io/pacbio/pb_wdl_base@sha256:03cb3c01937eccc907f8ad71c87b258581504572205fe3f31a657e318f3564ae",
+          "source_file": "hifi-wdl-resources-v4.0.0-GRCh38_GIABv3/GRCh38_GIABv3/human_GRCh38_GIABv3_no_alt_analysis_set_maskedGRC_decoys_MAP2K3_KMT2C_KCNJ18.fasta",
+          "command": "samtools faidx {source} -r {dir}/asm_keep_contigs.GRCh38_GIABv3.txt -o {out}",
+          "resources": "about 15 seconds; little memory"
+        },
+        {
+          "name": "human_GRCh38_GIABv3_asm.fasta.fai",
+          "md5": "374a75f82ff6f6ae919649aa0322cc20",
+          "bytes": 7771,
+          "image": "quay.io/pacbio/pb_wdl_base@sha256:03cb3c01937eccc907f8ad71c87b258581504572205fe3f31a657e318f3564ae",
+          "source_file": "ugc-wgw-asm-0.1.0/human_GRCh38_GIABv3_asm.fasta",
+          "command": "samtools faidx --fai-idx {out} {source}",
+          "resources": "seconds"
         }
       ]
     }

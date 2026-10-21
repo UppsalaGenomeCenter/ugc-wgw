@@ -29,18 +29,22 @@ Reading the tables:
 | `deepvariant_call_variants_cpu` | 64 | 28G | singleton, upstream | cpu from workflow input default; memory from input default |
 | `ugc_wgw_hifiasm_assemble` | 48 | 288G | assembly | cpu from workflow input default; cpu input: hifiasm_threads; memory from workflow input default; memory input: hifiasm_mem_gb; command uses threads |
 | `run_parabricks_deepvariant` | 48 | 192G | singleton, upstream | cpu from input default; memory from input default; command uses threads; gpu |
+| `ugc_wgw_cactus_split` | 32 | 128G | cohort_pangenome | cpu from workflow input default; cpu input: split_cpu; memory from workflow input default; memory input: split_mem_gb; command uses threads; command uses mem |
 | `pbmm2_align_wgs` | 32 | 64G | singleton, upstream | cpu from input default; memory from input default; command uses threads |
+| `ugc_wgw_flagger_align` | 32 | 64G | assembly | cpu from workflow input default; cpu input: flagger_align_threads; memory from workflow input default; memory input: flagger_align_mem_gb; command uses threads |
 | `pbsamoa_merge` | 32 | 32G | singleton, upstream | cpu from input default; memory from input default; command uses threads; command uses mem |
 | `glnexus` | 32 | - | cohort_call, cohort_merge | cpu from workflow input default; cpu input: glnexus_threads; memory: "~{mem_gb} GiB" where mem_gb = glnexus_mem_gb = glnexus_mem = select_first([glnexus_mem_gb, 32 + ceil(n_samples * 0.1)]); memory scales with N; command uses threads; command uses mem |
 | `ugc_wgw_yak_count` | 24 | - | assembly | cpu from workflow input default; cpu input: yak_threads; memory: "~{mem_gb} GiB" where mem_gb = yak_mem_gb_used = select_first([yak_mem_gb, if low_depth then 70 else 50]); command uses threads |
 | `sawfish_discover` | 16 | 128G | singleton, upstream | cpu from input default; memory from input default; command uses threads |
-| `ugc_wgw_minimap2_align_asm` | 16 | 128G | assembly | cpu from input default; memory from input default; command uses threads |
 | `hiphase` | 16 | 96G | singleton, downstream | cpu from input default; memory from input default; command uses threads |
+| `ugc_wgw_dipcall` | 16 | 48G | assembly_call | cpu from workflow input default; cpu input: dipcall_threads; memory from workflow input default; memory input: dipcall_mem_gb |
 | `index_input_bam` | 16 | 32G | singleton, upstream | cpu from input default; memory from input default; command uses threads |
 | `sawfish_call` | 16 | 32G | singleton, upstream, cohort_call | cpu from input default; memory from input default; command uses threads |
 | `trgt_genotype` | 16 | 32G | singleton, downstream | cpu from input default; memory from input default; command uses threads; command uses mem |
+| `ugc_wgw_flagger_hmm` | 16 | 32G | assembly | cpu from workflow input default; cpu input: flagger_threads; memory from workflow input default; memory input: flagger_mem_gb; command uses threads |
+| `ugc_wgw_minimap2_align_asm` | 16 | 32G | assembly_call | cpu from workflow input default; cpu input: align_threads; memory from workflow input default; memory input: align_mem_gb; command uses threads |
 | `samtools_fasta` | 16 | 16G | assembly | cpu from input default; memory from input default; command uses threads |
-| `samtools_merge` | 16 | 16G | assembly | cpu from input default; memory from input default; command uses threads |
+| `ugc_wgw_cactus_chrom` | 16 | - | cohort_pangenome | cpu from workflow input default; cpu input: chrom_cpu; memory: "~{mem_gb} GiB" where mem_gb = chrom_mem = if chrom == "chrOther" then chrom_mem_gb_floor else ugc_wgw_pangenome_names.chrom_mem_gb[chrom]; command uses threads; command uses mem |
 
 ## ugc_wgw_singleton
 
@@ -167,16 +171,50 @@ Reading the tables:
 
 ## ugc_wgw_assembly
 
-9 tasks, in first-call order.
+10 tasks, in first-call order.
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
 | `ugc_wgw_manifest_write` | 1 | 1G | - | `workflows/ugc_wgw/provenance.wdl:9` |
 | `samtools_fasta` | 16 | 16G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/samtools.wdl:86` |
 | `ugc_wgw_yak_count` | 24 | - | cpu from workflow input default; cpu input: yak_threads; memory: "~{mem_gb} GiB" where mem_gb = yak_mem_gb_used = select_first([yak_mem_gb, if low_depth then 70 else 50]); command uses threads | `workflows/ugc_wgw/assembly/yak.wdl:9` |
+| `ugc_wgw_fail` | 1 | 1G | - | `workflows/ugc_wgw/fail.wdl:7` |
 | `ugc_wgw_hifiasm_assemble` | 48 | 288G | cpu from workflow input default; cpu input: hifiasm_threads; memory from workflow input default; memory input: hifiasm_mem_gb; command uses threads | `workflows/ugc_wgw/assembly/hifiasm.wdl:9` |
 | `ugc_wgw_gfatools_gfa2fa` | 2 | 4G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/assembly/gfatools.wdl:9` |
-| `ugc_wgw_minimap2_align_asm` | 16 | 128G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/assembly/align_hifiasm.wdl:9` |
-| `ugc_wgw_paftools_call` | 4 | 32G | cpu from input default; memory from input default; command uses threads; command uses mem | `workflows/ugc_wgw/assembly/align_hifiasm.wdl:114` |
-| `ugc_wgw_bcftools_zip_stats` | 4 | 4G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/assembly/bcftools_zip_stats.wdl:9` |
-| `samtools_merge` | 16 | 16G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/samtools.wdl:5` |
+| `ugc_wgw_flagger_align` | 32 | 64G | cpu from workflow input default; cpu input: flagger_align_threads; memory from workflow input default; memory input: flagger_align_mem_gb; command uses threads | `workflows/ugc_wgw/assembly/flagger.wdl:7` |
+| `ugc_wgw_flagger_correct_bam` | 8 | 16G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/assembly/flagger.wdl:110` |
+| `ugc_wgw_flagger_hmm` | 16 | 32G | cpu from workflow input default; cpu input: flagger_threads; memory from workflow input default; memory input: flagger_mem_gb; command uses threads | `workflows/ugc_wgw/assembly/flagger.wdl:202` |
+| `ugc_wgw_yak_trioeval` | 8 | 48G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/assembly/yak.wdl:82` |
+
+## ugc_wgw_assembly_call
+
+9 tasks, in first-call order.
+
+| task | cpu | memory | notes | source |
+|---|---|---|---|---|
+| `ugc_wgw_manifest_write` | 1 | 1G | - | `workflows/ugc_wgw/provenance.wdl:9` |
+| `ugc_wgw_minimap2_align_asm` | 16 | 32G | cpu from workflow input default; cpu input: align_threads; memory from workflow input default; memory input: align_mem_gb; command uses threads | `workflows/ugc_wgw/assembly/align_asm.wdl:7` |
+| `ugc_wgw_chrom_coverage` | 2 | 8G | memory from input default | `workflows/ugc_wgw/assembly/chrom_coverage.wdl:7` |
+| `ugc_wgw_dipcall` | 16 | 48G | cpu from workflow input default; cpu input: dipcall_threads; memory from workflow input default; memory input: dipcall_mem_gb | `workflows/ugc_wgw/assembly/dipcall.wdl:7` |
+| `ugc_wgw_pav` | 8 | 40G | cpu from workflow input default; cpu input: pav_threads; memory from workflow input default; memory input: pav_mem_gb; command uses threads | `workflows/ugc_wgw/assembly/pav.wdl:7` |
+| `ugc_wgw_liftover_unreliable` | 2 | 8G | - | `workflows/ugc_wgw/assembly/masking.wdl:7` |
+| `ugc_wgw_reliable_regions` | 1 | 4G | - | `workflows/ugc_wgw/assembly/masking.wdl:93` |
+| `ugc_wgw_vcf_finish` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/assembly/vcf_finish.wdl:7` |
+| `ugc_wgw_asm_concordance` | 2 | 8G | - | `workflows/ugc_wgw/assembly/concordance.wdl:7` |
+
+## ugc_wgw_cohort_pangenome
+
+10 tasks, in first-call order.
+
+| task | cpu | memory | notes | source |
+|---|---|---|---|---|
+| `ugc_wgw_manifest_write` | 1 | 1G | - | `workflows/ugc_wgw/provenance.wdl:9` |
+| `ugc_wgw_bcftools_concat` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/cohort/concat.wdl:9` |
+| `ugc_wgw_bcftools_freq` | 2 | 4G | cpu from workflow input default; cpu input: freq_threads; memory from workflow input default; memory input: freq_mem_gb; command uses threads | `workflows/ugc_wgw/cohort/freq.wdl:9` |
+| `ugc_wgw_pangenome_names` | 1 | 2G | - | `workflows/ugc_wgw/pangenome/names.wdl:7` |
+| `ugc_wgw_cactus_split` | 32 | 128G | cpu from workflow input default; cpu input: split_cpu; memory from workflow input default; memory input: split_mem_gb; command uses threads; command uses mem | `workflows/ugc_wgw/pangenome/cactus_split.wdl:7` |
+| `ugc_wgw_cactus_chrom` | 16 | - | cpu from workflow input default; cpu input: chrom_cpu; memory: "~{mem_gb} GiB" where mem_gb = chrom_mem = if chrom == "chrOther" then chrom_mem_gb_floor else ugc_wgw_pangenome_names.chrom_mem_gb[chrom]; command uses threads; command uses mem | `workflows/ugc_wgw/pangenome/cactus_chrom.wdl:7` |
+| `ugc_wgw_pangenome_vcf_post` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/pangenome/vcf_post.wdl:7` |
+| `ugc_wgw_pangenome_freq_summary` | 1 | 4G | - | `workflows/ugc_wgw/pangenome/vcf_post.wdl:132` |
+| `ugc_wgw_vcf_split_multiallelic` | 2 | 4G | cpu from input default; command uses threads | `workflows/ugc_wgw/pangenome/truvari.wdl:7` |
+| `ugc_wgw_truvari_bench` | 2 | 8G | - | `workflows/ugc_wgw/pangenome/truvari.wdl:77` |

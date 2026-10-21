@@ -14,7 +14,8 @@ class StagesTest(unittest.TestCase):
             self.assertEqual(mode_stages(mode), stages)
             for s in stages:
                 self.assertIn(s, STAGES)
-        self.assertEqual(mode_stages("assembly"), ("assembly",))
+        self.assertEqual(mode_stages("assembly"), ("assembly", "assembly_call", "cohort_pangenome"))
+        self.assertEqual(STAGES["cohort_pangenome"].subject_type, "cohort")
         with self.assertRaises(UgcError):
             mode_stages("trio")
 
@@ -35,7 +36,16 @@ class StagesTest(unittest.TestCase):
             "assembly": {"ugc_wgw_version": True, "sample_id": True, "hifi_reads": True, "ref_map_file": True,
                          "ugc_wgw_container_registry": True,
                          "father_id": False, "mother_id": False, "father_hifi_reads": False, "mother_hifi_reads": False,
-                         "hifiasm_extra_params": False, "hifiasm_mem_gb": False, "trio_low_depth_gb": False},
+                         "hifiasm_extra_params": False, "hifiasm_mem_gb": False, "trio_low_depth_gb": False,
+                         "assembler": False, "hifiasm_telomere_motif": False, "keep_read_alignment": False, "flagger_threads": False,
+                         "trioeval_c": False},
+            "assembly_call": {"ugc_wgw_version": True, "sample_id": True, "hap_fastas": True, "haplotype_labels": True, "trio": True,
+                              "read_small_variant_vcf": False, "read_small_variant_vcf_index": False, "flagger_bed": False,
+                              "ref_map_file": True, "ugc_wgw_container_registry": True, "dipcall_threads": False, "pav_mem_gb": False},
+            "cohort_pangenome": {"ugc_wgw_version": True, "cohort_id": True, "sample_ids": True, "hap1_fastas": True, "hap2_fastas": True,
+                                 "trios": True, "sample_sexes": True, "sample_sex_sources": False, "chromosomes": False, "build_other_contigs": False,
+                                 "sv_vcf": False, "sv_vcf_index": False, "split_cpu": False, "split_disk_gb": False, "chrom_mem_gb_floor": False,
+                                 "chrom_mem_gb_per_100mb": False, "freq_threads": False, "ref_map_file": True},
         }
         for stage, subset in expect.items():
             declared = declared_inputs(wdl_path(REPO, stage))

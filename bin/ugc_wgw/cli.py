@@ -147,14 +147,17 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--samples", nargs="+", metavar="ID", help="samples to summarise (default: every registered sample)")
     g.add_argument("--samples-file", metavar="FILE")
     s.add_argument("--cohort", metavar="ID", help="also write the cohort summary (covers the cohort's members)")
-    s.add_argument("--mode", default="standalone", choices=("standalone", "joint"),
-                   help="which runs to summarise: singleton, or upstream + downstream (default: standalone)")
+    s.add_argument("--mode", default="standalone", choices=sorted(MODES),
+                   help="which runs to summarise: singleton (standalone), upstream + downstream (joint), or the assembly stages "
+                        "and the cohort's pangenome alone (assembly); the assembly stages join every mode (default: standalone)")
     s.add_argument("--any-version", action="store_true", help="runs of every ugc-wgw version (default: the current one)")
     s.add_argument("--out-dir", metavar="DIR", help="output directory (default: <results>/reports/summary)")
     s.add_argument("--force", action="store_true", help="rebuild the per-sample digests even when they are current")
     s.add_argument("--threshold", action="append", default=[], metavar="KEY=VALUE",
                    help="QC threshold override (keys: " + ", ".join(sorted(summary.DEFAULT_THRESHOLDS)) + "); repeatable")
     s.add_argument("--jobs", type=int, default=1, metavar="N", help="build per-sample digests in N processes")
+    s.add_argument("--pass-list", metavar="FILE", help="also write the IDs whose assembly QC has no fail flag, in sample-sheet order "
+                                                       "(the input of `cohort freeze` for a pangenome cohort)")
 
     s = sub.add_parser("resources", help="what every task will ask SLURM for: declared in the WDL, capped by the site "
                                          "(cpu_max, memory_max), overridden by the resource policy")
@@ -258,6 +261,7 @@ def cmd_init(a: argparse.Namespace) -> int:
         max_inflight=int(pick(a.max_inflight, "max_inflight", 4)),  # type: ignore[arg-type]
         poll_interval=float(pick(a.poll_interval, "poll_interval", 30.0)),  # type: ignore[arg-type]
         assembly_use_parents=False if a.no_assembly_parents else bool(profile.get("assembly_use_parents", True)),
+        pangenome_sv_cohort=str(profile.get("pangenome_sv_cohort") or ""),
         deepvariant=str(pick(a.deepvariant, "deepvariant", "cpu")), gpu_type=str(pick(a.gpu_type, "gpu_type", "")),
         parabricks_gpus=int(pick(a.parabricks_gpus, "parabricks_gpus", 4)),  # type: ignore[arg-type]
         stage_inputs=profile.get("stage_inputs"), prices=profile.get("prices"),  # type: ignore[arg-type]
@@ -522,7 +526,7 @@ def cmd_summary(a: argparse.Namespace) -> int:
         out_dir = Path(a.out_dir) if a.out_dir else cfg.results_dir / "reports" / "summary"
         written = summary.run(cfg, db, code, sample_ids=sel.samples, cohort_id=a.cohort, mode=a.mode,
                               version=None if a.any_version else version, out_dir=out_dir, force=a.force,
-                              thresholds=thr, jobs=max(1, a.jobs))
+                              thresholds=thr, jobs=max(1, a.jobs), pass_list=Path(a.pass_list) if a.pass_list else None)
         for p in written:
             print(p)
         if not written:

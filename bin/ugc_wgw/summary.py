@@ -39,6 +39,13 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "depth_mean_min": 20.0,           # mean depth (x) below which the sample fails
     "mapped_read_percent_min": 95.0,  # mapped reads (%) below which the sample fails
     "read_quality_median_min": 25.0,  # median read quality (Phred) below which the sample fails
+    # assembly (docs/design/assembly-v2.md §8): permissive placeholders, set from the per-sample pilot
+    "asm_flagger_err_pct_max": 10.0,      # Flagger Err + Dup + Col (% of the assembly) above which the assembly fails
+    "asm_hap_length_min": 2.5e9,          # a haplotype's total length (bp) below which the assembly fails
+    "asm_hap_length_max": 3.5e9,          # ... or above which
+    "asm_reliable_fraction_min": 0.5,     # reliable.bed as a fraction of the reference below which the assembly fails
+    "asm_het_loss_max": 0.2,              # het-loss rate (read hets the assembly calls hom or not at all) above which it fails
+    "asm_switch_error_max": 0.05,         # yak trioeval switch-error rate above which a trio-binned haplotype fails
 }
 
 STAGE_ORDER = ("singleton", "downstream", "upstream")  # which stage's file wins when several carry it
@@ -190,12 +197,12 @@ def latest_success_in_mode(db: DB, subject_type: str, subject_id: str, stage: st
 
 
 def resolve_sources(db: DB, sample_id: str, mode: str, version: str | None) -> Sources | None:
-    """The latest successful runs of a sample in `mode` (plus assembly); None when it has none."""
-    stages = ("singleton",) if mode == "standalone" else ("upstream", "downstream")
+    """The latest successful runs of a sample in `mode` (plus assembly and assembly_call); None when it has none."""
+    stages: tuple[str, ...] = ("singleton",) if mode == "standalone" else ("upstream", "downstream") if mode == "joint" else ()
     runs: dict[str, RunRecord] = {}
     docs: dict[str, dict[str, object]] = {}
-    for stage in stages + ("assembly",):
-        run = latest_success_in_mode(db, "sample", sample_id, stage, "assembly" if stage == "assembly" else mode, version)
+    for stage in stages + ("assembly", "assembly_call"):
+        run = latest_success_in_mode(db, "sample", sample_id, stage, "assembly" if stage.startswith("assembly") else mode, version)
         if run is None:
             continue
         try:
@@ -204,7 +211,7 @@ def resolve_sources(db: DB, sample_id: str, mode: str, version: str | None) -> S
             LOGGER.warning("summary: %s %s: %s", sample_id, stage, exc)
             continue
         runs[stage] = run
-    if not any(s in runs for s in stages):
+    if not runs:   # a sample with only an assembly gets a summary too (its assembly section and QC)
         return None
     rec = db.get_sample(sample_id)
     return Sources(sample_id=sample_id, mode=mode, runs=runs, docs=docs,
@@ -214,7 +221,8 @@ def resolve_sources(db: DB, sample_id: str, mode: str, version: str | None) -> S
 
 
 def resolve_cohort_runs(db: DB, cohort_id: str, mode: str, version: str | None) -> dict[str, RunRecord]:
-    stages = ("cohort_call", "cohort_merge", "cohort_freq") if mode == "joint" else ("cohort_merge", "cohort_freq")
+    stages = (("cohort_call", "cohort_merge", "cohort_freq") if mode == "joint"
+              else ("cohort_pangenome",) if mode == "assembly" else ("cohort_merge", "cohort_freq"))
     out: dict[str, RunRecord] = {}
     for stage in stages:
         run = latest_success_in_mode(db, "cohort", cohort_id, stage, mode, version)
@@ -287,6 +295,37 @@ def qc_flags(digest: dict[str, object], thr: dict[str, float]) -> dict[str, obje
     mito: dict[str, object] = targeted.get("mitorsaw", {})  # type: ignore[assignment]
     if mito and not mito.get("haplotypes"):
         flag("tool_status", "warn", "mitorsaw reported no haplotypes")
+    asm: dict[str, object] = digest.get("assembly", {}) or {}  # type: ignore[assignment]
+    if asm:
+        fl: dict[str, object] = asm.get("flagger") or {}  # type: ignore[assignment]
+        nh = fl.get("non_hap_pct")
+        if isinstance(nh, (int, float)) and nh > thr["asm_flagger_err_pct_max"]:
+            flag("asm_flagger_err", "fail", f"Flagger flags {sv.fmt(nh, 2)}% of the assembly as Err, Dup or Col, above {sv.fmt(thr['asm_flagger_err_pct_max'], 1)}%",
+                 nh, thr["asm_flagger_err_pct_max"])
+        for h in asm.get("haplotypes", []):  # type: ignore[union-attr]
+            length = (h.get("stats") or {}).get("total_length")
+            if isinstance(length, (int, float)) and not thr["asm_hap_length_min"] <= length <= thr["asm_hap_length_max"]:
+                flag("asm_hap_length", "fail", f"haplotype {h.get('name')} is {sv.fmt_bp(length)} long, outside "
+                     f"{sv.fmt_bp(thr['asm_hap_length_min'])} to {sv.fmt_bp(thr['asm_hap_length_max'])}", length, [thr["asm_hap_length_min"], thr["asm_hap_length_max"]])
+            te = h.get("trio_eval") or {}
+            sw = te.get("switch_rate")
+            if isinstance(sw, (int, float)) and sw > thr["asm_switch_error_max"]:
+                flag("asm_switch_error", "fail", f"haplotype {h.get('name')} switch-error rate {sv.fmt(sw, 4)} is above {sv.fmt(thr['asm_switch_error_max'], 4)}",
+                     sw, thr["asm_switch_error_max"])
+        rel: dict[str, object] = asm.get("reliable") or {}  # type: ignore[assignment]
+        rf = rel.get("reliable_fraction_of_reference")
+        if isinstance(rf, (int, float)) and rf < thr["asm_reliable_fraction_min"]:
+            flag("asm_reliable_fraction", "fail", f"only {sv.fmt(rf, 3)} of the reference is reliably assembled, below {sv.fmt(thr['asm_reliable_fraction_min'], 2)}",
+                 rf, thr["asm_reliable_fraction_min"])
+        con: dict[str, object] = asm.get("concordance") or {}  # type: ignore[assignment]
+        hl = con.get("het_loss_rate")
+        if isinstance(hl, (int, float)) and hl > thr["asm_het_loss_max"]:
+            flag("asm_het_loss", "fail", f"het-loss rate {sv.fmt(hl, 4)} against the read-based calls is above {sv.fmt(thr['asm_het_loss_max'], 2)} (collapsed haplotypes)",
+                 hl, thr["asm_het_loss_max"])
+        kar = str(((asm.get("karyotype") or {}).get("karyotype")) or "")  # type: ignore[union-attr]
+        sheet_k = {"MALE": "XY", "FEMALE": "XX"}.get(str(sample.get("sex_sheet") or "").upper())
+        if sheet_k and kar in ("XX", "XY") and kar != sheet_k:
+            flag("asm_karyotype_mismatch", "warn", f"sex in the sheet is {sample.get('sex_sheet')} ({sheet_k}) but the assembly infers {kar}", kar, sample.get("sex_sheet"))
     if digest.get("messages"):
         flag("messages", "info", f"{len(digest['messages'])} workflow message(s)")  # type: ignore[arg-type]
     if digest.get("warnings"):
@@ -434,23 +473,39 @@ def build_digest(src: Sources, thr: dict[str, float], y_threshold: float = 0.1) 
                 files[logical] = {"path": str(p), "bytes": None}
     d["files"] = files
 
-    # assembly (when the sample has one)
+    # assembly and assembly_call (when the sample has them)
     asm: dict[str, object] = {}
     if "assembly" in src.docs:
         doc = src.docs["assembly"]
         ns = namespace("assembly") + "."
         stats_paths = doc.get(ns + "assembly_stats") if isinstance(doc.get(ns + "assembly_stats"), list) else []
-        paf_paths = doc.get(ns + "paftools_vcf_stats") if isinstance(doc.get(ns + "paftools_vcf_stats"), list) else []
-        haps = doc.get(ns + "haplotypes") if isinstance(doc.get(ns + "haplotypes"), list) else []
-        asm = {"trio": bool(doc.get(ns + "trio")), "haplotypes": []}
+        haps = doc.get(ns + "haplotype_labels") if isinstance(doc.get(ns + "haplotype_labels"), list) else []
+        asm = {"trio": bool(doc.get(ns + "trio")), "assembler": doc.get(ns + "assembler_used"), "haplotypes": [], "calls": {}, "karyotype": None,
+               "flagger": None, "reliable": None, "concordance": None}
+        trio_paths = doc.get(ns + "trio_eval") if isinstance(doc.get(ns + "trio_eval"), list) else []
         for i, p in enumerate(stats_paths):  # type: ignore[arg-type]
             g = safe("assembly_stats", lambda p=p: sp.parse_gfatools_stats(sp.read_lines(Path(str(p))))) or {}
-            paf = {}
-            if i < len(paf_paths):  # type: ignore[arg-type]
-                paf = (safe("paftools_vcf_stats", lambda q=paf_paths[i]: sp.parse_bcftools_stats(sp.read_lines(Path(str(q))))) or {}).get("sn", {})  # type: ignore[index]
-            asm["haplotypes"].append({"name": str(haps[i]) if i < len(haps) else f"hap{i + 1}", "stats": g,  # type: ignore[attr-defined, arg-type]
-                                      "paftools": {"snps": paf.get("number of SNPs"), "indels": paf.get("number of indels"),
-                                                   "records": paf.get("number of records")}})
+            te = (safe("trio_eval", lambda q=trio_paths[i]: sp.parse_trioeval(sp.read_lines(Path(str(q))))) or None) if i < len(trio_paths) else None  # type: ignore[index, arg-type]
+            asm["haplotypes"].append({"name": str(haps[i]) if i < len(haps) else f"hap{i + 1}", "stats": g, "trio_eval": te})  # type: ignore[attr-defined, arg-type]
+        fs = doc.get(ns + "flagger_summary")
+        if fs:
+            asm["flagger"] = safe("flagger_summary", lambda q=fs: sp.parse_flagger_summary(sp.read_lines(Path(str(q))))) or None
+    if "assembly_call" in src.docs:
+        doc = src.docs["assembly_call"]
+        ns = namespace("assembly_call") + "."
+        asm.setdefault("haplotypes", []); asm.setdefault("calls", {})
+        for caller in ("dipcall", "pav"):
+            p = doc.get(ns + f"{caller}_vcf_stats")
+            if p:
+                sn = (safe(f"{caller}_vcf_stats", lambda q=p: sp.parse_bcftools_stats(sp.read_lines(Path(str(q))))) or {}).get("sn", {})
+                asm["calls"][caller] = {"snps": sn.get("number of SNPs"), "indels": sn.get("number of indels"), "records": sn.get("number of records")}  # type: ignore[index]
+        kj = doc.get(ns + "karyotype_json")
+        kar = safe("karyotype_json", lambda q=kj: sp.load_json(Path(str(q)))) if kj else None
+        asm["karyotype"] = kar if isinstance(kar, dict) else {"karyotype": doc.get(ns + "inferred_karyotype")}
+        for key, out in (("reliable_summary", "reliable"), ("concordance", "concordance")):
+            p = doc.get(ns + key)
+            if p:
+                asm[out] = safe(key, lambda q=p: sp.parse_kv_table(sp.read_lines(Path(str(q))))) or None
     d["assembly"] = asm
 
     # provenance from the primary run's manifest
@@ -767,9 +822,37 @@ def render_sample(d: dict[str, object], tools: list[dict[str, object]], *, proje
     asm: dict[str, object] = d.get("assembly", {})  # type: ignore[assignment]
     if asm:
         hap_rows = [[h["name"], sv.fmt_bp(h["stats"].get("total_length")), sv.fmt(h["stats"].get("n_sequences")), sv.fmt_bp(h["stats"].get("n50")) if h["stats"].get("n50") else "–",
-                     sv.fmt_bp(h["stats"].get("aun")), sv.fmt(h["paftools"].get("snps")), sv.fmt(h["paftools"].get("indels"))] for h in asm.get("haplotypes", [])]  # type: ignore[union-attr]
-        add("sec-assembly", "Assembly", f"<p class='muted'>{'trio-binned' if asm.get('trio') else 'single-sample'} hifiasm assembly</p>"
-            + _table(["haplotype", "total length", "contigs", "N50", "auN", "SNVs vs reference", "indels vs reference"], hap_rows, cls=""))
+                     sv.fmt_bp(h["stats"].get("aun"))] for h in asm.get("haplotypes", [])]  # type: ignore[union-attr]
+        calls: dict[str, dict[str, object]] = asm.get("calls", {})  # type: ignore[assignment]
+        call_rows = [[c, sv.fmt(v.get("snps")), sv.fmt(v.get("indels")), sv.fmt(v.get("records"))] for c, v in sorted(calls.items())]
+        kar: dict[str, object] = asm.get("karyotype") or {}  # type: ignore[assignment]
+        kar_text = ""
+        if kar:
+            kar_text = (f"<p class='small muted'>inferred karyotype <b>{_esc(str(kar.get('karyotype')))}</b>"
+                        + (f": {_esc(str(kar.get('reason')))}" if kar.get("reason") else "") + "</p>")
+        qc_rows: list[list[object]] = []
+        fl: dict[str, object] = asm.get("flagger") or {}  # type: ignore[assignment]
+        if fl:
+            qc_rows.append(["Flagger: Err / Dup / Hap / Col (% of the assembly)",
+                            " / ".join(sv.fmt(fl.get(k), 2) for k in ("err_pct", "dup_pct", "hap_pct", "col_pct"))])
+        for h in asm.get("haplotypes", []):  # type: ignore[union-attr]
+            te = h.get("trio_eval") or {}
+            if te:
+                qc_rows.append([f"trioeval {h.get('name')}: switch / Hamming error rate", f"{sv.fmt(te.get('switch_rate'), 4)} / {sv.fmt(te.get('hamming_rate'), 4)}"])
+        rel: dict[str, object] = asm.get("reliable") or {}  # type: ignore[assignment]
+        if rel:
+            qc_rows.append(["reliable region (dip.bed minus Flagger's regions)",
+                            f"{sv.fmt_bp(rel.get('reliable_bp'))}, {sv.fmt(rel.get('reliable_fraction_of_reference'), 3)} of the reference"])
+        con: dict[str, object] = asm.get("concordance") or {}  # type: ignore[assignment]
+        if con:
+            qc_rows.append([f"concordance with the read-based SNVs in {con.get('region')}",
+                            f"genotype concordance {sv.fmt(con.get('genotype_concordance'), 4)} over {sv.fmt(con.get('both_called'))} sites; "
+                            f"het loss {sv.fmt(con.get('het_loss_rate'), 4)} of {sv.fmt(con.get('read_het'))} read hets; {sv.fmt(con.get('asm_only_het'))} assembly-only hets"])
+        add("sec-assembly", "Assembly", f"<p class='muted'>{'trio-binned' if asm.get('trio') else 'single-sample'} {_esc(str(asm.get('assembler') or 'hifiasm'))} assembly</p>"
+            + _table(["haplotype", "total length", "contigs", "N50", "auN"], hap_rows, cls="")
+            + (("<h3>Assembly QC</h3>" + _kv(qc_rows)) if qc_rows else "")
+            + (("<h3>Calls against the reference (assembly_call)</h3>" + kar_text
+                + _table(["caller", "SNVs", "indels", "records"], call_rows, cls="")) if call_rows or kar else "<p class='muted'>assembly_call has not run.</p>"))
 
     # messages and files
     msgs: list[str] = d.get("messages", [])  # type: ignore[assignment]
@@ -810,10 +893,19 @@ def y_threshold_of(code: CodeInfo) -> float:
     return 0.1
 
 
+def assembly_passes(digest: dict[str, object]) -> bool:
+    """The sample has an assembly and no assembly QC flag of severity fail."""
+    if not digest.get("assembly"):
+        return False
+    qc: dict[str, object] = digest.get("qc", {}) or {}  # type: ignore[assignment]
+    return not any(str(f.get("code", "")).startswith("asm_") and f.get("severity") == "fail" for f in qc.get("flags", []))  # type: ignore[union-attr]
+
+
 def run(cfg: Config, db: DB, code: CodeInfo, *, sample_ids: list[str] | None, cohort_id: str | None, mode: str,
         version: str | None, out_dir: Path, force: bool = False, thresholds: dict[str, float] | None = None,
-        jobs: int = 1) -> list[Path]:
-    """Write the per-sample reports (and the cohort report when asked); returns the report paths written."""
+        jobs: int = 1, pass_list: Path | None = None) -> list[Path]:
+    """Write the per-sample reports (and the cohort report when asked); returns the report paths written. With
+    pass_list, also the IDs whose assembly QC has no fail, in the sample sheet's order, one per line."""
     thr = thresholds or dict(DEFAULT_THRESHOLDS)
     cohort: Cohort | None = None
     if cohort_id:
@@ -858,11 +950,14 @@ def run(cfg: Config, db: DB, code: CodeInfo, *, sample_ids: list[str] | None, co
         for sid, digest in zip(to_build, results):
             digests[sid] = digest
     cohort_links = [(c, f"{c}.summary.html") for c in ([cohort.cohort_id] if cohort else [])]
+    passed: list[str] = []
     for i, sid in enumerate(targets):
         if sid not in digests:
             continue
         digest = digests[sid]
         digest["qc"] = qc_flags(digest, thr)  # thresholds may have changed since the digest was written
+        if assembly_passes(digest):
+            passed.append(sid)
         dpath = out_dir / f"{sid}.summary.json"
         write_json(dpath, digest)
         hpath = out_dir / f"{sid}.summary.html"
@@ -882,4 +977,10 @@ def run(cfg: Config, db: DB, code: CodeInfo, *, sample_ids: list[str] | None, co
         cpath.write_text(render_cohort(cdigest, tools, project_name=project_name, project_url=cfg.project_url or DEFAULT_PROJECT_URL))
         written.append(cpath)
         diag(f"{cohort.cohort_id}: wrote {cpath.name} ({len(cdigest.get('members', []))} members)")  # type: ignore[arg-type]
+    if pass_list is not None:
+        sheet_order = {sid: i for i, sid in enumerate(db.list_sample_ids())}
+        pass_list.parent.mkdir(parents=True, exist_ok=True)
+        pass_list.write_text("".join(sid + "\n" for sid in sorted(passed, key=lambda s: sheet_order.get(s, len(sheet_order)))))
+        written.append(pass_list)
+        diag(f"pass list: {len(passed)} of {len(digests)} summarised sample(s) have an assembly without a QC fail -> {pass_list}")
     return written

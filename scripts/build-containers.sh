@@ -40,7 +40,7 @@ fi
 for tool in "${tools[@]}"; do
   df="containers/$tool/Dockerfile"
   [ -f "$df" ] || { echo "no Dockerfile for $tool" >&2; exit 1; }
-  version=$(sed -nE 's/^ARG [A-Z_]*VERSION=(.*)$/\1/p' "$df" | head -1)
+  version=$(sed -nE 's/^ARG [A-Z0-9_]*VERSION=(.*)$/\1/p' "$df" | head -1)
   [ -n "$version" ] || { echo "$df: missing 'ARG <TOOL>_VERSION=<v>'" >&2; exit 1; }
   image="$REGISTRY/$tool:$version"
   echo "== building $image with $CLI" >&2

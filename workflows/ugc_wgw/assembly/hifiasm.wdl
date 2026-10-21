@@ -8,7 +8,7 @@ import "../../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/structs.wdl"
 
 task ugc_wgw_hifiasm_assemble {
   meta {
-    description: "hifiasm assembly of HiFi reads; with father_yak and mother_yak the child's reads are trio-binned (hap1 = father, hap2 = mother). HiFi-only runs write <prefix>.bp.*, trio runs <prefix>.dip.*"
+    description: "hifiasm assembly of HiFi reads, --telo-m when telomere_motif is set; with father_yak and mother_yak the child's reads are trio-binned (hap1 = father, hap2 = mother). HiFi-only runs write <prefix>.bp.*, trio runs <prefix>.dip.*"
     outputs: {
       assembly_hap_gfas: {
         description: "Haplotype-resolved primary contig graphs, hap1 then hap2"
@@ -18,6 +18,9 @@ task ugc_wgw_hifiasm_assemble {
       },
       assembly_lowQ_beds: {
         description: "Low-quality regions of the haplotype contigs and the unitig graphs"
+      },
+      version: {
+        description: "hifiasm --version, one line (the assembler_version of the stage's output contract)"
       }
     }
   }
@@ -31,6 +34,9 @@ task ugc_wgw_hifiasm_assemble {
     }
     extra_params: {
       description: "Additional hifiasm parameters (trio: -c/-d binning thresholds)"
+    }
+    telomere_motif: {
+      description: "Telomere motif for --telo-m (CCCTAA for human); unset or empty leaves telomere identification off"
     }
     father_yak: {
       description: "yak k-mer table of the father (trio mode)"
@@ -56,6 +62,7 @@ task ugc_wgw_hifiasm_assemble {
     String sample_id
     Array[File] reads_fastas
     String? extra_params
+    String? telomere_motif
     File? father_yak
     File? mother_yak
     Int threads = 48
@@ -65,17 +72,19 @@ task ugc_wgw_hifiasm_assemble {
   }
 
   String prefix = "~{sample_id}.asm"
+  String telo_arg = if select_first([telomere_motif, ""]) != "" then "--telo-m " + select_first([telomere_motif, ""]) else ""
   Int disk_size = ceil(size(reads_fastas, "GB") * 4 + 20)
 
   command <<<
     set -euo pipefail
 
-    hifiasm --version >&2
+    hifiasm --version | tee "~{prefix}.hifiasm.version.txt" >&2
 
     # shellcheck disable=SC2086
     hifiasm \
       -o "~{prefix}" \
       -t ~{threads} \
+      ~{telo_arg} \
       ~{default="" extra_params} \
       ~{"-1 " + father_yak} \
       ~{"-2 " + mother_yak} \
@@ -101,6 +110,7 @@ task ugc_wgw_hifiasm_assemble {
       glob("~{prefix}.*.hap[12].p_ctg.lowQ.bed"),
       glob("~{prefix}.*.[pr]_utg.lowQ.bed")
     ])
+    File version = "~{prefix}.hifiasm.version.txt"
   }
 
   runtime {

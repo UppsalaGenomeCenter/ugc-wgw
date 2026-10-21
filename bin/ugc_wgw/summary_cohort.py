@@ -93,6 +93,65 @@ def _provenance(man: dict[str, object]) -> dict[str, object]:
             "containers": sorted({str(c.get("image")) for c in man.get("containers", []) if isinstance(c, dict)})}
 
 
+TRUVARI_KEYS = ("TP-base", "TP-comp", "FP", "FN", "precision", "recall", "f1")
+
+
+def _pangenome_entry(outs: Outputs) -> dict[str, object]:
+    """cohort_pangenome's small outputs: the chromosomes built with their graph sizes, the split's contig binning per
+    genome, the frequency summary, the members table, truvari's figures, and the sizes of the VCFs."""
+    entry: dict[str, object] = {}
+    chroms = outs.opt("chromosomes_built")
+    entry["chromosomes"] = [str(c) for c in chroms] if isinstance(chroms, list) else []
+    per_chrom: dict[str, dict[str, object]] = {}
+    stats = outs.opt("chrom_graph_stats")
+    for p in (stats if isinstance(stats, list) else []):
+        if not (isinstance(p, str) and Path(p).exists()):
+            continue
+        _cols, rows = sp.table(sp.read_lines(Path(p)))
+        for r in rows:
+            per_chrom[r.get("ref_chrom", "?")] = {k: sp._num(r.get(k, "")) for k in ("nodes", "edges", "length")}
+    totals = {k: sum(float(c.get(k) or 0) for c in per_chrom.values()) for k in ("nodes", "edges", "length")}
+    entry["graph"] = {"chromosomes": per_chrom, "nodes": int(totals["nodes"]), "edges": int(totals["edges"]), "length": int(totals["length"])}
+    p = outs.opt("ambiguous_contigs")
+    if isinstance(p, str) and Path(p).exists():
+        _cols, rows = sp.table(sp.read_lines(Path(p)))
+        contigs = [{k: (sp._num(v) if k != "genome" else v) for k, v in r.items()} for r in rows]
+        entry["split"] = {"genomes": contigs,
+                          "assigned_bp": sum(int(float(r.get("assigned_bp") or 0)) for r in contigs),  # type: ignore[arg-type]
+                          "ambiguous_bp": sum(int(float(r.get("ambiguous_bp") or 0)) for r in contigs),  # type: ignore[arg-type]
+                          "ambiguous_contigs": sum(int(float(r.get("ambiguous") or 0)) for r in contigs)}  # type: ignore[arg-type]
+    p = outs.opt("freq_summary")
+    if isinstance(p, str) and Path(p).exists():
+        entry["summary"] = sp.parse_freq_summary(sp.read_lines(Path(p)))
+    p = outs.opt("freq_samples")
+    if isinstance(p, str) and Path(p).exists():
+        entry["samples"] = sp.parse_freq_samples(sp.read_lines(Path(p)))
+    p = outs.opt("truvari_summary")
+    if isinstance(p, str) and Path(p).exists():
+        doc = read_json(Path(p))
+        if isinstance(doc, dict):
+            entry["truvari"] = {k: doc.get(k) for k in TRUVARI_KEYS}
+    for name in ("pangenome_vcf", "pangenome_wave_vcf", "freq_vcf"):
+        p = outs.opt(name)
+        if isinstance(p, str) and Path(p).exists():
+            entry[name] = {"bytes": Path(p).stat().st_size}
+    return entry
+
+
+def _freq_resource_html(title: str, r: dict[str, object]) -> str:
+    """The cards and charts of one resource of a frequency summary (cohort_freq's small_variants or structural_variants,
+    cohort_pangenome's pangenome)."""
+    rec: dict[str, object] = r.get("records", {})  # type: ignore[assignment]
+    return (f"<h3>{_esc(title)}</h3>"
+            + _cards([("records", sv.fmt(rec.get("total"))), ("with AC > 0", sv.fmt(rec.get("ac_gt0"))), ("singletons", sv.fmt(rec.get("singletons"))),
+                      ("mean call rate", sv.fmt((r.get("mean_call_rate") or {}).get("all"), 4)), ("call rate < 0.9", sv.fmt(rec.get("call_rate_below_0.9"))),  # type: ignore[union-attr]
+                      ("with AC > 0 in XX", sv.fmt((r.get("records_ac_gt0_in") or {}).get("XX"))), ("in XY", sv.fmt((r.get("records_ac_gt0_in") or {}).get("XY")))])  # type: ignore[union-attr]
+            + '<div class="grid"><div><h4>Allele-frequency bins</h4>' + sv.hist([(k, sv.finite(v)) for k, v in (r.get("records_by_af_bin") or {}).items()], width=420, y_label="records")  # type: ignore[union-attr]
+            + "</div><div><h4>By type</h4>" + sv.bars_h([(k, sv.finite(v), "") for k, v in sorted((r.get("records_by_type") or {}).items())], width=300, label_w=70)  # type: ignore[union-attr]
+            + "</div><div><h4>By contig class</h4>" + sv.bars_h([(k, sv.finite(v), "") for k, v in sorted((r.get("records_by_contig_class") or {}).items())], width=300, label_w=70)  # type: ignore[union-attr]
+            + "</div><div><h4>By filter</h4>" + sv.bars_h([(k, sv.finite(v), "") for k, v in sorted((r.get("records_by_filter") or {}).items())], width=300, label_w=110) + "</div></div>")  # type: ignore[union-attr]
+
+
 def build_cohort_digest(cohort: Cohort, members: dict[str, dict[str, object]], cruns: dict[str, RunRecord], mode: str,
                         thr: dict[str, float]) -> dict[str, object]:
     warnings: list[str] = []
@@ -165,6 +224,8 @@ def build_cohort_digest(cohort: Cohort, members: dict[str, dict[str, object]], c
                 p = outs.opt("cohort_small_variant_vcf")
                 if isinstance(p, str) and Path(p).exists():
                     entry["small_variant_vcf"] = {"path": p, "bytes": Path(p).stat().st_size, "samples": sp.vcf_samples(Path(p))}
+            elif stage == "cohort_pangenome":
+                entry.update(_pangenome_entry(outs))
             elif stage == "cohort_freq":
                 p = outs.opt("freq_summary")
                 if isinstance(p, str) and Path(p).exists():
@@ -183,7 +244,7 @@ def build_cohort_digest(cohort: Cohort, members: dict[str, dict[str, object]], c
     assembly = {sid: members[sid].get("assembly") for sid in cohort.members if sid in members and members[sid].get("assembly")}
     versions = {"ugc_wgw": sorted({str(r.get("ugc_wgw_version")) for r in present if r.get("ugc_wgw_version")}),
                 "digest_schema": sorted({str(members[sid].get("schema")) for sid in members})}
-    man = next((_manifest_of(cruns.get(s)) for s in ("cohort_freq", "cohort_merge", "cohort_call") if cruns.get(s)), {})
+    man = next((_manifest_of(cruns.get(s)) for s in ("cohort_freq", "cohort_merge", "cohort_call", "cohort_pangenome") if cruns.get(s)), {})
     prov = _provenance(man) if man else next((m.get("provenance", {}) for m in members.values()), {})
     return {"schema": DIGEST_SCHEMA, "generated_at": utc_now(), "mode": mode,
             "cohort": {"id": cohort.cohort_id, "frozen_at": cohort.frozen_at, "sha256": cohort.sample_list_sha256, "n": len(cohort.members)},
@@ -298,33 +359,77 @@ def render_cohort(d: dict[str, object], tools: list[dict[str, object]], *, proje
                          ("sex inferred", sv.fmt((samples_block.get("n_sex_source") or {}).get("inferred")))])
         for resource in ("small_variants", "structural_variants"):
             r = summ.get(resource)
-            if not r:
-                continue
-            rec = r.get("records", {})
-            fbody += (f"<h3>{_esc(resource.replace('_', ' '))}</h3>"
-                      + _cards([("records", sv.fmt(rec.get("total"))), ("with AC > 0", sv.fmt(rec.get("ac_gt0"))), ("singletons", sv.fmt(rec.get("singletons"))),
-                                ("mean call rate", sv.fmt((r.get("mean_call_rate") or {}).get("all"), 4)), ("call rate < 0.9", sv.fmt(rec.get("call_rate_below_0.9"))),
-                                ("with AC > 0 in XX", sv.fmt((r.get("records_ac_gt0_in") or {}).get("XX"))), ("in XY", sv.fmt((r.get("records_ac_gt0_in") or {}).get("XY")))])
-                      + '<div class="grid"><div><h4>Allele-frequency bins</h4>' + sv.hist([(k, sv.finite(v)) for k, v in (r.get("records_by_af_bin") or {}).items()], width=420, y_label="records")
-                      + "</div><div><h4>By type</h4>" + sv.bars_h([(k, sv.finite(v), "") for k, v in sorted((r.get("records_by_type") or {}).items())], width=300, label_w=70)
-                      + "</div><div><h4>By contig class</h4>" + sv.bars_h([(k, sv.finite(v), "") for k, v in sorted((r.get("records_by_contig_class") or {}).items())], width=300, label_w=70)
-                      + "</div><div><h4>By filter</h4>" + sv.bars_h([(k, sv.finite(v), "") for k, v in sorted((r.get("records_by_filter") or {}).items())], width=300, label_w=110) + "</div></div>")
+            if r:
+                fbody += _freq_resource_html(resource.replace("_", " "), r)  # type: ignore[arg-type]
         fs: list[dict[str, str]] = cf.get("samples", [])  # type: ignore[assignment]
         if fs:
             fbody += "<details><summary>members in the frequency VCFs</summary>" + _table(["sample", "group", "sex source", "in small-variant VCF", "in SV VCF"],
                                                                                           [[link(r.get("sample_id")), r.get("group"), r.get("sex_source"), r.get("in_small_variant_vcf"), r.get("in_sv_vcf")] for r in fs]) + "</details>"
     add("sec-freq", "Allele frequencies (cohort_freq)", fbody or "<p class='muted'>cohort_freq has not run.</p>")
 
+    cp = callsets.get("cohort_pangenome", {})
+    if cp or d.get("mode") == "assembly":
+        pbody = ""
+        if cp:
+            graph: dict[str, object] = cp.get("graph", {})  # type: ignore[assignment]
+            per_chrom: dict[str, dict[str, object]] = graph.get("chromosomes", {})  # type: ignore[assignment]
+            split: dict[str, object] = cp.get("split", {})  # type: ignore[assignment]
+            psumm: dict[str, dict[str, dict[str, object]]] = cp.get("summary", {})  # type: ignore[assignment]
+            ps = psumm.get("samples", {})
+            pbody += _cards([("chromosomes built", sv.fmt(len(cp.get("chromosomes", [])))), ("members", sv.fmt((ps.get("n") or {}).get("total"))),  # type: ignore[arg-type]
+                             ("in the graph VCF", sv.fmt((ps.get("n_in_vcf") or {}).get("pangenome"))), ("XX", sv.fmt((ps.get("n") or {}).get("XX"))), ("XY", sv.fmt((ps.get("n") or {}).get("XY"))),
+                             ("karyotype unknown", sv.fmt((ps.get("n") or {}).get("unknown"))),
+                             ("graph nodes", sv.fmt(graph.get("nodes"))), ("edges", sv.fmt(graph.get("edges"))), ("graph length", sv.fmt_bp(graph.get("length"))),
+                             ("graph VCF", _bytes((cp.get("pangenome_vcf") or {}).get("bytes"))), ("vcfwave VCF", _bytes((cp.get("pangenome_wave_vcf") or {}).get("bytes")))])  # type: ignore[union-attr]
+            if per_chrom:
+                pbody += ("<h3>Per chromosome</h3>"
+                          + _table(["chromosome", "nodes", "edges", "length"],
+                                   [[c, sv.fmt(g.get("nodes")), sv.fmt(g.get("edges")), sv.fmt_bp(g.get("length"))] for c, g in per_chrom.items()], cls=""))
+            if split:
+                pbody += ("<h3>Contigs binned by the split (cactus-graphmap-split)</h3>"
+                          + _cards([("assigned", sv.fmt_bp(split.get("assigned_bp"))), ("ambiguous, in no graph", sv.fmt_bp(split.get("ambiguous_bp"))),
+                                    ("ambiguous contigs", sv.fmt(split.get("ambiguous_contigs")))])
+                          + "<details><summary>per haplotype</summary>"
+                          + _table(["haplotype", "contigs assigned", "bp assigned", "contigs ambiguous", "bp ambiguous"],
+                                   [[g.get("genome"), sv.fmt(g.get("assigned")), sv.fmt_bp(g.get("assigned_bp")), sv.fmt(g.get("ambiguous")), sv.fmt_bp(g.get("ambiguous_bp"))]
+                                    for g in split.get("genomes", [])]) + "</details>")  # type: ignore[union-attr]
+            if psumm.get("pangenome"):
+                pbody += _freq_resource_html("Allele frequencies of the vcfwave VCF (missing genotypes kept: no assembled sequence)", psumm["pangenome"])  # type: ignore[arg-type]
+            tv: dict[str, object] = cp.get("truvari", {})  # type: ignore[assignment]
+            if tv:
+                pbody += ("<h3>Graph SVs against the read-based merge (truvari bench, 50 bp and longer)</h3>"
+                          + _cards([("recall", sv.fmt(tv.get("recall"), 4)), ("precision", sv.fmt(tv.get("precision"), 4)), ("F1", sv.fmt(tv.get("f1"), 4)),
+                                    ("TP (base)", sv.fmt(tv.get("TP-base"))), ("FN", sv.fmt(tv.get("FN"))), ("FP", sv.fmt(tv.get("FP")))]))
+            pm: list[dict[str, str]] = cp.get("samples", [])  # type: ignore[assignment]
+            if pm:
+                pbody += "<details><summary>members in the graph VCF</summary>" + _table(["sample", "group", "sex source", "in the graph VCF"],
+                                                                                       [[link(r.get("sample_id")), r.get("group"), r.get("sex_source"), r.get("in_pangenome_vcf")] for r in pm]) + "</details>"
+            pbody += ("<p class='muted'>Genotypes of members that are not trio-binned are unphased: hifiasm's hap1/hap2 are local phase blocks, so the graph's paths "
+                      "of those members are not haplotypes (no LD, imputation or PanGenie-style use without statistical phasing). Contigs the split left ambiguous are in no graph.</p>")
+        add("sec-pangenome", "Pangenome graph (cohort_pangenome)", pbody or "<p class='muted'>cohort_pangenome has not run.</p>")
+
     asm: dict[str, dict[str, object]] = d.get("assembly", {})  # type: ignore[assignment]
     if asm:
         asm_rows = []
         for sid, a in asm.items():
-            for h in a.get("haplotypes", []):  # type: ignore[union-attr]
+            dip = (a.get("calls") or {}).get("dipcall", {})  # type: ignore[union-attr]
+            kar = (a.get("karyotype") or {}).get("karyotype")  # type: ignore[union-attr]
+            fl = a.get("flagger") or {}
+            rel = a.get("reliable") or {}
+            con = a.get("concordance") or {}
+            for i, h in enumerate(a.get("haplotypes", [])):  # type: ignore[union-attr]
                 st = h.get("stats", {})
-                pf = h.get("paftools", {})
+                te = h.get("trio_eval") or {}
+                first = i == 0
                 asm_rows.append([link(sid), "trio" if a.get("trio") else "single", h.get("name"), sv.fmt_bp(st.get("total_length")), sv.fmt(st.get("n_sequences")),
-                                 sv.fmt_bp(st.get("n50")) if st.get("n50") else "–", sv.fmt_bp(st.get("aun")), sv.fmt(pf.get("snps")), sv.fmt(pf.get("indels"))])
-        add("sec-assembly", "Assemblies", _table(["sample", "mode", "haplotype", "total length", "contigs", "N50", "auN", "SNVs vs reference", "indels vs reference"], asm_rows))
+                                 sv.fmt_bp(st.get("n50")) if st.get("n50") else "–", sv.fmt_bp(st.get("aun")),
+                                 sv.fmt(te.get("switch_rate"), 4) if te else "–",
+                                 (kar or "–") if first else "", sv.fmt(dip.get("snps")) if first else "", sv.fmt(dip.get("indels")) if first else "",
+                                 sv.fmt(fl.get("non_hap_pct"), 2) if first and fl else ("–" if first else ""),
+                                 sv.fmt(rel.get("reliable_fraction_of_reference"), 3) if first and rel else ("–" if first else ""),
+                                 sv.fmt(con.get("het_loss_rate"), 4) if first and con else ("–" if first else "")])
+        add("sec-assembly", "Assemblies", _table(["sample", "mode", "haplotype", "total length", "contigs", "N50", "auN", "switch error", "karyotype",
+                                                  "SNVs (dipcall)", "indels (dipcall)", "Flagger non-Hap %", "reliable fraction", "het loss"], asm_rows))
 
     versions: dict[str, list[str]] = d.get("versions", {})  # type: ignore[assignment]
     note = f" Members were summarised from ugc-wgw versions {', '.join(versions.get('ugc', []))}." if len(versions.get("ugc_wgw", [])) > 1 else ""

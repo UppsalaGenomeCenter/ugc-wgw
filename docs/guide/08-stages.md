@@ -346,8 +346,12 @@ fewer than three characters cannot be stratified by sex (a limit of
 ## `assembly`
 
 hifiasm per sample, trio-binned with the parents' reads when the pedigree
-allows, then each haplotype converted, aligned and called. Ported from
-PacBio's HiFi-human-assembly-WDL v1.0.2.
+allows, then each haplotype converted to FASTA with statistics. Ported from
+PacBio's HiFi-human-assembly-WDL v1.0.2. The stage ends at an **output
+contract** that every later stage reads: `assembler_used`,
+`assembler_version`, `haplotype_labels`, `hap_fastas`, statistics and graphs.
+The assembler behind it is named by the `assembler` input; only `hifiasm`
+exists, and any other value fails at the start of the run.
 
 ```mermaid
 flowchart TD
@@ -362,27 +366,209 @@ flowchart TD
     depth -->|"yes"| y1["yak count -b0, 70 GB, hifiasm -c1 -d1"]
     depth -->|"no"| y2["yak count -b37, 50 GB, hifiasm -c2 -d5"]
   end
-  cf --> asm["hifiasm 0.25.0: hap1 and hap2 contig graphs"]
+  cf --> asm["hifiasm 0.25.0 --telo-m CCCTAA: hap1 and hap2 contig graphs"]
   y1 --> asm
   y2 --> asm
   subgraph hap["per haplotype; hap1 is the father's, hap2 the mother's in trio mode"]
-    fa["gfatools gfa2fa, bgzip, calN50"] --> mm["minimap2 -x asm5 to GRCh38, samtools sort"] --> pt["paftools call"] --> zs["bgzip, tabix, bcftools stats"]
+    fa["gfatools gfa2fa, bgzip, calN50"]
   end
   asm --> fa
-  mm --> mg["samtools merge: sample.asm.GRCh38.bam"]
+  fa --> out[/"hap_fastas, haplotype_labels, assembler_version"/]
+  fa --> fl["HMM-Flagger: reads to hap1+hap2 (minimap2 map-hifi), correct_bam, bam2cov, hmm_flagger"]
+  cf --> fl
+  fl --> fb[/"flagger_bed, flagger_summary"/]
+  y1 --> te["yak trioeval per haplotype (trio only)"]
+  y2 --> te
+  fa --> te
 ```
+
+Text version: `samtools fasta` per child uBAM (and per parent uBAM in trio
+mode, followed by `yak count` per parent with depth-dependent parameters);
+hifiasm with `--telo-m CCCTAA`, trio-binned when the yak tables exist; then
+`gfatools gfa2fa` and calN50 per haplotype. The outputs are the contract.
+Two QC steps read it: HMM-Flagger aligns the sample's own reads back to the
+diploid assembly (hap1 and hap2 together, minimap2 `-x map-hifi -I8g`),
+cleans the alignment with secphase's `correct_bam` (primary alignments,
+reads and alignments of 5 kb or more, divergence at most 0.1), and models
+the per-base coverage into `Err`, `Dup`, `Hap` and `Col` regions
+(`flagger_bed`, with the shares in `flagger_summary`); trio-binned samples
+also get `yak trioeval` per haplotype against the parental k-mer tables,
+with the thresholds the binning used (switch and Hamming error rates).
 
 | Driver fills | You may override |
 |---|---|
-| `sample_id`, `hifi_reads`; in trio mode `father_id`, `mother_id`, `father_hifi_reads`, `mother_hifi_reads` | `hifiasm_extra_params`, `hifiasm_threads` (48), `hifiasm_mem_gb` (288), `yak_threads` (24), `yak_mem_gb`, `yak_params`, `hifiasm_trio_params`, `trio_low_depth_gb` (90) |
+| `sample_id`, `hifi_reads`; in trio mode `father_id`, `mother_id`, `father_hifi_reads`, `mother_hifi_reads` | `assembler` (`hifiasm`), `hifiasm_telomere_motif` (`CCCTAA`; empty = off), `hifiasm_extra_params`, `hifiasm_threads` (48), `hifiasm_mem_gb` (288), `yak_threads` (24), `yak_mem_gb`, `yak_params`, `hifiasm_trio_params`, `trio_low_depth_gb` (90), `keep_read_alignment` (false: the reads-to-assembly BAM is tens of GB per sample), `flagger_align_threads` (32), `flagger_align_mem_gb` (64), `flagger_threads` (16), `flagger_mem_gb` (32), `trioeval_c`, `trioeval_d` (the binning's) |
 
 Resources: hifiasm 48 CPUs and 288 GB for up to a day at 30x (about 135 GB
-observed); yak 24 CPUs and 70 or 50 GB per parent; minimap2 16 CPUs and
-128 GB per haplotype; paftools 4 CPUs and 32 GB. The site's default wall time
-of three days covers hifiasm. The yak tables are not exported; the call cache
-re-uses them for siblings.
+observed); yak 24 CPUs and 70 or 50 GB per parent; the Flagger alignment
+32 CPUs and 64 GB (the whole diploid assembly indexed at once), bam2cov and
+hmm_flagger 16 CPUs and 32 GB; trioeval 8 CPUs and 48 GB. The site's default
+wall time of three days covers hifiasm. The yak tables are not exported; the
+call cache re-uses them for siblings. Flagger's read alignment is an
+intermediate unless `keep_read_alignment`.
 
-Outputs: per-haplotype FASTAs and statistics, graphs, per-haplotype and
-merged alignments, paftools VCFs, `trio`, `hap1_parent`, `hap2_parent`
-(chapter 07). The `haplotypes` output gives the order of every per-haplotype
-array.
+**The hifiasm command is frozen.** miniwdl keys its call cache on a task's
+command and inputs, so anything that changes the hifiasm command line (the
+motif does; the thread count does not) costs every sample's assembly again,
+up to a day each. 0.11.0 made the one change (`--telo-m`, the version file);
+later releases change only the stages after the contract, and
+`assembly_call` with `--any-version` builds on the assemblies of the previous
+version (chapter 10).
+
+Outputs: per-haplotype FASTAs and statistics, graphs, Flagger's BED and
+summary, trioeval per haplotype (trio), `trio`, `hap1_parent`, `hap2_parent`
+(chapter 07). `haplotype_labels` gives the order of every per-haplotype
+array: `hap1`, `hap2`, or `pat`, `mat` when trio-binned. The QC flags the
+summary derives from these (chapter 11, `asm_*` thresholds) feed
+`ugc-wgw summary --pass-list`, the sample list a pangenome cohort is frozen
+from (chapter 06).
+
+## `assembly_call`
+
+The assembly's haplotypes aligned to the decoy-free GRCh38 and called with
+dipcall and PAV 3, with a per-chromosome account of what was assembled and
+the karyotype the assembly implies.
+
+```mermaid
+flowchart TD
+  in[/"hap_fastas, haplotype_labels, trio (assembly)"/] --> mm
+  subgraph hap["per haplotype"]
+    mm["minimap2 2.31 -x asm5 to asm_fasta: BAM and PAF"]
+  end
+  mm --> cov["chromosome coverage: aligned bases and contigs per chromosome;<br/>karyotype XX / XY / unknown from non-PAR chrX and chrY;<br/>non-trio XY: dipcall copies with chrY in hap1, chrX in hap2"]
+  cov --> dip["dipcall v0.3 (-x PAR when XY): dip.vcf.gz, dip.bed"]
+  in --> pav["PAV 3: VCF and callable regions per haplotype"]
+  fb[/"flagger_bed (assembly)"/] --> lift["paftools.js liftover of the non-Hap regions, per haplotype PAF"]
+  mm --> lift
+  lift --> rel["reliable.bed = dip.bed minus the lifted regions"]
+  dip --> rel
+  dip --> fd["rename syndip, unphase unless trio, FILTER ASM_UNRELIABLE outside reliable.bed, bgzip, tabix, stats"]
+  pav --> fp["unphase unless trio, FILTER ASM_UNRELIABLE outside reliable.bed, bgzip, tabix, stats"]
+  rel --> fd
+  rel --> fp
+  rv[/"read_small_variant_vcf (singleton or downstream, any version)"/] --> con["PASS SNVs inside reliable.bed: genotype concordance, het loss, assembly-only hets"]
+  fd --> con
+  fd --> out[/"dipcall_vcf, pav_vcf, chrom_coverage, inferred_karyotype, reliable_bed, concordance"/]
+  fp --> out
+```
+
+Text version: minimap2 aligns each haplotype once (SAM, then `samtools sort`
+for the BAM and `paftools.js sam2paf` for the PAF); the coverage task reads
+the PAFs; dipcall runs in male mode with the PAR BED when the karyotype is
+`XY`, on regrouped haplotype copies unless the assembly was trio-binned; PAV
+runs on the original haplotypes (`hap_h1`/`hap_h2`, or `hap_pat`/`hap_mat`
+when trio); each caller's VCF is finished into the primary VCF. With the
+assembly's `flagger_bed`, its non-Hap intervals (Err, Dup, Col; assembly
+coordinates) are lifted to the reference through each haplotype's PAF
+(`paftools.js liftover`, alignments of 50 kb and MAPQ 5 or more, dipcall's
+own thresholds) and `reliable.bed` is `dip.bed` minus them; every record of
+both primary VCFs outside it gets `FILTER=ASM_UNRELIABLE` added. Calls are
+annotated, never dropped: count by `PASS` to use the mask, ignore the filter
+to see everything. With a read-based VCF, dipcall's `PASS` SNVs are compared
+with the read-based ones inside `reliable.bed` (inside `dip.bed` when there
+is no Flagger mask): genotype concordance, the het-loss rate (read hets the
+assembly calls homozygous or not at all, the signature of collapsed
+haplotypes) and the assembly's hets the reads lack.
+
+| Driver fills | You may override |
+|---|---|
+| `sample_id`, `hap_fastas`, `haplotype_labels`, `trio`, `flagger_bed` (from `assembly`); `read_small_variant_vcf` and its index when the sample has a `singleton` or `downstream` run of any version | `align_threads` (16), `align_mem_gb` (32), `dipcall_threads` (8; the task takes twice as many cores), `dipcall_mem_gb` (48), `pav_threads` (8), `pav_align_threads` (4), `pav_mem_gb` (40), `chrx_min_fraction` (0.5), `chry_min_fraction` (0.1) |
+
+Resources (dev-machine measurements on chr20 assemblies against the whole
+reference, before the pilot sets the real rows): minimap2 asm5 needs about
+12 GB for the reference index per haplotype; dipcall's two concurrent
+minimap2 runs about 2 × 16 GB; PAV's `align_map` peaks at 15 GB per
+haplotype, both haplotypes at once, and its single-process table merges and
+VCF writer take tens of minutes on a whole genome; the liftover, the
+reliable-region arithmetic and the concordance are seconds to minutes on
+small tasks. The karyotype thresholds are read against the chrX and chrY
+lengths, so a chr20-only smoke assembly always infers `unknown`.
+
+Outputs: alignments as BAM and PAF, the coverage table, the karyotype with
+its evidence, the two primary VCFs with their statistics, the callers' raw
+files, the unreliable and reliable regions with their summary, the
+concordance table (chapter 07).
+
+## `cohort_pangenome`
+
+The last stage of the assembly mode builds a Minigraph-Cactus graph of the
+cohort's haplotype assemblies on the decoy-free GRCh38 and turns it into
+cohort VCFs with allele frequencies. The graph is built one chromosome at a
+time (Cactus's `--mgSplit` route): one genome-wide step maps every haplotype
+to a reference-only graph and bins the contigs by chromosome, then every
+requested chromosome is constructed, mapped, aligned and joined in its own
+task. The tools are cactus v3.3.0 (minigraph 0.21, vg 1.76.1, vcfwave) from
+the `comparative-genomics-toolkit/cactus` image, bcftools 1.23 from
+`pb_wdl_base` and truvari 5.5.0.
+
+```mermaid
+flowchart TD
+  asm[/"hap_fastas and trio of every member (assembly)"/] --> names["Cactus-safe names SAMPLE.1 and SAMPLE.2;<br/>per-chromosome BEDs and memory from the reference index"]
+  kar[/"inferred_karyotype of every member (assembly_call)"/] --> freq
+  names --> split["cactus-minigraph --refOnly, cactus-graphmap --mgSplit,<br/>cactus-graphmap-split: one tar per chromosome (genome-wide)"]
+  split --> chrom
+  subgraph per["per requested chromosome"]
+    chrom["cactus-minigraph, cactus-graphmap, cactus-align --pangenome,<br/>cactus-graphmap-join --vcf --vcfwave --gbz --gfa"]
+  end
+  chrom --> post["concat; sample IDs restored; non-trio members unphased;<br/>header lines (the raw and the vcfwave VCF)"]
+  post --> freq["ugc_wgw_bcftools_freq per chromosome on the vcfwave VCF,<br/>missing genotypes kept; concat; summary"]
+  sv[/"cohort_merge SV VCF of pangenome_sv_cohort, else of this cohort, if any"/] --> tv["truvari bench, 50 bp and longer, sequence comparison off"]
+  post --> tv
+  post --> out[/"pangenome_vcf, pangenome_wave_vcf, chrom_gbzs, chrom_gfas,<br/>freq_vcf, freq_summary, truvari_summary"/]
+  freq --> out
+  tv --> out
+```
+
+Text version: `ugc_wgw_pangenome_names` maps each sample ID to a Cactus-safe
+genome name (dots and dashes to `_`; a collision fails the run), writes the
+rename table and, from the reference index, a BED and a memory size per
+requested chromosome; `ugc_wgw_cactus_split` writes the seqfile (`GRCh38`,
+then `<name>.1` and `<name>.2` per member in cohort order), runs
+`cactus-minigraph --refOnly`, `cactus-graphmap --mgSplit` and
+`cactus-graphmap-split` over the whole genome, and tars each chromosome's
+directory with its seqfile; per requested chromosome `ugc_wgw_cactus_chrom`
+untars, rewrites the paths and runs the four construction steps, ending in
+`cactus-graphmap-join` with `--vcf --vcfwave --gbz --gfa`; two
+`ugc_wgw_pangenome_vcf_post` calls concatenate the raw and the vcfwave VCFs,
+restore the sample IDs (`bcftools reheader`), unphase the members that were
+not trio-binned (`+setGT`) and add the header lines (cohort, chromosomes,
+the ambiguity rule, the phase policy); the `cohort_freq` tasks run per
+chromosome on the vcfwave VCF with missing genotypes kept, their shards are
+concatenated and `ugc_wgw_pangenome_freq_summary` writes the summary; with a
+read-based SV merge, a biallelic copy of the vcfwave VCF (`bcftools norm -m
+-any`; truvari refuses multiallelic records) goes through
+`ugc_wgw_truvari_bench`; the manifest.
+
+Contigs enter a chromosome's graph only when enough of their length aligns
+to one reference contig (75, 50 or 25 % below 100 kb, below 1 Mb and from 1
+Mb, with a best-to-second ratio of 2 at MAPQ 5 or more, Cactus's defaults);
+the rest is ambiguous and in no graph. `ambiguous_contigs` counts them per
+haplotype, and the summary's cohort page shows the totals. The other
+contigs (chrM and the unplaced ones, lumped together as `chrOther`) are
+built only with `build_other_contigs = true`.
+
+| Driver fills | You may override |
+|---|---|
+| `cohort_id`, `sample_ids`, `hap1_fastas`, `hap2_fastas` and `trios` (from every member's `assembly`), `sample_sexes` and `sample_sex_sources` (`XX`, `XY` or empty from every member's `assembly_call` karyotype; the sheet's sex is not used), `sv_vcf` and its index (the `cohort_merge` SV VCF of `pangenome_sv_cohort`, else of this cohort, any version and either read mode, when one exists) | `chromosomes` (the map's chr1–22, X, Y), `build_other_contigs` (false), `split_cpu` (32), `split_mem_gb` (128), `split_disk_gb` (from the inputs), `chrom_cpu` (16), `chrom_mem_gb_floor` (64), `chrom_mem_gb_per_100mb` (32; the larger rule wins), `freq_threads` (2), `freq_mem_gb` (4) |
+
+`chromosomes = ["chr20"]` under `stage_inputs.cohort_pangenome` is how the
+scaling pilot runs (and the smoke): the split step still maps every
+haplotype genome-wide, only the per-chromosome tasks are limited. Every
+member needs a successful `assembly` and `assembly_call` at the version
+(or `--any-version`); freeze the pangenome cohort from `ugc-wgw summary
+--pass-list` (chapter 06) so that no assembly with a QC failure enters the
+graph.
+
+Resources (dev-machine measurements on two chr20 assemblies, eight cores,
+before the pilot sets the real rows): the split step took 12 minutes; one
+chromosome task about 50 minutes with `cactus-align` peaking at 11 GB; the
+VCF post-processing, the frequencies and truvari are minutes. The memory of
+a chromosome task is the larger of `chrom_mem_gb_floor` and
+`chrom_mem_gb_per_100mb` times the chromosome's length in 100 Mb; the
+default rule gives 64 GB for every human chromosome but chr1 and chr2 (80
+and 78 GB). Chapter 12 gets the scaling table once the pilot has run.
+
+Outputs: the graph's cohort VCF and its vcfwave form, the GBZ and GFA per
+chromosome with their statistics and logs, the name map and the split's
+tables, the frequency VCF with its summary and samples tables, truvari's
+figures (chapter 07).

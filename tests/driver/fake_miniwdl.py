@@ -38,7 +38,7 @@ import time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "bin"))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from ugc_wgw.stages import declared_calls, declared_inputs  # noqa: E402
-from fixtures import fixture_bytes, stats_values  # noqa: E402
+from fixtures import PANGENOME_CHROMS, fixture_bytes, stats_values  # noqa: E402
 
 REF = "GRCh38_GIABv3"
 
@@ -160,23 +160,68 @@ def make_outputs(stage: str, inputs: dict[str, object], run_dir: pathlib.Path,
             [f"{sid}.asm.{tag}.{u}_utg.noseq.gfa" for u in ("p", "r")]
         files["assembly_lowQ_beds"] = [f"{sid}.asm.{tag}.{h}.p_ctg.lowQ.bed" for h in haps] + \
             [f"{sid}.asm.{tag}.{u}_utg.lowQ.bed" for u in ("p", "r")]
-        files["zipped_assembly_fastas"] = [f"{sid}.asm.{tag}.{h}.p_ctg.fasta.gz" for h in haps]
+        files["hap_fastas"] = [f"{sid}.asm.{tag}.{h}.p_ctg.fasta.gz" for h in haps]
         files["assembly_stats"] = [f"{sid}.asm.{tag}.{h}.p_ctg.fasta.stats.txt" for h in haps]
-        files["asm_bams"] = [f"{sid}.{h}.asm.{REF}.bam" for h in haps]
-        files["asm_bam_indices"] = [x + ".bai" for x in files["asm_bams"]]  # type: ignore[union-attr]
-        f("merged_asm_bam", f"{sid}.asm.{REF}.bam")
-        files["paftools_vcfs"] = [f"{sid}.{h}.asm.{REF}.paftools.vcf.gz" for h in haps]
-        files["paftools_vcf_indices"] = [x + ".tbi" for x in files["paftools_vcfs"]]  # type: ignore[union-attr]
-        files["paftools_vcf_stats"] = [x + ".stats.txt" for x in files["paftools_vcfs"]]  # type: ignore[union-attr]
-        strings.update({"trio": trio, "haplotypes": haps})
+        files["assembler_version"] = f"{sid}.asm.hifiasm.version.txt"
+        files["flagger_bed"] = f"{sid}.asm.flagger.bed"
+        files["flagger_summary"] = f"{sid}.asm.flagger.summary.tsv"
+        if v.get("keep_read_alignment"):
+            f("read_alignment_bam", f"{sid}.asm.reads.bam")
+        strings.update({"trio": trio, "haplotype_labels": ["pat", "mat"] if trio else haps, "assembler_used": str(v.get("assembler") or "hifiasm")})
         if trio:
+            files["trio_eval"] = [f"{sid}.asm.{h}.trioeval.txt" for h in ("pat", "mat")]
             strings.update({"hap1_parent": v.get("father_id"), "hap2_parent": v.get("mother_id")})
+    elif stage == "assembly_call":
+        labels = [str(x) for x in v.get("haplotype_labels", ["hap1", "hap2"])]  # type: ignore[union-attr]
+        files["asm_bams"] = [f"{sid}.{h}.asm.{REF}.bam" for h in labels]
+        files["asm_bam_indices"] = [x + ".bai" for x in files["asm_bams"]]  # type: ignore[union-attr]
+        files["asm_pafs"] = [f"{sid}.{h}.asm.{REF}.paf.gz" for h in labels]
+        files["chrom_coverage"] = f"{sid}.asm.chrom_coverage.tsv"
+        files["karyotype_json"] = f"{sid}.asm.karyotype.json"
+        files["regroup_log"] = f"{sid}.asm.regroup.tsv"
+        f("dipcall_vcf", f"{sid}.dipcall.{REF}.vcf.gz")
+        files["dipcall_vcf_stats"] = f"{sid}.dipcall.{REF}.vcf.gz.stats.txt"
+        files["dipcall_raw_vcf"] = f"{sid}.dip.vcf.gz"
+        files["dipcall_bed"] = f"{sid}.dip.bed"
+        files["dipcall_hap_beds"] = [f"{sid}.hap1.bed", f"{sid}.hap2.bed"]
+        f("pav_vcf", f"{sid}.pav.{REF}.vcf.gz")
+        files["pav_vcf_stats"] = f"{sid}.pav.{REF}.vcf.gz.stats.txt"
+        files["pav_raw_vcf"] = f"{sid}.pav.raw.vcf.gz"
+        files["pav_raw_vcf_index"] = f"{sid}.pav.raw.vcf.gz.csi"
+        files["pav_callable_beds"] = [f"{sid}.pav.callable_ref_{h}.bed" for h in ("h1", "h2")]
+        if v.get("flagger_bed"):
+            files["unreliable_beds"] = [f"{sid}.{h}.asm.unreliable.bed" for h in labels]
+            files["reliable_bed"] = f"{sid}.asm.reliable.bed"
+            files["reliable_summary"] = f"{sid}.asm.reliable.summary.tsv"
+        if v.get("read_small_variant_vcf"):
+            files["concordance"] = f"{sid}.asm.concordance.tsv"
+        strings.update({"inferred_karyotype": "unknown", "haplotype_labels_out": labels})
     elif stage == "cohort_merge":
         f("cohort_sv_vcf", f"{sid}.merged.{REF}.structural_variants.vcf.gz")
         f("cohort_trgt_vcf", f"{sid}.merged.{REF}.trgt.vcf.gz")
         files["cohort_trgt_lps"] = f"{sid}.merged.{REF}.trgt.lps.tsv"
         if v.get("run_glnexus", True):
             f("cohort_small_variant_vcf", f"{sid}.merged.{REF}.small_variants.vcf.gz")
+    elif stage == "cohort_pangenome":
+        chroms = [str(c) for c in v.get("chromosomes", [])] or list(PANGENOME_CHROMS)  # type: ignore[union-attr]
+        pre = f"{sid}.pangenome.{REF}"
+        f("pangenome_vcf", f"{pre}.vcf.gz")
+        f("pangenome_wave_vcf", f"{pre}.wave.vcf.gz")
+        files["chrom_gbzs"] = [f"{pre}.{c}.gbz" for c in chroms]
+        files["chrom_gfas"] = [f"{pre}.{c}.gfa.gz" for c in chroms]
+        files["chrom_graph_stats"] = [f"{pre}.{c}.graph-stats.tsv" for c in chroms]
+        files["chrom_logs"] = [f"{pre}.{c}.cactus-logs.tar.gz" for c in chroms]
+        files["name_map"] = f"{sid}.pangenome.name_map.tsv"
+        files["split_log"] = f"{pre}.split.log"
+        files["contig_sizes"] = f"{pre}.contig_sizes.tsv"
+        files["ambiguous_contigs"] = f"{pre}.ambiguous_contigs.tsv"
+        f("freq_vcf", f"{pre}.freq.vcf.gz")
+        files["freq_summary"] = f"{pre}.freq.summary.tsv"
+        files["freq_samples"] = f"{pre}.freq.samples.tsv"
+        if v.get("sv_vcf"):
+            files["truvari_summary"] = f"{pre}.truvari.json"
+            files["truvari_details"] = f"{pre}.truvari.tar.gz"
+        strings["chromosomes_built"] = chroms
     elif stage == "cohort_freq":
         if v.get("small_variant_vcf"):
             f("small_variant_freq_vcf", f"{sid}.freq.{REF}.small_variants.vcf.gz")

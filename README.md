@@ -21,7 +21,7 @@ data, into one verifiable offline bundle.
   repeats (`trgt merge`, trgt-lps) and small variants (GLnexus), and compute
   allele frequencies. Two modes: standalone (per-sample DeepVariant, cohort
   merges afterwards) and joint (GLnexus genotypes before phasing, as
-  upstream's family workflow does). De novo assembly (hifiasm, trio-binned
+  upstream's family workflow does). De novo assembly and assembly-based calling (hifiasm, trio-binned
   when parents are present) is a third mode.
 - **A driver, `ugc-wgw`,** that registers samples, freezes cohorts, generates
   every input file, submits runs at a chosen concurrency, retries transient

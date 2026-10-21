@@ -25,12 +25,14 @@ STAGES: dict[str, StageSpec] = {
     "cohort_merge": StageSpec("cohort_merge", "cohort", "ugc_wgw_cohort_merge.wdl", "build_cohort_merge"),
     "cohort_freq": StageSpec("cohort_freq", "cohort", "ugc_wgw_cohort_freq.wdl", "build_cohort_freq"),
     "assembly": StageSpec("assembly", "sample", "ugc_wgw_assembly.wdl", "build_assembly"),
+    "assembly_call": StageSpec("assembly_call", "sample", "ugc_wgw_assembly_call.wdl", "build_assembly_call"),
+    "cohort_pangenome": StageSpec("cohort_pangenome", "cohort", "ugc_wgw_cohort_pangenome.wdl", "build_cohort_pangenome"),
 }
 
 MODES: dict[str, tuple[str, ...]] = {
     "standalone": ("singleton", "cohort_merge", "cohort_freq"),
     "joint": ("upstream", "cohort_call", "downstream", "cohort_merge", "cohort_freq"),
-    "assembly": ("assembly",),
+    "assembly": ("assembly", "assembly_call", "cohort_pangenome"),
 }
 
 

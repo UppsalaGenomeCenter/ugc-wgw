@@ -15,7 +15,9 @@ arrays of files from every member of a cohort.
 | `downstream` | sample | Upstream's post-phasing half: HiPhase, TRGT, pbjam and variant stats, MethBat methylation, StarPhase. |
 | `cohort_merge` | cohort | svx or bcftools SV merge, `trgt merge` and trgt-lps, optional phased small-variant merge, optional GLnexus. |
 | `cohort_freq` | cohort | Allele counts and frequencies of the cohort's joint small-variant VCF and merged SV VCF, overall and per sex, as sites-only VCFs with a summary. |
-| `assembly` | sample | hifiasm (trio-binned when both parents are registered), gfatools, minimap2 and paftools per haplotype. |
+| `assembly` | sample | hifiasm (trio-binned when both parents are registered) and gfatools per haplotype, behind an output contract: `hap_fastas`, `haplotype_labels`, `assembler_version`. |
+| `assembly_call` | sample | The haplotypes aligned to the decoy-free GRCh38 (minimap2 2.31), assembled bases per chromosome and the inferred karyotype, dipcall and PAV 3 calls. |
+| `cohort_pangenome` | cohort | A Minigraph-Cactus graph of the members' haplotype assemblies on the decoy-free GRCh38, built per chromosome; its cohort VCFs (raw and vcfwave) with allele frequencies; optionally truvari against the cohort's read-based SV merge. |
 
 Stages never call each other. The driver passes outputs of one stage as inputs
 of the next, by reading the earlier run's `outputs.json`.
@@ -25,10 +27,21 @@ of the next, by reading the earlier run's `outputs.json`.
 A **mode** is the stage sequence the driver walks: `standalone` is
 `singleton → cohort_merge → cohort_freq`, `joint` is
 `upstream → cohort_call → downstream → cohort_merge → cohort_freq`, `assembly`
-is the single stage `assembly`. Every `submit`, `retry`, `status` and `inputs` command takes
-`--mode`, default `standalone`, because the same stage can sit in different
-modes with different wiring: `downstream` in joint mode takes the cohort-called
-VCF, `cohort_merge` in standalone mode takes files from `singleton` runs.
+is `assembly → assembly_call → cohort_pangenome`. Every `submit`, `retry`,
+`status` and `inputs` command takes `--mode`, default `standalone`, because
+the same stage can sit in different modes with different wiring: `downstream`
+in joint mode takes the cohort-called VCF, `cohort_merge` in standalone mode
+takes files from `singleton` runs.
+
+One caveat travels with the assembly mode's cohort stage. For a member that
+was not trio-binned, hifiasm's `hap1` and `hap2` are local phase blocks: the
+sample's two paths through the pangenome graph switch between its parental
+haplotypes along every chromosome. Per-site alleles and genotypes are valid
+for every member, and the primary VCFs write those members' genotypes with
+`/`; but the graph's paths are not a haplotype reference panel, so do not use
+them for linkage disequilibrium, imputation or PanGenie-style genotyping
+without statistical phasing, which ugc-wgw does not do. The VCF header says
+the same.
 
 ## Version
 

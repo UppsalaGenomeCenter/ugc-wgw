@@ -15,7 +15,8 @@
 #   run.sh <stage> [<subject>] [--mode M] [--retry [--max-attempts N]]   submit (or retry) one stage, then check
 #   run.sh check <stage> [<subject>]           check expected outputs of the current attempt
 #   run.sh all [standalone] [joint] [assembly]  the phases in that order (default: all three):
-#                                              standalone (SMOKE) -> joint (SMOKEJ) -> assembly HG002
+#                                              standalone (SMOKE) -> joint (SMOKEJ) -> assembly (all four
+#                                              samples, then the SMOKE cohort's chr20 pangenome)
 #   run.sh status                              ugc-wgw status for the three modes
 #   run.sh report                              ugc-wgw report (HTML) and the analysis summaries into $UGC_WGW_SMOKE_DIR/logs/
 #   run.sh summary                             ugc-wgw summary only (per-sample and cohort analysis pages)
@@ -27,7 +28,8 @@
 #                   run.sh adds project/, results/, cache/, maps/, logs/ and miniwdl.cfg
 # Stages default to subject HG002 (sample stages) or the cohort of their mode (cohort stages);
 # singleton/cohort_merge run in standalone, upstream/cohort_call/downstream in joint,
-# assembly in assembly. Joint mode uses cohort SMOKEJ (same members) because results paths
+# assembly/assembly_call/cohort_pangenome in assembly (cohort SMOKE, chromosomes chr20 only: init
+# sets stage_inputs.cohort_pangenome.chromosomes). Joint mode uses cohort SMOKEJ (same members) because results paths
 # do not encode the mode and cohort_merge would otherwise count as done after standalone.
 set -euo pipefail
 
@@ -47,12 +49,12 @@ mode_of_stage() {
   case "$1" in
     singleton|cohort_merge|cohort_freq) echo standalone ;;
     upstream|cohort_call|downstream) echo joint ;;
-    assembly) echo assembly ;;
+    assembly|assembly_call|cohort_pangenome) echo assembly ;;
     *) die "unknown stage $1" ;;
   esac
 }
 cohort_of_mode() { case "$1" in joint) echo SMOKEJ ;; *) echo SMOKE ;; esac; }
-is_cohort_stage() { case "$1" in cohort_call|cohort_merge|cohort_freq) return 0 ;; *) return 1 ;; esac; }
+is_cohort_stage() { case "$1" in cohort_call|cohort_merge|cohort_freq|cohort_pangenome) return 0 ;; *) return 1 ;; esac; }
 
 members() { sed 's/#.*//' "$smoke/data/cohort.txt" | awk 'NF { print $1 }'; }
 
@@ -136,6 +138,15 @@ cmd_init() {
       --ref-map "$ref_map" --results "$results" \
       --max-inflight "$inflight" --poll-interval 15 "${gpu_args[@]}"
   set_ugc
+  # the smoke data is chr20 only: the pangenome of the SMOKE cohort builds that chromosome alone
+  python3 - "$project/.ugc-wgw/config.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+doc = json.load(open(path))
+doc.setdefault("stage_inputs", {}).setdefault("cohort_pangenome", {})["chromosomes"] = ["chr20"]
+json.dump(doc, open(path, "w"), indent=2, sort_keys=True)
+PY
+  log "stage_inputs.cohort_pangenome.chromosomes = [chr20]"
   if [ -n "$hifiasm_threads" ]; then
     # the request and the command's -t both come from this workflow input; a policy row would change only the request
     python3 - "$project/.ugc-wgw/config.json" "$hifiasm_threads" <<'PY'
@@ -268,8 +279,14 @@ cmd_all() {  # cmd_all [standalone] [joint] [assembly]: the named phases in the 
     cmd_check cohort_freq SMOKEJ || fails=$((fails + 1))
   fi
   if [[ "$want" == *" assembly "* ]]; then
-    phase assembly --mode assembly --samples HG002
-    cmd_check assembly HG002 || fails=$((fails + 1))
+    # every smoke sample is assembled (HG002 trio-binned, the others not): chr20 only, enough to wire
+    # assembly -> assembly_call -> cohort_pangenome; every sample infers karyotype unknown from a chr20-only
+    # assembly, so the SMOKE cohort's chr20 graph has no sex strata; its SVs are compared with the
+    # standalone cohort_merge of SMOKE when that phase ran
+    phase assembly --mode assembly --cohort SMOKE
+    for m in $(members); do cmd_check assembly "$m" || fails=$((fails + 1)); done
+    for m in $(members); do cmd_check assembly_call "$m" || fails=$((fails + 1)); done
+    cmd_check cohort_pangenome SMOKE || fails=$((fails + 1))
   fi
   log "phases [${want# }] done in $(( $(date +%s) - t0 )) s; $fails check(s) failed"
   cmd_report || true
@@ -359,8 +376,9 @@ cmd_summary() {  # ugc-wgw summary for both cohorts: per-sample pages plus the c
   dir=$smoke/logs/summary-$(date -u +%Y%m%dT%H%M%SZ)
   "${ugc[@]}" summary --cohort SMOKE --mode standalone --any-version --out-dir "$dir/standalone" || fails=$((fails + 1))
   "${ugc[@]}" summary --cohort SMOKEJ --mode joint --any-version --out-dir "$dir/joint" || fails=$((fails + 1))
+  "${ugc[@]}" summary --cohort SMOKE --mode assembly --any-version --out-dir "$dir/assembly" || fails=$((fails + 1))
   for f in standalone/SMOKE.summary.html standalone/SMOKE.summary.json standalone/HG002.summary.html standalone/HG002.summary.json \
-           joint/SMOKEJ.summary.html joint/HG002.summary.html; do
+           joint/SMOKEJ.summary.html joint/HG002.summary.html assembly/SMOKE.summary.html assembly/HG002.summary.html; do
     [ -s "$dir/$f" ] || { log "summary: missing or empty $dir/$f"; fails=$((fails + 1)); }
   done
   if [ "$fails" -eq 0 ]; then log "summary: ok ($dir)"; else log "summary: FAILED ($fails problem(s), $dir)"; fi

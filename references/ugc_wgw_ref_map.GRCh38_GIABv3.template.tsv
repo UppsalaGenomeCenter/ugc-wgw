@@ -3,7 +3,9 @@
 # container (references.lock: hifi-wdl-resources) into <local_path_prefix>/hifi-wdl-resources-v4.0.0-GRCh38_GIABv3/,
 # renders this template and checks it against that manifest; the keys are the manifest's entries (files and scalars,
 # as singleton.wdl reads them from unpack_container_manifest) plus, from ugc-wgw-extras, scatter_regions (shipped)
-# and pbmm2_index (the reference's pbmm2 index, built by the installer with the bundled pbmm2 and verified by md5).
+# and pbmm2_index (the reference's pbmm2 index, built by the installer with the bundled pbmm2 and verified by md5), and,
+# from ugc-wgw-asm, the assembly stages' decoy-free reference (asm_fasta, asm_fasta_index: built by the installer with
+# the bundled pb_wdl_base and verified by md5), asm_par_bed and asm_graph_chromosomes (shipped).
 name	GRCh38_GIABv3
 fasta	<local_path_prefix>/hifi-wdl-resources-v4.0.0-GRCh38_GIABv3/GRCh38_GIABv3/human_GRCh38_GIABv3_no_alt_analysis_set_maskedGRC_decoys_MAP2K3_KMT2C_KCNJ18.fasta
 fasta_index	<local_path_prefix>/hifi-wdl-resources-v4.0.0-GRCh38_GIABv3/GRCh38_GIABv3/human_GRCh38_GIABv3_no_alt_analysis_set_maskedGRC_decoys_MAP2K3_KMT2C_KCNJ18.fasta.fai
@@ -18,3 +20,7 @@ paraphase_genome_build	38
 run_starphase	true
 scatter_regions	<local_path_prefix>/ugc-wgw-extras-0.3.0/scatter_regions.GRCh38_GIABv3.tsv
 pbmm2_index	<local_path_prefix>/ugc-wgw-extras-0.3.0/human_GRCh38_GIABv3_no_alt_analysis_set_maskedGRC_decoys_MAP2K3_KMT2C_KCNJ18.mmi
+asm_fasta	<local_path_prefix>/ugc-wgw-asm-0.1.0/human_GRCh38_GIABv3_asm.fasta
+asm_fasta_index	<local_path_prefix>/ugc-wgw-asm-0.1.0/human_GRCh38_GIABv3_asm.fasta.fai
+asm_par_bed	<local_path_prefix>/ugc-wgw-asm-0.1.0/asm_par.GRCh38.bed
+asm_graph_chromosomes	<local_path_prefix>/ugc-wgw-asm-0.1.0/asm_graph_chromosomes.GRCh38.txt

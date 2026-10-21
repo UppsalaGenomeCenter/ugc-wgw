@@ -1,0 +1,28 @@
+{
+  "ugc_wgw_cohort_pangenome.ugc_wgw_version": "<ugc_wgw_version>",
+  "ugc_wgw_cohort_pangenome.cohort_id": "String",
+  "ugc_wgw_cohort_pangenome.sample_ids": [
+    "String"
+  ],
+  "ugc_wgw_cohort_pangenome.hap1_fastas": [
+    "File (hap_fastas[0] of each member's assembly, same order)"
+  ],
+  "ugc_wgw_cohort_pangenome.hap2_fastas": [
+    "File (hap_fastas[1] of each member's assembly, same order)"
+  ],
+  "ugc_wgw_cohort_pangenome.trios": [
+    "Boolean (trio of each member's assembly, same order)"
+  ],
+  "ugc_wgw_cohort_pangenome.sample_sexes": [
+    "String (XX, XY or empty per member: assembly_call's inferred_karyotype)"
+  ],
+  "ugc_wgw_cohort_pangenome.sample_sex_sources": [
+    "String (karyotype or empty per member)"
+  ],
+  "ugc_wgw_cohort_pangenome.chromosomes": "Array[String]? (optional; default: the map's asm_graph_chromosomes)",
+  "ugc_wgw_cohort_pangenome.sv_vcf": "File? (cohort_sv_vcf of a cohort_merge run, for truvari bench)",
+  "ugc_wgw_cohort_pangenome.sv_vcf_index": "File? (optional)",
+  "ugc_wgw_cohort_pangenome.ref_map_file": "<local_path_prefix>/ugc_wgw_ref_map.GRCh38_GIABv3.tsv",
+  "ugc_wgw_cohort_pangenome.backend": "HPC",
+  "ugc_wgw_cohort_pangenome.preemptible": true
+}

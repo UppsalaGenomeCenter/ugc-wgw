@@ -279,6 +279,25 @@ summary. A candidate whose inputs cannot be generated (an earlier stage's
 output is missing from `outputs.json`) is reported as blocked with the member
 and output name, and skipped.
 
+## Freezing a pangenome cohort from the assembly QC
+
+The cohort pangenome stage builds the graph from a frozen cohort, and a
+frozen cohort is immutable, so the QC filter happens before the freeze, not
+in the workflow. After `assembly` and `assembly_call` have run, write the
+pass list and freeze from it:
+
+```bash
+ugc-wgw summary --pass-list /proj/ugc/projects/c26/pangenome.txt   # IDs without an assembly QC fail, in sheet order
+ugc-wgw cohort freeze PG2026 --samples /proj/ugc/projects/c26/pangenome.txt
+```
+
+`summary` writes every sample's page as usual and, with `--pass-list`, the
+file of sample IDs whose assembly has no `fail` flag among the `asm_*` checks
+(chapter 11 lists the thresholds; `--threshold` overrides them for the
+list). Samples left out keep their per-sample results; a later freeze under
+another ID can include them. A sample without an assembly is never in the
+list.
+
 ## Retrying
 
 ```bash

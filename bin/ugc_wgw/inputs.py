@@ -40,6 +40,20 @@ class BuildContext:
             self.member_runs.append(triple)
         return run, outs
 
+    def optional_prior(self, stage: str, subject_type: str, subject_id: str) -> Outputs | None:
+        """The latest success of `stage` for the subject at any ugc-wgw version, or None: a result of another mode
+        that a builder uses when it exists and never requires. Recorded in member_runs like prior()."""
+        run = self.db.latest_success(subject_type, subject_id, stage, None)
+        if run is None:
+            return None
+        outs = Outputs.load(run)
+        triple = {"sample_id" if subject_type == "sample" else "cohort_id": subject_id,
+                  "stage": stage, "ugc_wgw_version": run.ugc_wgw_version, "run_id": run.run_id}
+        if triple not in self.member_runs:
+            self.member_runs.append(triple)
+        LOGGER.info("%s %s: using %s run %s (ugc-wgw %s)", subject_type, subject_id, stage, run.run_id, run.ugc_wgw_version)
+        return outs
+
     def sample(self) -> SampleRecord:
         rec = self.db.get_sample(self.subject_id)
         if rec is None:
@@ -286,6 +300,69 @@ def build_assembly(ctx: BuildContext) -> dict[str, object]:
     return doc
 
 
+def build_assembly_call(ctx: BuildContext) -> dict[str, object]:
+    doc = common_inputs(ctx)
+    rec = ctx.sample()
+    sid = rec.sample_id
+    doc["sample_id"] = sid
+    doc["ugc_wgw_container_registry"] = ctx.cfg.ugc_wgw_container_registry
+    _, asm = ctx.prior("assembly", "sample", sid)
+    doc["hap_fastas"] = asm.arr("hap_fastas")
+    doc["haplotype_labels"] = asm.arr("haplotype_labels")
+    doc["trio"] = bool(asm.req("trio"))
+    doc["flagger_bed"] = asm.opt("flagger_bed")
+    # the sample's read-based small-variant calls when it has them: singleton first, else downstream (joint mode),
+    # at any version; another mode's result, used for concordance and never a prerequisite
+    for stage in ("singleton", "downstream"):
+        reads = ctx.optional_prior(stage, "sample", sid)
+        if reads is not None and reads.opt("phased_small_variant_vcf") is not None:
+            doc["read_small_variant_vcf"] = reads.req("phased_small_variant_vcf")
+            doc["read_small_variant_vcf_index"] = reads.req("phased_small_variant_vcf_index")
+            break
+    return doc
+
+
+KARYOTYPE_TO_GROUP = {"XX": "XX", "XY": "XY"}   # assembly_call's inferred_karyotype -> frequency stratum; unknown -> ""
+
+
+def build_cohort_pangenome(ctx: BuildContext) -> dict[str, object]:
+    doc = common_inputs(ctx)
+    members = ctx.members()
+    doc["cohort_id"] = ctx.subject_id
+    doc["sample_ids"] = members
+    hap1, hap2, trios, sexes, sources = [], [], [], [], []
+    for sid in members:
+        _, asm = ctx.prior("assembly", "sample", sid)
+        haps = asm.arr("hap_fastas")
+        if len(haps) != 2:
+            raise UgcError(f"cohort_pangenome: assembly of {sid} has {len(haps)} haplotype FASTAs, not 2")
+        hap1.append(haps[0])
+        hap2.append(haps[1])
+        trios.append(bool(asm.req("trio")))
+        # the strata come from the karyotype assembly_call inferred from the haplotypes themselves, never the sheet:
+        # a member of unknown karyotype is counted in the unstratified tags only
+        _, call = ctx.prior("assembly_call", "sample", sid)
+        group = KARYOTYPE_TO_GROUP.get(str(call.opt("inferred_karyotype") or "").strip().upper(), "")
+        sexes.append(group)
+        sources.append("karyotype" if group else "")
+    doc["hap1_fastas"] = hap1
+    doc["hap2_fastas"] = hap2
+    doc["trios"] = trios
+    doc["sample_sexes"] = sexes
+    doc["sample_sex_sources"] = sources
+    # the read-based SV merge to compare the graph with (truvari): the cohort config.json names, else this cohort's own,
+    # at any version and in either read mode; used when it exists, never a prerequisite
+    sv_cohort = ctx.cfg.pangenome_sv_cohort or ctx.subject_id
+    cm = ctx.optional_prior("cohort_merge", "cohort", sv_cohort)
+    if cm is not None and cm.opt("cohort_sv_vcf") is not None:
+        doc["sv_vcf"] = cm.req("cohort_sv_vcf")
+        doc["sv_vcf_index"] = cm.req("cohort_sv_vcf_index")
+    elif ctx.cfg.pangenome_sv_cohort:
+        LOGGER.warning("cohort_pangenome %s: no successful cohort_merge of cohort %s (config.json pangenome_sv_cohort); "
+                       "the graph's SVs are not compared with a read-based merge", ctx.subject_id, sv_cohort)
+    return doc
+
+
 BUILDERS = {
     "singleton": build_singleton,
     "upstream": build_upstream,
@@ -294,6 +371,8 @@ BUILDERS = {
     "cohort_merge": build_cohort_merge,
     "cohort_freq": build_cohort_freq,
     "assembly": build_assembly,
+    "assembly_call": build_assembly_call,
+    "cohort_pangenome": build_cohort_pangenome,
 }
 
 

@@ -11,7 +11,7 @@
 #      -> scripts/populate-sif-cache.sh into --sif-cache (incremental), hardlinked into build/sif/;
 #      tag-form references are resolved to registry digests with scripts/image-digest.py;
 #      --images data takes only upstream's reference data container(s), for tests of the install;
-#      --images install adds the image the installer builds the reference's pbmm2 index with (references.lock)
+#      --images install adds the images the installer builds the derived reference files with (references.lock built[])
 #   3. pip download -r code/bundle/requirements.txt (+ pip itself) for --python-version
 #      into build/wheels/ (binary wheels only, manylinux x86_64; no build tools needed offline);
 #      pip wheel of code/plugins/ugc_wgw_miniwdl (our miniwdl task plugin, pure python) into the same
@@ -77,7 +77,7 @@ case "$images" in
   data) grep 'workflow-data-container' "$build/code/vendor/hifi-human-wgs-wdl/image_manifest.txt" > "$out/build/data-manifest.txt"
         manifests=("$out/build/data-manifest.txt") ;;
   install) grep 'workflow-data-container' "$build/code/vendor/hifi-human-wgs-wdl/image_manifest.txt" > "$out/build/data-manifest.txt"
-        python3 -c 'import json,sys; [print(b["image"]) for b in json.load(open(sys.argv[1]))["bundles"]["ugc-wgw-extras"].get("built", [])]' \
+        python3 -c 'import json,sys; print("\n".join(sorted({bt["image"] for b in json.load(open(sys.argv[1]))["bundles"].values() for bt in b.get("built", [])})))' \
           "$build/code/references.lock" >> "$out/build/data-manifest.txt"
         manifests=("$out/build/data-manifest.txt") ;;
 esac

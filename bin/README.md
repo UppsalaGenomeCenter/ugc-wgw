@@ -47,7 +47,7 @@ ugc-wgw logs   <subject_id> --stage S [--tail N] [--attempt N] [--follow] [--jso
 ugc-wgw inputs <subject_id> --stage S [--mode M] [--cohort ID]
 ugc-wgw progress [--mode M] [--stage S] [--samples ... | --cohort ID] [--json]  # done/total per stage, ETA
 ugc-wgw report [--mode M] [--cohort ID] [--any-version] [--sizes] [--price K=V ...] [--out FILE]   # self-contained HTML run summary
-ugc-wgw summary [--samples ... | --cohort ID] [--mode M] [--any-version] [--out-dir DIR] [--force]
+ugc-wgw summary [--samples ... | --cohort ID] [--mode M] [--any-version] [--out-dir DIR] [--force] [--pass-list FILE]
             [--threshold KEY=VALUE ...] [--jobs N]  # per-sample and cohort analysis pages (what was found, QC flags)
 ugc-wgw resources [--stage S] [--changed] [--json]     # what each task asks SLURM for: declared → site caps → policy
 ugc-wgw stage-inputs [--stage S | --mode M] [--nested] [--json]   # every workflow input: default, who fills it, your override
@@ -80,8 +80,9 @@ before a run starts and fails the attempt as `InputError` when it does not hold.
 
 `standalone` = `singleton` → `cohort_merge` → `cohort_freq`; `joint` =
 `upstream` → `cohort_call` → `downstream` → `cohort_merge` → `cohort_freq`
-(needs `--cohort`); `assembly` = the single per-sample stage `assembly` (no
-cohort). `cohort_freq` turns the cohort's joint small-variant VCF and merged
+(needs `--cohort`); `assembly` = `assembly → assembly_call → cohort_pangenome`
+(the cohort stage needs `--cohort`; without it the per-sample stages run and
+the cohort stage is reported blocked). `cohort_freq` turns the cohort's joint small-variant VCF and merged
 SV VCF into sites-only frequency files; its inputs builder takes each
 member's sex from the sheet, else from the sex upstream inferred. In assembly mode a sample whose
 `father_id` and `mother_id` are both registered samples with reads is

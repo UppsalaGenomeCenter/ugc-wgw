@@ -1,57 +1,57 @@
 version 1.0
 
-# ugc-pacbio-wgw — stage `assembly`: hifiasm de novo assembly of one sample, trio-binned with yak when both parents' reads are given
+# ugc-pacbio-wgw — stage `assembly`: hifiasm de novo assembly of one sample, trio-binned with yak when both parents' reads are given; the output contract every later stage reads; HMM-Flagger and trio QC
 # origin: none
 # see docs/DESIGN.md §5, §13; docs/ENTRYPOINTS.md §8
 
 import "../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/samtools.wdl" as Samtools
 import "../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/backend_configuration/backend_configuration.wdl" as BackendConfiguration
-import "ugc_wgw/assembly/align_hifiasm.wdl" as Align
-import "ugc_wgw/assembly/bcftools_zip_stats.wdl" as ZipStats
+import "ugc_wgw/assembly/flagger.wdl" as Flagger
 import "ugc_wgw/assembly/gfatools.wdl" as Gfatools
 import "ugc_wgw/assembly/hifiasm.wdl" as Hifiasm
 import "ugc_wgw/assembly/yak.wdl" as Yak
+import "ugc_wgw/fail.wdl" as Fail
 import "ugc_wgw/provenance.wdl" as Provenance
 
 workflow ugc_wgw_assembly {
   meta {
-    description: "ugc-pacbio-wgw stage assembly: samtools fasta, hifiasm (trio-binned with parental yak tables when father_hifi_reads and mother_hifi_reads are given), gfatools + calN50 per haplotype, minimap2 asm5 alignment to the reference, samtools merge of the haplotypes, paftools variant calls with bcftools stats. Ported from HiFi-human-assembly-WDL v1.0.2 into the WGS tree's conventions; aligns to the ref_map reference only."
+    description: "ugc-pacbio-wgw stage assembly: samtools fasta, hifiasm (trio-binned with parental yak tables when father_hifi_reads and mother_hifi_reads are given; --telo-m CCCTAA by default), gfatools gfa2fa and calN50 per haplotype. The assembler sits behind an output contract (assembler_used, hap_fastas, haplotype_labels, assembler_version); only hifiasm is implemented and any other value fails at the start. QC on the contract: HMM-Flagger (the reads aligned back to hap1+hap2, correct_bam, bam2cov, hmm_flagger) flags Err/Dup/Hap/Col regions; trio-binned samples get yak trioeval per haplotype. Calling against the reference is the assembly_call stage."
     outputs: {
+      assembler_used: {
+        description: "The assembler that ran (hifiasm)"
+      },
+      assembler_version: {
+        description: "Its version line, one file"
+      },
+      haplotype_labels: {
+        description: "Labels of the two haplotypes in the order of every per-haplotype array: hap1, hap2; pat, mat when trio-binned"
+      },
+      hap_fastas: {
+        description: "Haplotype contigs, bgzipped FASTA, in haplotype order"
+      },
+      assembly_stats: {
+        description: "calN50 statistics per haplotype"
+      },
       assembly_noseq_gfas: {
         description: "Sequence-less GFAs (haplotype contigs and unitig graphs)"
       },
       assembly_lowQ_beds: {
         description: "Low-quality regions of the contigs and unitig graphs"
       },
-      haplotypes: {
-        description: "hap1, hap2: the order of every per-haplotype array below"
+      flagger_bed: {
+        description: "HMM-Flagger's prediction for the diploid assembly: Err, Dup, Hap or Col per interval, in assembly coordinates"
       },
-      zipped_assembly_fastas: {
-        description: "Haplotype contigs, bgzipped FASTA"
+      flagger_summary: {
+        description: "Flagger's summary table (prediction_summary_final.tsv)"
       },
-      assembly_stats: {
-        description: "calN50 statistics per haplotype"
+      trio_eval: {
+        description: "yak trioeval per haplotype (switch and Hamming error), trio-binned samples only"
       },
-      asm_bams: {
-        description: "Contigs aligned to the reference, per haplotype"
+      read_alignment_bam: {
+        description: "The reads aligned to the diploid assembly, only with keep_read_alignment"
       },
-      asm_bam_indices: {
-        description: "Indices for asm_bams"
-      },
-      merged_asm_bam: {
-        description: "Both haplotypes' alignments merged"
-      },
-      merged_asm_bam_index: {
-        description: "Index for merged_asm_bam"
-      },
-      paftools_vcfs: {
-        description: "paftools variant calls per haplotype (bgzipped)"
-      },
-      paftools_vcf_indices: {
-        description: "Indices for paftools_vcfs"
-      },
-      paftools_vcf_stats: {
-        description: "bcftools stats per haplotype VCF"
+      read_alignment_bam_index: {
+        description: "Its index, only with keep_read_alignment"
       },
       trio: {
         description: "Whether the assembly was trio-binned"
@@ -77,6 +77,12 @@ workflow ugc_wgw_assembly {
     }
     sample_id: {
       description: "Sample ID; output prefix is <sample_id>.asm"
+    }
+    assembler: {
+      description: "The assembler behind the output contract; only hifiasm is implemented, anything else fails at the start"
+    }
+    hifiasm_telomere_motif: {
+      description: "hifiasm --telo-m motif (CCCTAA for human); an empty string disables telomere identification. Changing it changes the hifiasm command and so the call-cache key of every sample"
     }
     hifi_reads: {
       description: "Unaligned HiFi BAMs of the sample"
@@ -117,8 +123,29 @@ workflow ugc_wgw_assembly {
     trio_low_depth_gb: {
       description: "A parent counts as low depth when its uncompressed FASTA is smaller than this many GB (60 GB is about 10x)"
     }
+    keep_read_alignment: {
+      description: "Export the reads-to-assembly BAM Flagger worked on (tens of GB per sample; off by default)"
+    }
+    flagger_align_threads: {
+      description: "minimap2 threads for the reads-to-assembly alignment"
+    }
+    flagger_align_mem_gb: {
+      description: "Memory (GB) of that alignment (the -I8g index of the diploid assembly)"
+    }
+    flagger_threads: {
+      description: "bam2cov and hmm_flagger threads"
+    }
+    flagger_mem_gb: {
+      description: "Memory (GB) of bam2cov and hmm_flagger"
+    }
+    trioeval_c: {
+      description: "yak trioeval -c; default: the -c the binning used"
+    }
+    trioeval_d: {
+      description: "yak trioeval -d; default: the -d the binning used"
+    }
     ref_map_file: {
-      description: "ugc-wgw reference map (docs/DESIGN.md §10.4); keys used here: name, fasta, fasta_index"
+      description: "ugc-wgw reference map (docs/DESIGN.md §10.4); keys used here: name"
     }
     ugc_wgw_container_registry: {
       description: "Registry holding the ugc-built images (hifiasm)"
@@ -152,6 +179,8 @@ workflow ugc_wgw_assembly {
   input {
     String ugc_wgw_version
     String sample_id
+    String assembler = "hifiasm"
+    String hifiasm_telomere_motif = "CCCTAA"
     Array[File] hifi_reads
     String? father_id
     String? mother_id
@@ -165,6 +194,13 @@ workflow ugc_wgw_assembly {
     String? yak_params
     String? hifiasm_trio_params
     Int trio_low_depth_gb = 90
+    Boolean keep_read_alignment = false
+    Int flagger_align_threads = 32
+    Int flagger_align_mem_gb = 64
+    Int flagger_threads = 16
+    Int flagger_mem_gb = 32
+    Int? trioeval_c
+    Int? trioeval_d
     File ref_map_file
     String ugc_wgw_container_registry
 
@@ -189,9 +225,9 @@ workflow ugc_wgw_assembly {
     then backend_configuration.spot_runtime_attributes
     else backend_configuration.on_demand_runtime_attributes
 
+  # read for the input contract every entrypoint shares; this stage needs no key of it
   #@ except: DeclarationName
-  Map[String, String] ref_map = read_map(ref_map_file)
-  String ref_name = ref_map["name"]
+  Map[String, String] ref_map = read_map(ref_map_file)  # !UnusedDeclaration
 
   Boolean is_trio = defined(father_hifi_reads) && defined(mother_hifi_reads)
 
@@ -249,59 +285,86 @@ workflow ugc_wgw_assembly {
 
   String? hifiasm_params = if is_trio then hifiasm_params_trio else hifiasm_extra_params
 
-  call Hifiasm.ugc_wgw_hifiasm_assemble { input:
-    sample_id = sample_id,
-    reads_fastas = samtools_fasta_child.fasta,
-    extra_params = hifiasm_params,
-    father_yak = yak_count_father.yak,
-    mother_yak = yak_count_mother.yak,
-    threads = hifiasm_threads,
-    mem_gb = hifiasm_mem_gb,
-    ugc_wgw_container_registry = ugc_wgw_container_registry,
-    runtime_attributes = default_runtime_attributes
+  # the assembler seam: the contract below is all the rest of the stage and the later stages read
+  if (assembler != "hifiasm") {
+    call Fail.ugc_wgw_fail { input:  # !UnusedCall
+      message = "assembler '" + assembler + "' is not implemented (only hifiasm)",
+      runtime_attributes = default_runtime_attributes
+    }
   }
+  if (assembler == "hifiasm") {
+    call Hifiasm.ugc_wgw_hifiasm_assemble { input:
+      sample_id = sample_id,
+      reads_fastas = samtools_fasta_child.fasta,
+      extra_params = hifiasm_params,
+      telomere_motif = hifiasm_telomere_motif,
+      father_yak = yak_count_father.yak,
+      mother_yak = yak_count_mother.yak,
+      threads = hifiasm_threads,
+      mem_gb = hifiasm_mem_gb,
+      ugc_wgw_container_registry = ugc_wgw_container_registry,
+      runtime_attributes = default_runtime_attributes
+    }
+  }
+  Array[File] hap_gfas = select_first([ugc_wgw_hifiasm_assemble.assembly_hap_gfas])
 
   # <sample_id>.asm.<bp|dip>.hap1.p_ctg.gfa -> hap1; the glob is lexicographic, so hap1 comes first
-  scatter (gfa in ugc_wgw_hifiasm_assemble.assembly_hap_gfas) {
-    String haplotype = sub(basename(gfa, ".p_ctg.gfa"), "^.*\\.", "")
-
+  scatter (gfa in hap_gfas) {
     call Gfatools.ugc_wgw_gfatools_gfa2fa { input:
       gfa = gfa,
       runtime_attributes = default_runtime_attributes
     }
-
-    call Align.ugc_wgw_minimap2_align_asm { input:
-      sample_id = sample_id,
-      haplotype = haplotype,
-      query_fasta = ugc_wgw_gfatools_gfa2fa.zipped_fasta,
-      ref_fasta = ref_map["fasta"],  # !FileCoercion
-      ref_name = ref_name,
-      runtime_attributes = default_runtime_attributes
-    }
-
-    call Align.ugc_wgw_paftools_call { input:
-      bam = ugc_wgw_minimap2_align_asm.bam,
-      bam_index = ugc_wgw_minimap2_align_asm.bam_index,
-      ref_fasta = ref_map["fasta"],  # !FileCoercion
-      sample_id = sample_id,
-      runtime_attributes = default_runtime_attributes
-    }
-
-    call ZipStats.ugc_wgw_bcftools_zip_stats { input:
-      vcf = ugc_wgw_paftools_call.vcf,
-      ref_fasta = ref_map["fasta"],  # !FileCoercion
-      ref_index = ref_map["fasta_index"],  # !FileCoercion
-      sample_id = sample_id,
-      runtime_attributes = default_runtime_attributes
-    }
   }
+  Array[String] labels = if is_trio then ["pat", "mat"] else ["hap1", "hap2"]
 
-  call Samtools.samtools_merge as merge_haps { input:
-    bams = ugc_wgw_minimap2_align_asm.bam,
-    out_prefix = "~{sample_id}.asm.~{ref_name}",
+  # HMM-Flagger: the sample's reads back on its own diploid assembly
+  call Flagger.ugc_wgw_flagger_align { input:
+    sample_id = sample_id,
+    reads_fastas = samtools_fasta_child.fasta,
+    hap_fastas = ugc_wgw_gfatools_gfa2fa.zipped_fasta,
+    threads = flagger_align_threads,
+    mem_gb = flagger_align_mem_gb,
+    ugc_wgw_container_registry = ugc_wgw_container_registry,
     runtime_attributes = default_runtime_attributes
   }
+  call Flagger.ugc_wgw_flagger_correct_bam { input:
+    sample_id = sample_id,
+    bam = ugc_wgw_flagger_align.bam,
+    bam_index = ugc_wgw_flagger_align.bam_index,
+    runtime_attributes = default_runtime_attributes
+  }
+  call Flagger.ugc_wgw_flagger_hmm { input:
+    sample_id = sample_id,
+    bam = ugc_wgw_flagger_correct_bam.corrected_bam,
+    bam_index = ugc_wgw_flagger_correct_bam.corrected_bam_index,
+    dip_fasta = ugc_wgw_flagger_align.dip_fasta,
+    threads = flagger_threads,
+    mem_gb = flagger_mem_gb,
+    runtime_attributes = default_runtime_attributes
+  }
+  if (keep_read_alignment) {
+    File kept_bam = ugc_wgw_flagger_align.bam
+    File kept_bam_index = ugc_wgw_flagger_align.bam_index
+  }
 
+  # trio QC: each haplotype against the parental k-mer tables, with the binning's thresholds
+  if (is_trio) {
+    Boolean trio_low = select_first([low_depth])
+    Int eval_c = select_first([trioeval_c, if trio_low then 1 else 2])
+    Int eval_d = select_first([trioeval_d, if trio_low then 1 else 5])
+    scatter (i in range(length(labels))) {
+      call Yak.ugc_wgw_yak_trioeval { input:
+        sample_id = sample_id,
+        haplotype = labels[i],
+        hap_fasta = ugc_wgw_gfatools_gfa2fa.zipped_fasta[i],
+        father_yak = select_first([yak_count_father.yak]),
+        mother_yak = select_first([yak_count_mother.yak]),
+        min_occurrence = eval_c,
+        mid_occurrence = eval_d,
+        runtime_attributes = default_runtime_attributes
+      }
+    }
+  }
   Array[String] no_members = []
 
   call Provenance.ugc_wgw_manifest_write { input:
@@ -315,23 +378,21 @@ workflow ugc_wgw_assembly {
   }
 
   output {
-    Array[File] assembly_noseq_gfas = ugc_wgw_hifiasm_assemble.assembly_noseq_gfas
-    Array[File] assembly_lowQ_beds = ugc_wgw_hifiasm_assemble.assembly_lowQ_beds
-    Array[String] haplotypes = haplotype
-    Array[File] zipped_assembly_fastas = ugc_wgw_gfatools_gfa2fa.zipped_fasta
+    String assembler_used = assembler
+    File assembler_version = select_first([ugc_wgw_hifiasm_assemble.version])
+    Array[String] haplotype_labels = labels
+    Array[File] hap_fastas = ugc_wgw_gfatools_gfa2fa.zipped_fasta
     Array[File] assembly_stats = ugc_wgw_gfatools_gfa2fa.stats
-    Array[File] asm_bams = ugc_wgw_minimap2_align_asm.bam
-    Array[File] asm_bam_indices = ugc_wgw_minimap2_align_asm.bam_index
-    File merged_asm_bam = merge_haps.merged_bam
-    File merged_asm_bam_index = merge_haps.merged_bam_index
-    Array[File] paftools_vcfs = ugc_wgw_bcftools_zip_stats.zipped_vcf
-    Array[File] paftools_vcf_indices = ugc_wgw_bcftools_zip_stats.zipped_vcf_index
-    Array[File] paftools_vcf_stats = ugc_wgw_bcftools_zip_stats.stats
-
+    Array[File] assembly_noseq_gfas = select_first([ugc_wgw_hifiasm_assemble.assembly_noseq_gfas])
+    Array[File] assembly_lowQ_beds = select_first([ugc_wgw_hifiasm_assemble.assembly_lowQ_beds])
+    File flagger_bed = ugc_wgw_flagger_hmm.prediction_bed
+    File flagger_summary = ugc_wgw_flagger_hmm.summary_tsv
+    Array[File]? trio_eval = ugc_wgw_yak_trioeval.trioeval
+    File? read_alignment_bam = kept_bam
+    File? read_alignment_bam_index = kept_bam_index
     Boolean trio = is_trio
     String? hap1_parent = father
     String? hap2_parent = mother
-
     String ugc_wgw_workflow_version = ugc_wgw_version
     File ugc_wgw_manifest = ugc_wgw_manifest_write.ugc_wgw_manifest
   }

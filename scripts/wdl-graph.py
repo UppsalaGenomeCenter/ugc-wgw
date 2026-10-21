@@ -41,7 +41,7 @@ except ImportError:  # pragma: no cover
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 ENTRYPOINTS = ["ugc_wgw_singleton", "ugc_wgw_upstream", "ugc_wgw_cohort_call", "ugc_wgw_downstream", "ugc_wgw_cohort_merge", "ugc_wgw_cohort_freq",
-               "ugc_wgw_assembly"]
+               "ugc_wgw_assembly", "ugc_wgw_assembly_call", "ugc_wgw_cohort_pangenome"]
 OUTPUT = REPO / "docs" / "guide" / "workflow-graphs.md"
 DEFAULT_DEPTH = 1
 DEPTH: Dict[str, int] = {}  # per-entrypoint override of DEFAULT_DEPTH

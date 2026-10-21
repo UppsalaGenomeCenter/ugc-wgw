@@ -1,0 +1,18 @@
+# Expected outputs of ugc_wgw_cohort_pangenome, one glob per line relative to out/ (arrays: name/<i>/file).
+pangenome_vcf/*.pangenome.*.vcf.gz
+pangenome_vcf_index/*.pangenome.*.vcf.gz.tbi
+pangenome_wave_vcf/*.pangenome.*.wave.vcf.gz
+pangenome_wave_vcf_index/*.pangenome.*.wave.vcf.gz.tbi
+chrom_gbzs/*/*.pangenome.*.chr*.gbz
+chrom_gfas/*/*.pangenome.*.chr*.gfa.gz
+chrom_graph_stats/*/*.pangenome.*.chr*.graph-stats.tsv
+chrom_logs/*/*.pangenome.*.chr*.cactus-logs.tar.gz
+name_map/*.pangenome.name_map.tsv
+split_log/*.pangenome.*.split.log
+contig_sizes/*.pangenome.*.contig_sizes.tsv
+ambiguous_contigs/*.pangenome.*.ambiguous_contigs.tsv
+freq_vcf/*.pangenome.*.freq.vcf.gz
+freq_vcf_index/*.pangenome.*.freq.vcf.gz.tbi
+freq_summary/*.pangenome.*.freq.summary.tsv
+freq_samples/*.pangenome.*.freq.samples.tsv
+ugc_wgw_manifest/*.cohort_pangenome.ugc_wgw_manifest.json

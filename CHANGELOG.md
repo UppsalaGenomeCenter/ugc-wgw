@@ -3,6 +3,50 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.11.0
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.5.0,
+unchanged. There was no 0.10.0. This release is the assembly track: the
+`assembly` mode becomes `assembly → assembly_call → cohort_pangenome`.
+
+- **Breaking, `assembly`.** The stage ends at an output contract
+  (`assembler_used`, `assembler_version`, `haplotype_labels`, `hap_fastas`,
+  statistics, graphs); `haplotypes`, `zipped_assembly_fastas`, `asm_bams`,
+  `merged_asm_bam` and the `paftools_*` outputs are gone, and the
+  `align_hifiasm` image with them.
+- **Expensive.** hifiasm runs with `--telo-m CCCTAA` (`hifiasm_telomere_motif`,
+  empty = off) and writes its version file, so every sample's assembly is
+  recomputed once on this version; no later release touches the hifiasm
+  command. HMM-Flagger v1.2.0 (own tasks around the published images) and,
+  for trio-binned samples, `yak trioeval` give per-assembly QC.
+- New stage `assembly_call` (per sample): minimap2 2.31 aligns each
+  haplotype to a decoy-free GRCh38 (BAM and PAF), the stage reports assembled
+  bases per chromosome, infers the karyotype, and calls with dipcall v0.3 and
+  PAV 3. Primary VCFs carry the sample's name, unphased genotypes unless
+  trio-binned, and `FILTER=ASM_UNRELIABLE` outside the Flagger-reliable
+  region (added, never dropped); with a read-based VCF a concordance table.
+- New stage `cohort_pangenome` (per cohort): a Minigraph-Cactus v3.3.0 graph
+  of the members' assemblies, built per chromosome behind one genome-wide
+  split (`chromosomes` under `stage_inputs` limits the build); the cohort
+  VCFs (raw and vcfwave) under the sample IDs with non-trio members
+  unphased, allele frequencies with karyotype strata, GBZ and GFA per
+  chromosome, optional `truvari bench` against the cohort's read-based SV
+  merge (`pangenome_sv_cohort`, a profile key). The graph's paths of members
+  that were not trio-binned are not haplotypes: no LD, imputation or
+  PanGenie-style use without statistical phasing (guide chapter 02).
+- References: the `ugc-wgw-asm` 0.1.0 lock entry (the decoy-free contig list,
+  the chromosome list, dipcall's PAR BED; the installer derives the FASTA and
+  index from the data container); the map gains `asm_fasta`,
+  `asm_fasta_index`, `asm_par_bed`, `asm_graph_chromosomes`.
+- Images: a new `minimap2` image of ours (minimap2 2.31, samtools 1.24,
+  paftools.js) and the published dipcall, HMM-Flagger, secphase, PAV,
+  Minigraph-Cactus and Truvari images pinned by digest.
+- Summary: assembly QC thresholds and flags, an "Assembly QC" block per
+  sample, QC columns in the cohort table, `summary --pass-list` for freezing
+  a QC-gated pangenome cohort, and `summary --mode assembly` with the cohort
+  page's pangenome section.
+
 ## 0.9.4
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

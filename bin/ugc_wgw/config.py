@@ -18,8 +18,8 @@ CONFIG_SCHEMA = 1
 DEFAULT_REGISTRY = "ghcr.io/uppsalagenomecenter"
 DEEPVARIANT_MODES = ("cpu", "gpu", "parabricks")   # small-variant caller of singleton/upstream (guide chapter 12)
 # the project keys a site profile may set (`ugc-wgw init --profile`, guide chapter 05); `description` is allowed and ignored
-PROFILE_KEYS = ("max_inflight", "poll_interval", "assembly_use_parents", "deepvariant", "gpu_type", "parabricks_gpus",
-                "stage_inputs", "prices", "summary_thresholds", "input_thresholds")
+PROFILE_KEYS = ("max_inflight", "poll_interval", "assembly_use_parents", "pangenome_sv_cohort", "deepvariant", "gpu_type",
+                "parabricks_gpus", "stage_inputs", "prices", "summary_thresholds", "input_thresholds")
 
 
 @dataclass
@@ -37,6 +37,7 @@ class Config:
     max_inflight: int = 4
     poll_interval: float = 30.0
     assembly_use_parents: bool = True
+    pangenome_sv_cohort: str = ""   # cohort whose cohort_merge SV VCF cohort_pangenome compares the graph with (empty: the same cohort)
     auto_retry_max: int = 2
     backoff_seconds: float = 300.0
     cancel_orphans: bool = True
@@ -99,6 +100,7 @@ class Config:
             "max_inflight": self.max_inflight,
             "poll_interval": self.poll_interval,
             "assembly_use_parents": self.assembly_use_parents,
+            "pangenome_sv_cohort": self.pangenome_sv_cohort,
             "auto_retry_max": self.auto_retry_max,
             "backoff_seconds": self.backoff_seconds,
             "cancel_orphans": self.cancel_orphans,
@@ -146,6 +148,7 @@ class Config:
             max_inflight=int(doc.get("max_inflight", 4)),
             poll_interval=float(doc.get("poll_interval", 30.0)),
             assembly_use_parents=bool(doc.get("assembly_use_parents", True)),
+            pangenome_sv_cohort=str(doc.get("pangenome_sv_cohort") or "").strip(),
             auto_retry_max=int(doc.get("auto_retry_max", 2)),
             backoff_seconds=float(doc.get("backoff_seconds", 300.0)),
             cancel_orphans=bool(doc.get("cancel_orphans", True)),
@@ -238,6 +241,10 @@ def load_profile(path: Path) -> dict[str, object]:
         raise UgcError(f"profile {path}: poll_interval must be a positive number")
     if "assembly_use_parents" in out and not isinstance(out["assembly_use_parents"], bool):
         raise UgcError(f"profile {path}: assembly_use_parents must be true or false")
+    if "pangenome_sv_cohort" in out:
+        if not isinstance(out["pangenome_sv_cohort"], str):
+            raise UgcError(f"profile {path}: pangenome_sv_cohort must be a cohort ID (string)")
+        out["pangenome_sv_cohort"] = out["pangenome_sv_cohort"].strip()
     for key in ("stage_inputs", "prices", "summary_thresholds", "input_thresholds"):
         if key in out and not isinstance(out[key], dict):
             raise UgcError(f"profile {path}: {key} must be an object")
@@ -322,6 +329,7 @@ def init_project(
     max_inflight: int = 4,
     poll_interval: float = 30.0,
     assembly_use_parents: bool = True,
+    pangenome_sv_cohort: str = "",
     auto_retry_max: int = 2,
     backoff_seconds: float = 300.0,
     cancel_orphans: bool = True,
@@ -349,6 +357,7 @@ def init_project(
         max_inflight=max_inflight,
         poll_interval=poll_interval,
         assembly_use_parents=assembly_use_parents,
+        pangenome_sv_cohort=pangenome_sv_cohort.strip(),
         auto_retry_max=auto_retry_max,
         backoff_seconds=backoff_seconds,
         cancel_orphans=cancel_orphans,

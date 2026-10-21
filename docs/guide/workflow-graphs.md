@@ -431,7 +431,7 @@ flowchart TD
 
 ## ugc_wgw_assembly
 
-Source `workflows/ugc_wgw_assembly.wdl`, depth 1, Mermaid source 914 characters.
+Source `workflows/ugc_wgw_assembly.wdl`, depth 1, Mermaid source 1192 characters.
 
 Inlined workflows: none.
 
@@ -453,28 +453,127 @@ flowchart TD
     n5["yak_count_father"]
     n6["yak_count_mother"]
   end
-  n7["ugc_wgw_hifiasm_assemble"]
-  subgraph s5["scatter gfa in ugc_wgw_hifiasm_assemble.assembly_hap_g…"]
-    n8["ugc_wgw_gfatools_gfa2fa"]
-    n9["ugc_wgw_minimap2_align_asm"]
-    n10["ugc_wgw_paftools_call"]
-    n11["ugc_wgw_bcftools_zip_stats"]
+  subgraph s5["if assembler != #quot;hifiasm#quot;"]
+    n7["ugc_wgw_fail"]
   end
-  n12["merge_haps"]
-  n13["ugc_wgw_manifest_write"]
-  n1 --> n7
+  subgraph s6["if assembler == #quot;hifiasm#quot;"]
+    n8["ugc_wgw_hifiasm_assemble"]
+  end
+  subgraph s7["scatter gfa in hap_gfas"]
+    n9["ugc_wgw_gfatools_gfa2fa"]
+  end
+  n10["ugc_wgw_flagger_align"]
+  n11["ugc_wgw_flagger_correct_bam"]
+  n12["ugc_wgw_flagger_hmm"]
+  subgraph s8["if is_trio"]
+    subgraph s9["scatter i in range(length(labels))"]
+      n13["ugc_wgw_yak_trioeval"]
+    end
+  end
+  n14["ugc_wgw_manifest_write"]
+  n1 --> n8
+  n1 --> n10
   n2 --> n4
   n2 --> n5
   n3 --> n4
   n3 --> n6
   n4 --> n5
   n4 --> n6
-  n4 --> n7
-  n5 --> n7
-  n6 --> n7
-  n7 -.-> s5
-  n8 --> n9
+  n4 --> n8
+  n4 --> n13
+  n5 --> n8
+  n5 --> n13
+  n6 --> n8
+  n6 --> n13
+  n8 -.-> s7
   n9 --> n10
-  n9 --> n12
+  n9 --> n13
   n10 --> n11
+  n10 --> n12
+  n11 --> n12
+```
+
+## ugc_wgw_assembly_call
+
+Source `workflows/ugc_wgw_assembly_call.wdl`, depth 1, Mermaid source 685 characters.
+
+Inlined workflows: none.
+
+Workflow nodes (not expanded here): none.
+
+```mermaid
+flowchart TD
+  subgraph s1["scatter i in range(length(hap_fastas))"]
+    n1["ugc_wgw_minimap2_align_asm"]
+  end
+  n2["ugc_wgw_chrom_coverage"]
+  n3["ugc_wgw_dipcall"]
+  n4["ugc_wgw_pav"]
+  subgraph s2["if defined(flagger_bed)"]
+    subgraph s3["scatter i in range(length(hap_fastas))"]
+      n5["ugc_wgw_liftover_unreliable"]
+    end
+    n6["ugc_wgw_reliable_regions"]
+  end
+  n7["finish_dipcall"]
+  n8["finish_pav"]
+  subgraph s4["if defined(read_small_variant_vcf)"]
+    n9["ugc_wgw_asm_concordance"]
+  end
+  n10["ugc_wgw_manifest_write"]
+  n1 --> n2
+  n1 --> n5
+  n2 --> n3
+  n3 --> n6
+  n3 --> n7
+  n3 --> n9
+  n4 --> n8
+  n5 --> n6
+  n6 --> n7
+  n6 --> n8
+  n6 --> n9
+  n7 --> n9
+```
+
+## ugc_wgw_cohort_pangenome
+
+Source `workflows/ugc_wgw_cohort_pangenome.wdl`, depth 1, Mermaid source 647 characters.
+
+Inlined workflows: none.
+
+Workflow nodes (not expanded here): none.
+
+```mermaid
+flowchart TD
+  n1["ugc_wgw_pangenome_names"]
+  n2["ugc_wgw_cactus_split"]
+  subgraph s1["scatter chrom in to_build"]
+    n3["ugc_wgw_cactus_chrom"]
+  end
+  n4["post_raw"]
+  n5["post_wave"]
+  subgraph s2["scatter i in range(length(requested))"]
+    n6["freq_shard"]
+  end
+  n7["concat_freq"]
+  n8["ugc_wgw_pangenome_freq_summary"]
+  subgraph s3["if defined(sv_vcf)"]
+    n9["ugc_wgw_vcf_split_multiallelic"]
+    n10["ugc_wgw_truvari_bench"]
+  end
+  n11["ugc_wgw_manifest_write"]
+  n1 --> n2
+  n1 --> n3
+  n1 --> n4
+  n1 --> n5
+  n1 --> n6
+  n2 --> n3
+  n3 --> n4
+  n3 --> n5
+  n5 --> n6
+  n5 --> n9
+  n6 --> n7
+  n6 --> n8
+  n7 --> n8
+  n9 --> n10
 ```

@@ -245,8 +245,53 @@ structural_variants\tmean_call_rate\tall\t1.0000
 structural_variants\trecords\tcall_rate_below_0.9\t0
 """
 
+# cohort_pangenome: the chromosomes the fake builds (chromosomes input absent), the graph sizes per chromosome, the split's
+# contig binning per haplotype, the frequency summary of the vcfwave VCF and truvari's figures
+PANGENOME_CHROMS = ["chr1", "chr20", "chrX"]
+GRAPH_STATS = "#ref_chrom\tnodes\tedges\tlength\n{chrom}\t{nodes}\t{edges}\t{length}\n"
+AMBIGUOUS_HEADER = "genome\tassigned\tassigned_bp\tambiguous\tambiguous_bp\n"
+TRUVARI_JSON = {"TP-base": 24000, "TP-comp": 24500, "FP": 2500, "FN": 6000, "precision": 0.9074, "recall": 0.8, "f1": 0.8503,
+                "base cnt": 30000, "comp cnt": 27000, "gt_concordance": 0.95}
+PANGENOME_FREQ_SUMMARY = """# ugc-pacbio-wgw cohort_pangenome: AF bins use the largest allele frequency of a record with AC > 0; call rate = NS / n_samples
+resource\tmetric\tkey\tvalue
+samples\tn\ttotal\t{n}
+samples\tn\tXX\t{xx}
+samples\tn\tXY\t{xy}
+samples\tn\tunknown\t0
+samples\tn_sex_source\tkaryotype\t{n}
+samples\tn_sex_source\tnone\t0
+samples\tn_in_vcf\tpangenome\t{n}
+pangenome\trecords\ttotal\t4100000
+pangenome\trecords_by_type\tDEL\t12000
+pangenome\trecords_by_type\tINDEL\t700000
+pangenome\trecords_by_type\tINS\t14000
+pangenome\trecords_by_type\tMIXED\t9000
+pangenome\trecords_by_type\tMNV\t15000
+pangenome\trecords_by_type\tSNV\t3350000
+pangenome\trecords_by_contig_class\tautosome\t4000000
+pangenome\trecords_by_contig_class\tchrX\t100000
+pangenome\trecords_by_filter\t.\t4100000
+pangenome\trecords\tac_gt0\t4100000
+pangenome\trecords\tsingletons\t1500000
+pangenome\trecords_by_af_bin\t<0.001\t0
+pangenome\trecords_by_af_bin\t<0.01\t0
+pangenome\trecords_by_af_bin\t<0.05\t0
+pangenome\trecords_by_af_bin\t>=0.05\t4100000
+pangenome\trecords_ac_gt0_in\tXX\t3000000
+pangenome\trecords_ac_gt0_in\tXY\t3100000
+pangenome\tmean_call_rate\tall\t0.9700
+pangenome\trecords\tcall_rate_below_0.9\t150000
+"""
+
 GFATOOLS = "CC\tGS   genome_size_if_provided\nCC\tSZ   total_sequence_length\nCC\tNN   number_of_sequences\nCC\tNL   x   Nx   Lx\nCC\tAU   auN\nCC\nGS\t3100000000\nSZ\t{sz}\nNN\t{nn}\nNL\t0\t{n0}\t1\nNL\t50\t{n50}\t{l50}\nAU\t{aun}\n"
-PAFTOOLS_SN = "# bcftools stats\nSN\t0\tnumber of samples:\t1\nSN\t0\tnumber of records:\t{rec}\nSN\t0\tnumber of SNPs:\t{snps}\nSN\t0\tnumber of indels:\t{indels}\n"
+CALLER_SN = "# bcftools stats\nSN\t0\tnumber of samples:\t1\nSN\t0\tnumber of records:\t{rec}\nSN\t0\tnumber of SNPs:\t{snps}\nSN\t0\tnumber of indels:\t{indels}\n"
+FLAGGER_SUMMARY = ("#metric\tlevel\tunit\tannotation_type\tannotation\tsize_bin\tlabel_filter\tErr\tDup\tHap\tCol\tUnk\n"
+                   "PREDICTION\tbase_level\tcount\tannotation\twhole_genome\tALL_SIZES\tALL_LABELS\t37000000\t41000000\t2900000000\t42000000\t0\n"
+                   "PREDICTION\tbase_level\tpercentage\tannotation\twhole_genome\tALL_SIZES\tALL_LABELS\t1.24\t1.37\t95.99\t1.40\t0.00\n"
+                   "PREDICTION\twindow_level\tpercentage\tannotation\twhole_genome\tALL_SIZES\tALL_LABELS\t1.30\t1.40\t95.90\t1.40\t0.00\n")
+KARYOTYPE_JSON = {"karyotype": "unknown", "reason": "non-PAR chrX bases aligned are 0.000 of the chrX length, below 0.5", "trio": False,
+                  "chrx_bases_outside_par": 0, "chry_bases_outside_par": 0, "chrx_fraction": 0.0, "chry_fraction": 0.0,
+                  "thresholds": {"min_mapq": 5, "chrx_min_fraction": 0.5, "chry_min_fraction": 0.1}, "regrouped": False, "moved_contigs": 0}
 
 
 def fixture_bytes(name: str, sid: str, stage: str, inferred_sex: str = "", index: int = 0,
@@ -304,18 +349,55 @@ def fixture_bytes(name: str, sid: str, stage: str, inferred_sex: str = "", index
         doc = KIVVI_OK
     elif name == "freq_summary":
         ms = members or []
-        text = FREQ_SUMMARY.replace("{n}", str(len(ms))).replace("{xx}", str(len(ms) // 2)).replace("{xy}", str(len(ms) - len(ms) // 2))
+        tpl = PANGENOME_FREQ_SUMMARY if stage == "cohort_pangenome" else FREQ_SUMMARY
+        text = tpl.replace("{n}", str(len(ms))).replace("{xx}", str(len(ms) // 2)).replace("{xy}", str(len(ms) - len(ms) // 2))
+    elif name == "freq_samples" and stage == "cohort_pangenome":
+        ms = members or []
+        text = "sample_id\tgroup\tsex_source\tin_pangenome_vcf\n" + "".join(
+            f"{m}\t{'XX' if i % 2 else 'XY'}\tkaryotype\tyes\n" for i, m in enumerate(ms))
     elif name == "freq_samples":
         ms = members or []
         text = "sample_id\tgroup\tsex_source\tin_small_variant_vcf\tin_sv_vcf\n" + "".join(
             f"{m}\t{'XX' if i % 2 else 'XY'}\tsheet\tyes\tyes\n" for i, m in enumerate(ms))
+    elif name == "chrom_graph_stats":
+        chrom = PANGENOME_CHROMS[index] if index < len(PANGENOME_CHROMS) else f"chr{index}"
+        text = GRAPH_STATS.format(chrom=chrom, nodes=500_000 + index * 1000, edges=700_000 + index * 1000, length=60_000_000 + index * 1_000_000)
+    elif name == "ambiguous_contigs":
+        ms = members or []
+        text = AMBIGUOUS_HEADER + "".join(f"{m}.{h}\t{30 + i}\t{3_000_000_000 - i * 1_000_000}\t{18 + i}\t{2_000_000 + i * 500_000}\n"
+                                          for i, m in enumerate(ms) for h in (1, 2))
+    elif name == "contig_sizes":
+        ms = members or []
+        gens = [f"{m}.{h}" for m in ms for h in (1, 2)]
+        text = ("Contig\tGRCh38\t" + "\t".join(gens) + "\t_MINIGRAPH_\tmin\tmax\tavg\n"
+                + "_AMBIGUOUS_\t0\t" + "\t".join(["2000000"] * len(gens)) + "\t0\t0\t2000000\t1000000\n"
+                + "chr20\t64444167\t" + "\t".join(["65000000"] * len(gens)) + "\t64444167\t64444167\t65000000\t64800000\n")
+    elif name == "name_map":
+        ms = members or []
+        text = "sample_id\tsafe_name\ttrio\n" + "".join(f"{m}\t{m.replace('-', '_').replace('.', '_')}\tfalse\n" for m in ms)
+    elif name == "truvari_summary":
+        doc = TRUVARI_JSON
     elif name == "cohort_trgt_lps":
         ms = members or []
         text = "trid\tmotif\t" + "\t".join(ms) + "\n" + "".join(f"chr1_{i}_{i + 50}_CAG\tCAG\t" + "\t".join(["0,0"] * len(ms)) + "\n" for i in range(1, 6))
     elif name == "assembly_stats":
         text = GFATOOLS.format(sz=3_020_000_000 - index * 5_000_000, nn=400 + index * 20, n0=140_000_000, n50=60_000_000 - index * 3_000_000, l50=15 + index, aun=58_000_000)
-    elif name == "paftools_vcf_stats":
-        text = PAFTOOLS_SN.format(rec=3_000_000 + index, snps=2_700_000 + index, indels=300_000)
+    elif name == "dipcall_vcf_stats":
+        text = CALLER_SN.format(rec=4_500_000, snps=3_800_000, indels=700_000)
+    elif name == "pav_vcf_stats":
+        text = CALLER_SN.format(rec=4_600_000, snps=3_850_000, indels=750_000)
+    elif name == "karyotype_json":
+        doc = KARYOTYPE_JSON
+    elif name == "flagger_summary":
+        text = FLAGGER_SUMMARY
+    elif name == "trio_eval":
+        text = f"S\th{index + 1}tg000001l\t16624\t22\t16610\t13\t13\t9\nW\t{199 + index}\t49822\t{0.0040 + index * 0.001:.6f}\nH\t540\t49871\t0.010828\n"
+    elif name == "reliable_summary":
+        text = "reference_bp\t3031042417\ndip_bed_bp\t2800000000\nunreliable_bp\t40000000\nunreliable_in_dip_bed_bp\t30000000\nreliable_bp\t2770000000\nreliable_fraction_of_reference\t0.9139\nreliable_fraction_of_dip_bed\t0.9893\n"
+    elif name == "concordance":
+        text = "region\treliable.bed\nsites_merged\t3900000\nboth_called\t3700000\nconcordant\t3650000\ndiscordant\t50000\nread_het\t2200000\nhet_loss\t44000\nread_only\t120000\nasm_only\t80000\nasm_only_het\t30000\ngenotype_concordance\t0.9865\nhet_loss_rate\t0.0200\n"
+    elif name == "chrom_coverage":
+        text = "haplotype\tchrom\taligned_bases\tcontigs\tchrom_length\tfraction\nhap1\tchr20\t60000000\t3\t64444167\t0.9310\nhap2\tchr20\t61000000\t2\t64444167\t0.9466\n"
     if doc is not None:
         text = json.dumps(doc, indent=2) + "\n"
     return text.encode() if text is not None else None

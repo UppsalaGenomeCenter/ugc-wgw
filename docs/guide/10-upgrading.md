@@ -80,6 +80,28 @@ outputs were used, so the mixture is traceable. Do not use it across an
 upstream change that alters the earlier stage's outputs in a way the later
 stage cares about; the changelog says when that is the case.
 
+## Assemblies across versions
+
+A new version re-gates every stage: `submit` only counts runs of the current
+version as done. For the read-based modes that costs little, because the
+call cache replays unchanged tasks. For `assembly` it is cheap only while the
+hifiasm command is unchanged, and expensive otherwise: a change to the hifiasm
+command line (its options, its image) recomputes every sample's assembly, up
+to a day each. The changelog marks such a release **EXPENSIVE: invalidates
+the assembly call cache**; 0.11.0 is one, and no later release touches the
+hifiasm command.
+
+When only the stages after the assembly changed (calling, QC, the graph), run
+them with `--any-version`, so that `assembly` successes of the previous version
+satisfy the prerequisite instead of being redone:
+
+```bash
+ugc-wgw submit --mode assembly --stage assembly_call --any-version
+```
+
+The run's manifest records which `assembly` run, and of which version, the
+stage read (`cohort_members` in `run_manifest.json`).
+
 ## When to re-initialise instead
 
 - The new bundle changes `config.json`'s schema (the driver refuses to load

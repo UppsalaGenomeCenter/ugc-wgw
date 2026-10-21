@@ -43,7 +43,8 @@ class DryRunTest(unittest.TestCase):
         self.assertIn("no output", err)
         code, out, err = run_cli(["--project", proj, "submit", "--mode", "assembly", "--dry-run"])
         self.assertEqual(code, 0, err)
-        self.assertIn("runnable=2 blocked=0", out)
+        self.assertIn("runnable=2 blocked=3", out)   # assembly_call waits for assembly; cohort_pangenome for --cohort
+        self.assertIn("cohort_pangenome needs --cohort", out)
         self.assertEqual(len([l for l in out.splitlines() if " run " in l and "ugc_wgw_assembly.wdl" in l]), 2)
 
     def test_gpu_type_goes_to_the_plugin_not_the_inputs(self):

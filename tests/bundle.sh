@@ -49,7 +49,8 @@ if scripts/install-bundle.sh --bundle "$tarball" --prefix "$scratch/prefix-bad" 
 fi
 [ ! -d "$scratch/prefix-bad/versions" ]
 printf 'SLURM_PARTITION=core\nSLURM_ACCOUNT=acc-1\nSLURM_EXTRA_ARGS=--qos short\nTASK_CPU_MAX=48\nTASK_MEMORY_MAX=360G\nTASK_RESOURCES=<prefix>/resources.tsv\nSLURM_PARTITION_GPU=gpu\nSINGULARITY_NV=1\nTASK_SCRATCH_ENV=TMPDIR\n' > "$scratch/site.cfg"
-report=$(scripts/install-bundle.sh --bundle "$tarball" --prefix "$scratch/prefix" --site "$scratch/site.cfg" --activate)
+report=$(scripts/install-bundle.sh --bundle "$tarball" --prefix "$scratch/prefix" --site "$scratch/site.cfg" --activate 2> "$scratch/install.log")
+cat "$scratch/install.log" >&2
 install_dir=$(echo "$report" | sed -n 's/^install_dir=//p')
 [ -x "$install_dir/venv/bin/miniwdl" ]
 echo "$report" | grep -q '^profiles='
@@ -125,6 +126,15 @@ mmi=$scratch/prefix/references/ugc-wgw-extras-0.3.0/human_GRCh38_GIABv3_no_alt_a
 grep -q "^pbmm2_index	$mmi$" "$ref_map"
 grep -q "^run_starphase	true$" "$ref_map"
 [ -f "$scratch/prefix/references/ugc-wgw-extras-0.3.0/scatter_regions.GRCh38_GIABv3.tsv" ]
+# the assembly stages' references (references.lock ugc-wgw-asm): three shipped files, the derived fasta and its index built
+asm=$scratch/prefix/references/ugc-wgw-asm-0.1.0
+grep -q "^asm_fasta	$asm/human_GRCh38_GIABv3_asm.fasta$" "$ref_map"
+grep -q "^asm_fasta_index	$asm/human_GRCh38_GIABv3_asm.fasta.fai$" "$ref_map"
+grep -q "^asm_par_bed	$asm/asm_par.GRCh38.bed$" "$ref_map"
+grep -q "^asm_graph_chromosomes	$asm/asm_graph_chromosomes.GRCh38.txt$" "$ref_map"
+[ "$(wc -l < "$asm/asm_keep_contigs.GRCh38_GIABv3.txt")" -eq 194 ]
+[ "$(wc -l < "$asm/asm_graph_chromosomes.GRCh38.txt")" -eq 24 ]
+[ "$(md5sum "$asm/asm_par.GRCh38.bed" | cut -d' ' -f1)" = 25276f1418127b3971f3d84495639b29 ]
 echo "$report" | grep -q "^ref_map=$ref_map$"
 if [ "$images" = data ] || [ "$images" = install ]; then
   # the tree was copied out of the container and every file verified against references.lock
@@ -132,18 +142,23 @@ if [ "$images" = data ] || [ "$images" = install ]; then
   [ -f "$tree/manifest.json" ] && [ -f "$tree/GRCh38_GIABv3/trgt/adotto_strchive_20250827.hg38.bed.gz" ]
   echo "$report" | grep -q "^references=$tree$"
   if [ "$images" = install ]; then
-    # the reference's pbmm2 index was built with the bundled image and matches references.lock
+    # the reference's pbmm2 index and the assembly stages' fasta (+ .fai) were built with the bundled images and match references.lock
     [ -f "$mmi" ]
     [ "$(md5sum "$mmi" | cut -d' ' -f1)" = "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["bundles"]["ugc-wgw-extras"]["built"][0]["md5"])' references.lock)" ]
+    [ "$(md5sum "$asm/human_GRCh38_GIABv3_asm.fasta" | cut -d' ' -f1)" = 1210a749eee62f28de18ba906ae7198f ]
+    [ "$(md5sum "$asm/human_GRCh38_GIABv3_asm.fasta.fai" | cut -d' ' -f1)" = 374a75f82ff6f6ae919649aa0322cc20 ]
+    [ "$(wc -l < "$asm/human_GRCh38_GIABv3_asm.fasta.fai")" -eq 194 ]
+    grep -q 'human_GRCh38_GIABv3_asm.fasta built and verified' "$scratch/install.log"
     while read -r f; do [ -f "$f" ] || { echo "map names a missing file: $f" >&2; exit 1; }; done < <(cut -f2 "$ref_map" | grep '^/')
   else
-    [ ! -f "$mmi" ]   # no pbmm2 image in the bundle: the installer says how to build it and the map still names it
+    [ ! -f "$mmi" ] && [ ! -f "$asm/human_GRCh38_GIABv3_asm.fasta" ]   # no build images in the bundle: the installer says how to build them and the map still names them
+    grep -q 'not built: the bundle carries no quay.io/pacbio/pbmm2' "$scratch/install.log"
   fi
   # a second install must reuse the tree (no copy), verify it and keep the index
   scripts/install-bundle.sh --bundle "$tarball" --prefix "$scratch/prefix" --site "$scratch/site.cfg" --force > "$scratch/reinstall.log" 2>&1
   grep -q 'reference tree present' "$scratch/reinstall.log"
   grep -q 'profile kept' "$scratch/reinstall.log"
-  if [ "$images" = install ]; then grep -q 'pbmm2 index present and verified' "$scratch/reinstall.log"; else grep -q 'no pbmm2 index built' "$scratch/reinstall.log"; fi
+  if [ "$images" = install ]; then grep -q '\.mmi present and verified' "$scratch/reinstall.log" && grep -q 'asm.fasta present and verified' "$scratch/reinstall.log"; else grep -q '\.mmi not built' "$scratch/reinstall.log"; fi
 fi
 if grep -rq 'v3p1p0\|tertiary' "$install_dir/references" "$install_dir/inputs"; then echo "v3 map names survive in the install" >&2; exit 1; fi
 # WDL read_map() needs exactly two fields per line: no comments, no blank lines, in any rendered map

@@ -332,6 +332,18 @@ never starts the plugin, and miniwdl then prints a harmless
 by hand applies the caps and the policy only with `--cfg` pointing at the
 rendered `miniwdl.cfg`.
 
+## The pangenome's sizes
+
+`cohort_pangenome` has two tasks whose rows the chr20 scaling pilot sets
+(design brief, WP4): `ugc_wgw_cactus_split` maps every haplotype of the
+cohort genome-wide in one job (`split_cpu`, `split_mem_gb`, `split_disk_gb`
+as workflow inputs), and `ugc_wgw_cactus_chrom` builds one chromosome per
+job (`chrom_cpu`; memory the larger of `chrom_mem_gb_floor` and
+`chrom_mem_gb_per_100mb` per 100 Mb of the chromosome). The table of
+measured sizes per cohort size goes here once the pilot has run; until then
+the defaults are the dev-machine measurements on a two-sample chr20 graph,
+scaled up with margin.
+
 ## Finding the right numbers
 
 The inventory gives the declared values; the cluster gives the truth.

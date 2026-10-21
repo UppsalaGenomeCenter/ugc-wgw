@@ -82,9 +82,18 @@ class SourcesTest(unittest.TestCase):
         self.gen("cohort_merge", "cohort", "C1", merge_phased_small_variants=True)
         self.seed("cohort_merge", "cohort", "C1", attempt=2, run_glnexus=True)
         self.gen("cohort_freq", "cohort", "C1")
-        # assembly, trio and sample mode
+        # assembly, trio and sample mode; assembly_call with (S1 has a singleton) and without read-based calls
         self.gen("assembly", "sample", "K1", "assembly")
         self.gen("assembly", "sample", "S1", "assembly")
+        self.seed("assembly", "sample", "K1", "assembly", father_id="S1", mother_id="S3", father_hifi_reads=["/f"], mother_hifi_reads=["/m"])
+        self.seed("assembly", "sample", "S1", "assembly")
+        self.gen("assembly_call", "sample", "K1", "assembly")
+        self.gen("assembly_call", "sample", "S1", "assembly")
+        # cohort_pangenome over the members' assemblies and karyotypes, with and without a cohort_merge to compare with
+        for sid in MEMBERS:
+            self.seed("assembly", "sample", sid, "assembly", attempt=2)
+            self.seed("assembly_call", "sample", sid, "assembly", attempt=2, hap_fastas=["/a", "/b"], haplotype_labels=["hap1", "hap2"], trio=False)
+        self.gen("cohort_pangenome", "cohort", "C1", "assembly")   # C1 has a standalone cohort_merge above: truvari's sv_vcf travels
         for stage in STAGES:
             plain = {k for k in self.produced[stage] if "." not in k}
             dotted = {k for k in self.produced[stage] if "." in k}
@@ -162,9 +171,9 @@ class ListingTest(unittest.TestCase):
         self.assertIn("hifiasm_threads", [r["input"] for r in rows])
         code, out, err = run_cli(["--project", self.proj, "stage-inputs", "--stage", "assembly"])
         self.assertEqual(code, 0, err)
-        self.assertIn("# 1 stage, 23 workflow inputs:", out)
+        self.assertIn("# 1 stage, 32 workflow inputs:", out)
         self.assertIn("--nested adds", out)
-        self.assertIn("# assembly (ugc_wgw_assembly.wdl): 23 inputs", out)
+        self.assertIn("# assembly (ugc_wgw_assembly.wdl): 32 inputs", out)
         self.assertRegex(out, r"hifiasm_threads +Int +48 +stage_inputs")
         self.assertRegex(out, r"ugc_wgw_container_registry +String +- +config.json +ugc_wgw_container_registry")
         self.assertNotIn("override", self.header(out))
@@ -248,7 +257,7 @@ class NestedTest(unittest.TestCase):
         code, out, err = run_cli(["--project", proj, "stage-inputs", "--nested", "--mode", "assembly"])
         self.assertEqual(code, 0, err)
         self.assertIn("call-qualified inputs of the tasks inside", out)
-        self.assertRegex(out, r"# assembly \(ugc_wgw_assembly.wdl\): 23 inputs, \d+ call-qualified")
+        self.assertRegex(out, r"# assembly \(ugc_wgw_assembly.wdl\): 32 inputs, \d+ call-qualified")
 
 
 if __name__ == "__main__":

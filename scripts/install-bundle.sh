@@ -17,8 +17,9 @@
 #      absent, validate it when present
 #   4. references: copy the build's tree and manifest.json out of the bundled reference data
 #      container SIF into <references>/<install_subdir>/ (--references, default <root>/references)
-#      unless present, verify every md5 in references.lock, install ugc-wgw-extras (scatter regions; the
-#      reference's pbmm2 index is built there once with the bundled pbmm2 image and verified by md5),
+#      unless present, verify every md5 in references.lock, install the other lock entries' files (ugc-wgw-extras,
+#      ugc-wgw-asm) and build their derived files there once with the bundled images (the reference's pbmm2
+#      index, the assembly stages' decoy-free fasta), verified by md5,
 #      render references/ugc_wgw_ref_map.<build>.template.tsv into <root>/versions/<version>/references/
 #      and check it against the manifest, render the inputs templates into .../inputs/
 #   5. --verify-only: step 1, a temporary venv, the ugc_wgw_resources plugin entry point, `miniwdl check
@@ -295,20 +296,26 @@ log "4. references under $references"
 mkdir -p "$dest/references" "$dest/inputs"
 # references.lock names the build, the container paths, the install subdirs and every file's md5;
 # manifest.json names the SIF of the reference data container when the bundle carries it
-ref_build=""; ref_subdir=""; ref_sif=""; ref_data_path=""; ref_manifest_path=""; extras_subdir=""; extras_files=""
-built_name=""; built_md5=""; built_source=""; built_sif=""; built_image=""
-eval "$("$python_exe" - "$dest/code/references.lock" "$dest/manifest.json" <<'PYEOF'
+ref_build=""; ref_subdir=""; ref_sif=""; ref_data_path=""; ref_manifest_path=""
+# plan of the other lock entries (ugc-wgw-extras, ugc-wgw-asm, ...): the files they ship from code/references/ and the
+# files the installer builds there; one record per line, fields separated by the unit separator (commands hold spaces)
+plan=$dest/references-plan.txt
+eval "$("$python_exe" - "$dest/code/references.lock" "$dest/manifest.json" "$plan" <<'PYEOF'
 import json, shlex, sys
 b = json.load(open(sys.argv[1]))["bundles"]
-r, x = b["hifi-wdl-resources"], b["ugc-wgw-extras"]
+r = b["hifi-wdl-resources"]
 m = json.load(open(sys.argv[2]))
 images = {i.get("image"): i["sif"] for i in m.get("images", [])}
-built = (x.get("built") or [{}])[0]   # the reference's pbmm2 index: built by this installer, not shipped
+with open(sys.argv[3], "w") as out:
+    for key, x in b.items():
+        if key == "hifi-wdl-resources":
+            continue
+        out.write("\x1f".join(["files", key, x["install_subdir"], " ".join(f["name"] for f in x["files"])]) + "\n")
+        for bt in x.get("built", []):   # built by this installer, not shipped
+            out.write("\x1f".join(["built", key, x["install_subdir"], bt["name"], bt["md5"], bt["image"], images.get(bt["image"], ""),
+                                   bt["source_file"], bt.get("resources", ""), bt["command"]]) + "\n")
 for k, v in {"ref_build": r["build"], "ref_subdir": r["install_subdir"], "ref_sif": images.get(r["source"], ""),
-             "ref_data_path": r["container_paths"]["data"], "ref_manifest_path": r["container_paths"]["manifest"],
-             "extras_subdir": x["install_subdir"], "extras_files": " ".join(f["name"] for f in x["files"]),
-             "built_name": built.get("name", ""), "built_md5": built.get("md5", ""), "built_source": built.get("source_file", ""),
-             "built_image": built.get("image", ""), "built_sif": images.get(built.get("image"), "")}.items():
+             "ref_data_path": r["container_paths"]["data"], "ref_manifest_path": r["container_paths"]["manifest"]}.items():
     print(f"{k}={shlex.quote(v)}")
 PYEOF
 )"
@@ -349,43 +356,51 @@ if bad:
 print(f"[install-bundle]   {len(r['files'])} reference files verified (md5) under {sys.argv[2]}", file=sys.stderr)
 PYEOF
 fi
-if mkdir -p "$references/$extras_subdir" 2>/dev/null && [ -w "$references/$extras_subdir" ]; then
-  for f in $extras_files; do cp "$dest/code/references/$f" "$references/$extras_subdir/"; done
-  log "   ugc-wgw-extras installed to $references/$extras_subdir"
-else
-  log "   warning: $references not writable; copy code/references/{$extras_files} to $references/$extras_subdir/ yourself"
-fi
-# the reference's pbmm2 index (references.lock ugc-wgw-extras.built): built once per references directory from the
-# container's fasta with the bundled pbmm2 image, verified by md5 (the build is deterministic). The workflows read it
-# from the map's pbmm2_index key instead of rebuilding the 5.8 GB index once per input BAM.
-if [ -n "$built_name" ]; then
-  mmi=$references/$extras_subdir/$built_name
-  tmp_mmi=${built_name%.mmi}.building.mmi   # pbmm2 index insists on the .mmi suffix; renamed once verified
-  if [ -f "$mmi" ] && md5_is "$mmi" "$built_md5"; then
-    log "   pbmm2 index present and verified: $mmi"
-  elif [ -f "$mmi" ]; then
-    die "$mmi does not match references.lock (md5 $built_md5); remove it and run the installer again to rebuild it"
-  elif [ ! -f "$tree/$built_source" ]; then
-    log "   warning: no pbmm2 index built: the reference fasta $tree/$built_source is not present"
-  elif [ -z "$built_sif" ] || [ ! -f "$dest/sif/$built_sif" ]; then
-    log "   warning: no pbmm2 index built: the bundle carries no pbmm2 image ($built_image). Build it with that image:"
-    log "   pbmm2 index --preset HIFI $tree/$built_source $mmi   (md5 must be $built_md5), then run the installer again"
-  elif [ ! -w "$references/$extras_subdir" ]; then
-    log "   warning: no pbmm2 index built: $references/$extras_subdir is not writable"
+# shipped files: code/references/<name> -> <references>/<install_subdir>/ (ugc-wgw-extras, ugc-wgw-asm, ...)
+while IFS=$'\x1f' read -r kind entry subdir names _; do
+  [ "$kind" = files ] || continue
+  if mkdir -p "$references/$subdir" 2>/dev/null && [ -w "$references/$subdir" ]; then
+    for f in $names; do cp "$dest/code/references/$f" "$references/$subdir/"; done
+    log "   $entry installed to $references/$subdir ($names)"
   else
-    command -v apptainer >/dev/null || die "apptainer is needed to build the pbmm2 index with $built_sif"
-    log "   building the reference's pbmm2 index with $built_sif (about a minute; 12 GB of memory)"
-    rm -f "$references/$extras_subdir/$tmp_mmi"
-    if ! apptainer exec --bind "$references/$extras_subdir:/mnt/ugc-extras" --bind "$tree:/mnt/ugc-references:ro" "$dest/sif/$built_sif" \
-        pbmm2 index --num-threads 8 --preset HIFI "/mnt/ugc-references/$built_source" "/mnt/ugc-extras/$tmp_mmi" > "$dest/pbmm2-index.log" 2>&1; then
-      rm -f "$references/$extras_subdir/$tmp_mmi"
-      die "pbmm2 index failed (log: $dest/pbmm2-index.log). If the login node killed it for memory, build it in a job: sbatch --mem=16G --cpus-per-task=8 --wrap 'apptainer exec --bind $references/$extras_subdir:/mnt/ugc-extras --bind $tree:/mnt/ugc-references:ro $dest/sif/$built_sif pbmm2 index --num-threads 8 --preset HIFI /mnt/ugc-references/$built_source /mnt/ugc-extras/$built_name' and run the installer again (it verifies the file)"
-    fi
-    md5_is "$references/$extras_subdir/$tmp_mmi" "$built_md5" || { rm -f "$references/$extras_subdir/$tmp_mmi"; die "the built pbmm2 index does not match references.lock (md5 $built_md5): wrong pbmm2 image or reference?"; }
-    mv "$references/$extras_subdir/$tmp_mmi" "$mmi"
-    log "   pbmm2 index built and verified: $mmi"
+    log "   warning: $references not writable; copy code/references/{$names} to $references/$subdir/ yourself"
   fi
-fi
+done < "$plan"
+# built files (references.lock <entry>.built: the reference's pbmm2 index, the assembly stages' decoy-free fasta): built once
+# per references directory with the bundled image and the lock's command ({source}, {out} and {dir} substituted, paths as
+# seen inside the container), verified against the lock's md5, then renamed from the temporary name. Some tools insist on
+# the suffix (pbmm2: .mmi), so the temporary name keeps it: <stem>.building.<suffix>.
+while IFS=$'\x1f' read -r kind entry subdir name md5 image sif source resources command; do
+  [ "$kind" = built ] || continue
+  target=$references/$subdir/$name
+  tmp_name=${name%.*}.building.${name##*.}
+  cmd=${command//\{source\}//mnt/ugc-references/$source}
+  cmd=${cmd//\{out\}//mnt/ugc-references/$subdir/$tmp_name}
+  cmd=${cmd//\{dir\}//mnt/ugc-references/$subdir}
+  if [ -f "$target" ] && md5_is "$target" "$md5"; then
+    log "   $name present and verified ($entry)"
+  elif [ -f "$target" ]; then
+    die "$target does not match references.lock (md5 $md5); remove it and run the installer again to rebuild it"
+  elif [ ! -f "$references/$source" ]; then
+    log "   warning: $name not built: its source $references/$source is not present"
+  elif [ -z "$sif" ] || [ ! -f "$dest/sif/$sif" ]; then
+    log "   warning: $name not built: the bundle carries no $image. Build it with that image (/mnt/ugc-references = $references;"
+    log "   the md5 must be $md5), then run the installer again: $cmd"
+  elif [ ! -w "$references/$subdir" ]; then
+    log "   warning: $name not built: $references/$subdir is not writable"
+  else
+    command -v apptainer >/dev/null || die "apptainer is needed to build $name with $sif"
+    log "   building $name with $sif ($resources)"
+    rm -f "$references/$subdir/$tmp_name"
+    if ! apptainer exec --bind "$references:/mnt/ugc-references" "$dest/sif/$sif" sh -c "$cmd" > "$dest/build-$name.log" 2>&1; then
+      rm -f "$references/$subdir/$tmp_name"
+      die "building $name failed (log: $dest/build-$name.log). If the login node killed it for memory, run the same apptainer command in a job (sbatch --mem=16G --cpus-per-task=8), check the md5 ($md5) and rename $tmp_name to $name"
+    fi
+    md5_is "$references/$subdir/$tmp_name" "$md5" || { rm -f "$references/$subdir/$tmp_name"; die "the built $name does not match references.lock (md5 $md5)"; }
+    mv "$references/$subdir/$tmp_name" "$target"
+    log "   $name built and verified: $target"
+  fi
+done < "$plan"
 # WDL read_map() rejects comment lines, so the template's comments are dropped at render time
 warn_fs "install prefix" "$prefix" "references" "$tree"
 warn_fs "install prefix" "$prefix" "call cache" "$CALL_CACHE_DIR"

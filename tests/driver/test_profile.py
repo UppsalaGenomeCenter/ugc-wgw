@@ -73,12 +73,13 @@ class ProfileTest(unittest.TestCase):
         mine = self.tmp / "mine.json"
         mine.write_text(json.dumps({"description": "x", "prices": {"cpu_hour": 0.14, "currency": "SEK"}, "poll_interval": 15,
                                     "summary_thresholds": {"depth_mean_min": 18}, "assembly_use_parents": False,
+                                    "pangenome_sv_cohort": " ROUND1 ",
                                     "stage_inputs": {"ugc_wgw_cohort_merge": {"sv_merge_method": "bcftools"}}}))
         code, err, cfg = self.init("--profile", str(mine))
         self.assertEqual(code, 0, err)
-        self.assertEqual((cfg.prices, cfg.poll_interval, cfg.summary_thresholds, cfg.assembly_use_parents),
-                         ({"cpu_hour": 0.14, "currency": "SEK"}, 15.0, {"depth_mean_min": 18}, False))
-        self.assertEqual(cfg.profile["applied"], ["assembly_use_parents", "poll_interval", "prices",
+        self.assertEqual((cfg.prices, cfg.poll_interval, cfg.summary_thresholds, cfg.assembly_use_parents, cfg.pangenome_sv_cohort),
+                         ({"cpu_hour": 0.14, "currency": "SEK"}, 15.0, {"depth_mean_min": 18}, False, "ROUND1"))
+        self.assertEqual(cfg.profile["applied"], ["assembly_use_parents", "pangenome_sv_cohort", "poll_interval", "prices",
                                                   "stage_inputs.ugc_wgw_cohort_merge.sv_merge_method", "summary_thresholds"])
         code, out, _ = run_cli(["--project", str(cfg.project_dir), "stage-inputs", "--stage", "cohort_merge", "--json"])
         row = {r["input"]: r for r in json.loads(out)}["sv_merge_method"]

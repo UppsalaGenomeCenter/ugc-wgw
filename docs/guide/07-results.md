@@ -115,12 +115,51 @@ made (chapter 08).
 
 | Output | What it is |
 |---|---|
-| `haplotypes` | `["hap1", "hap2"]`: the order of every per-haplotype array below. hap1 is the father's, hap2 the mother's haplotype in trio mode. |
-| `zipped_assembly_fastas`, `assembly_stats` | Contigs per haplotype, `<sample_id>.asm.<bp\|dip>.<hap>.p_ctg.fasta.gz`, with calN50 statistics. `dip` means trio-binned, `bp` HiFi-only. |
+| `assembler_used`, `assembler_version` | `hifiasm` and its version line (`<sample_id>.asm.hifiasm.version.txt`). |
+| `haplotype_labels` | `["hap1", "hap2"]`, or `["pat", "mat"]` when trio-binned: the order of every per-haplotype array below (file names keep hifiasm's `hap1`/`hap2`). |
+| `hap_fastas`, `assembly_stats` | Contigs per haplotype, `<sample_id>.asm.<bp\|dip>.<hap>.p_ctg.fasta.gz`, with calN50 statistics. `dip` means trio-binned, `bp` HiFi-only. |
 | `assembly_noseq_gfas`, `assembly_lowQ_beds` | Assembly graphs without sequence and low-quality regions. |
-| `asm_bams`, `asm_bam_indices`, `merged_asm_bam` | Contigs aligned to GRCh38 per haplotype, and both merged: `<sample_id>.asm.GRCh38.bam`. |
-| `paftools_vcfs`, `paftools_vcf_indices`, `paftools_vcf_stats` | Variants called from the contig alignments per haplotype. |
+| `flagger_bed`, `flagger_summary` | HMM-Flagger's prediction for the diploid assembly (`Err`, `Dup`, `Hap` or `Col` per interval, assembly coordinates) and its summary table; the `base_level percentage` row of `whole_genome` gives the shares. |
+| `trio_eval` | `yak trioeval` per haplotype (trio-binned samples): the `W` line is the switch error, `H` the Hamming error (count, sites, rate). |
+| `read_alignment_bam`, `read_alignment_bam_index` | The reads aligned to the diploid assembly, only with `keep_read_alignment`. |
 | `trio`, `hap1_parent`, `hap2_parent` | Whether trio binning was used and which parent each haplotype follows. |
+
+### `assembly_call`
+
+| Output | What it is |
+|---|---|
+| `asm_bams`, `asm_bam_indices`, `asm_pafs` | Each haplotype aligned to the decoy-free GRCh38: `<sample_id>.<hap>.asm.GRCh38_GIABv3.bam` for viewing, the same alignments as gzipped PAF. |
+| `chrom_coverage` | Per haplotype and chromosome: aligned bases, contigs, the chromosome length and the fraction assembled. |
+| `karyotype_json`, `inferred_karyotype` | `XX`, `XY` or `unknown`, from non-PAR chrX and chrY coverage, with the evidence and thresholds; `unknown` when too little of chrX was assembled (every chr20-only smoke sample). |
+| `regroup_log` | For a non-trio XY sample, the contigs moved between dipcall's haplotype copies (chrY to hap1, non-PAR chrX to hap2). |
+| `dipcall_vcf`, `dipcall_vcf_index`, `dipcall_vcf_stats` | The primary dipcall VCF, `<sample_id>.dipcall.GRCh38_GIABv3.vcf.gz`: sample named, genotypes unphased unless trio-binned, dipcall's FILTER values kept, `ASM_UNRELIABLE` added outside `reliable_bed`. |
+| `dipcall_raw_vcf`, `dipcall_bed`, `dipcall_hap_beds` | dipcall's own files: the VCF as written (sample `syndip`), the region covered by exactly one contig of each haplotype, the per-haplotype covered regions. |
+| `pav_vcf`, `pav_vcf_index`, `pav_vcf_stats` | The primary PAV 3 VCF, `<sample_id>.pav.GRCh38_GIABv3.vcf.gz`, unphased unless trio-binned; PAV's FILTER values kept, `ASM_UNRELIABLE` added outside `reliable_bed` (`PASS` is the filter to count by). |
+| `pav_raw_vcf`, `pav_raw_vcf_index`, `pav_callable_beds` | PAV's VCF as written (`.csi`) and the reference regions it could call, per haplotype. |
+| `unreliable_beds`, `reliable_bed`, `reliable_summary` | With a Flagger BED: its non-Hap regions lifted to the reference per haplotype, `dip.bed` minus them, and the bases of each with the reliable fraction of the reference. |
+| `concordance` | With a read-based VCF: dipcall's `PASS` SNVs against the read-based ones inside the reliable region, as `metric<TAB>value` (sites compared, concordant, genotype concordance, read hets, het loss and its rate, assembly-only hets). |
+
+Genotypes: dipcall and PAV write phased genotypes in haplotype-column order.
+For a sample that was not trio-binned that order is hifiasm's local phasing,
+not a chromosome-scale haplotype, so the primary VCFs carry `/` genotypes;
+the raw VCFs keep the callers' `|`.
+
+### `cohort_pangenome`
+
+Under `cohorts/<cohort_id>/<version>/cohort_pangenome/current/out/`.
+
+| Output | What it is |
+|---|---|
+| `pangenome_vcf`, `pangenome_vcf_index` | `<cohort_id>.pangenome.GRCh38_GIABv3.vcf.gz`: the graph's cohort VCF (`vg deconstruct` through `cactus-graphmap-join`) over the chromosomes built, one column per member under its sample ID; trio-binned members keep `\|` genotypes, the others carry `/`. |
+| `pangenome_wave_vcf`, `pangenome_wave_vcf_index` | The same after `vcfwave`: alleles realigned to the reference and complex records decomposed; the file the frequencies and truvari read. |
+| `chromosomes_built` | The chromosomes built, the order of every per-chromosome array below. |
+| `chrom_gbzs`, `chrom_gfas` | The graph per chromosome, `<cohort_id>.pangenome.GRCh38_GIABv3.<chr>.gbz` and `.gfa.gz` (`vg` and `minigraph` read them). |
+| `chrom_graph_stats`, `chrom_logs` | `graph-stats.tsv` per chromosome (nodes, edges, length) and the Cactus logs of its construction, tarred. |
+| `name_map` | `<cohort_id>.pangenome.name_map.tsv`: sample ID, the Cactus-safe genome name (`<name>.1`, `<name>.2` are its haplotypes), trio. |
+| `split_log`, `contig_sizes`, `ambiguous_contigs` | `cactus-graphmap-split`'s log and `contig_sizes.tsv`, and per haplotype the contigs (and bases) assigned to a chromosome or left ambiguous; ambiguous contigs are in no graph. |
+| `freq_vcf`, `freq_vcf_index` | `<cohort_id>.pangenome.GRCh38_GIABv3.freq.vcf.gz`: sites-only allele counts and frequencies of the vcfwave VCF, overall and per karyotype (`_XX`, `_XY`), as `cohort_freq` writes them; a missing genotype stays missing, so `NS` reports how many members had assembled sequence at the site. |
+| `freq_summary`, `freq_samples` | The summary table (resource `pangenome`: records by type, contig class, filter and allele-frequency bin, call rate, carriers per stratum) and the members with the stratum used. |
+| `truvari_summary`, `truvari_details` | With a read-based SV merge: `truvari bench` of the graph's variants of 50 bp and longer against it (`summary.json`: recall, precision, F1, TP, FP, FN) and its output directory, tarred. |
 
 ## The stats and message files
 

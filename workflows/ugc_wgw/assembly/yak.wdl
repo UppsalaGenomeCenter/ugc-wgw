@@ -78,3 +78,93 @@ task ugc_wgw_yak_count {
     cpuPlatform: runtime_attributes.cpuPlatform
   }
 }
+
+task ugc_wgw_yak_trioeval {
+  meta {
+    description: "yak trioeval of one haplotype against the parental k-mer tables with the -c/-d thresholds the binning used: the W line gives the switch error (count, total, rate), the H line the Hamming error."
+    outputs: {
+      trioeval: {
+        description: "<sample_id>.asm.<haplotype>.trioeval.txt: yak trioeval's output (S lines per contig, then W and H)"
+      }
+    }
+  }
+
+  parameter_meta {
+    sample_id: {
+      description: "Sample ID; output prefix"
+    }
+    haplotype: {
+      description: "Haplotype label (pat or mat); part of the output name"
+    }
+    hap_fasta: {
+      description: "The haplotype's contigs"
+    }
+    father_yak: {
+      description: "The father's yak table"
+    }
+    mother_yak: {
+      description: "The mother's yak table"
+    }
+    min_occurrence: {
+      description: "yak trioeval -c (the binning's -c)"
+    }
+    mid_occurrence: {
+      description: "yak trioeval -d (the binning's -d)"
+    }
+    threads: {
+      description: "Threads"
+    }
+    mem_gb: {
+      description: "Memory (GB): the two yak tables are loaded"
+    }
+    runtime_attributes: {
+      description: "Runtime attribute structure"
+    }
+  }
+
+  input {
+    String sample_id
+    String haplotype
+    File hap_fasta
+    File father_yak
+    File mother_yak
+    Int min_occurrence = 2
+    Int mid_occurrence = 5
+    Int threads = 8
+    Int mem_gb = 48
+    RuntimeAttributes runtime_attributes
+  }
+
+  Int disk_size = ceil(size(father_yak, "GB") + size(mother_yak, "GB") + size(hap_fasta, "GB") + 10)
+
+  command <<<
+    set -euo pipefail
+    yak version >&2
+    yak trioeval \
+      -c ~{min_occurrence} \
+      -d ~{mid_occurrence} \
+      -t ~{threads} \
+      "~{father_yak}" \
+      "~{mother_yak}" \
+      "~{hap_fasta}" \
+    > "~{sample_id}.asm.~{haplotype}.trioeval.txt"
+    grep "^[WH]" "~{sample_id}.asm.~{haplotype}.trioeval.txt" >&2
+  >>>
+
+  output {
+    File trioeval = "~{sample_id}.asm.~{haplotype}.trioeval.txt"
+  }
+
+  runtime {
+    docker: "~{runtime_attributes.container_registry}/yak@sha256:7809845f03cb04e3a686178b006c42b0f61768797543d4cb46f62940ba44ffb7"  # 0.1_build3
+    cpu: threads
+    memory: "~{mem_gb} GiB"
+    disk: "~{disk_size} GB"
+    disks: "local-disk ~{disk_size} HDD"
+    preemptible: runtime_attributes.preemptible_tries
+    maxRetries: runtime_attributes.max_retries
+    awsBatchRetryAttempts: runtime_attributes.max_retries  # !UnknownRuntimeKey
+    zones: runtime_attributes.zones
+    cpuPlatform: runtime_attributes.cpuPlatform
+  }
+}

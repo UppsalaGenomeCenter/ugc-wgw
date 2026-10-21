@@ -92,20 +92,26 @@ reference data container's SIF (3.2 GB, a few minutes):
 
 then verifies every file's md5 against `references.lock` and renders the
 reference map. A later install finds the tree, verifies it and reuses it. The
-installer also copies `scatter_regions.GRCh38_GIABv3.tsv` into
-`<references>/ugc-wgw-extras-0.3.0/` when the directory is writable, and warns
-otherwise; then copy it yourself from `<prefix>/versions/<v>/code/references/`.
+installer also copies the files of the lock's other entries from
+`<prefix>/versions/<v>/code/references/` when the directory is writable, and
+warns otherwise: `scatter_regions.GRCh38_GIABv3.tsv` into
+`<references>/ugc-wgw-extras-0.3.0/`, and the assembly stages' contig lists
+and PAR BED into `<references>/ugc-wgw-asm-0.1.0/`.
 
-In the same directory it builds the reference's pbmm2 index once, with the
-pbmm2 image from the bundle: about a minute, 8 threads and 12 GB of memory
-on the login node, 5.8 GB on disk, verified against the md5 in
-`references.lock` (the build is deterministic). Every alignment reads this
-index through the map's `pbmm2_index` key; upstream's workflow would
-otherwise build the same file once per input BAM, in every sample. A later
-install finds and verifies it. If the login node refuses a 12 GB process,
-the installer's message gives the `sbatch` line that builds it in a job;
-run the installer again afterwards. A bundle built without the pbmm2 image
-(`--images data`) leaves the index to you and says how.
+In those directories it builds the derived reference files once, each with
+the image and the exact command the lock names, verified against the lock's
+md5 (the builds are deterministic). The reference's pbmm2 index (pbmm2
+image; about a minute, 8 threads and 12 GB of memory on the login node,
+5.8 GB on disk) is what every alignment reads through the map's
+`pbmm2_index` key, where upstream's workflow would build the same file once
+per input BAM. The decoy-free assembly reference
+`human_GRCh38_GIABv3_asm.fasta` and its index (`pb_wdl_base` image,
+`samtools faidx -r`, seconds) are the map's `asm_fasta` and
+`asm_fasta_index`, read by `assembly_call` and `cohort_pangenome`. A later
+install finds and verifies them. If the login node refuses a 12 GB process,
+the installer's message gives the command to run in a job; run the installer
+again afterwards. A bundle built without those images (`--images data`)
+leaves the files to you and says how.
 The archival form of the same data is PacBio's Zenodo tar named in
 `references.lock`; extracting it under `<references>/` gives the same tree
 and is only needed when a bundle was built without images.
@@ -252,7 +258,8 @@ again with `--force`.
 ├── resources.tsv             the site resource policy (chapter 12); created once, never overwritten
 ├── profiles/                 site profiles for `ugc-wgw init --profile` (chapter 05); installed once, never overwritten
 ├── call_cache/               miniwdl call cache shared by all versions
-└── references/               hifi-wdl-resources-v4.0.0-GRCh38_GIABv3/, ugc-wgw-extras-0.3.0/ (scatter regions, pbmm2 index)
+└── references/               hifi-wdl-resources-v4.0.0-GRCh38_GIABv3/, ugc-wgw-extras-0.3.0/ (scatter regions, pbmm2 index),
+                              ugc-wgw-asm-0.1.0/ (the assembly stages' contig lists, PAR BED and decoy-free fasta)
 ```
 
 Several versions coexist under `versions/`; a project's `config.json` records

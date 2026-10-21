@@ -107,6 +107,26 @@ SOURCES: dict[str, dict[str, Source]] = {
         "father_hifi_reads": (DRIVER, "sample sheet, trios only (assembly_use_parents)"),
         "mother_hifi_reads": (DRIVER, "sample sheet, trios only (assembly_use_parents)"),
     },
+    "assembly_call": {
+        **_COMMON, **_REGISTRY,
+        "sample_id": (DRIVER, "sample sheet"),
+        "hap_fastas": (DRIVER, "assembly outputs"),
+        "haplotype_labels": (DRIVER, "assembly outputs"),
+        "trio": (DRIVER, "assembly outputs"),
+        "flagger_bed": (DRIVER, "assembly outputs (HMM-Flagger's prediction), when present"),
+        "read_small_variant_vcf": (DRIVER, "singleton (else downstream) outputs of the sample, any version, when one exists"),
+        "read_small_variant_vcf_index": (DRIVER, "singleton (else downstream) outputs of the sample, any version, when one exists"),
+    },
+    "cohort_pangenome": {
+        **_COMMON, **_COHORT,
+        "hap1_fastas": (DRIVER, "assembly outputs of the members (hap_fastas[0])"),
+        "hap2_fastas": (DRIVER, "assembly outputs of the members (hap_fastas[1])"),
+        "trios": (DRIVER, "assembly outputs of the members (trio)"),
+        "sample_sexes": (DRIVER, "assembly_call outputs of the members (inferred_karyotype XX/XY, else empty)"),
+        "sample_sex_sources": (DRIVER, "karyotype or empty, per member"),
+        "sv_vcf": (DRIVER, "cohort_merge outputs of config.json pangenome_sv_cohort (else this cohort), any version, when one exists"),
+        "sv_vcf_index": (DRIVER, "cohort_merge outputs of config.json pangenome_sv_cohort (else this cohort), any version, when one exists"),
+    },
 }
 
 # call-qualified inputs the driver sets (inputs.py); every other nested input is the task's own default

@@ -12,6 +12,8 @@
 #   $UGC_WGW_SMOKE_DIR/references/hifi-wdl-resources-v4.0.0-GRCh38_GIABv3/   the container's data tree + manifest.json
 #   $UGC_WGW_SMOKE_DIR/references/ugc-wgw-extras-0.3.0/                          scatter_regions.GRCh38_GIABv3.tsv and the
 #                                                                                reference's pbmm2 index, built as the installer does
+#   $UGC_WGW_SMOKE_DIR/references/ugc-wgw-asm-0.1.0/                             the assembly stages' lists, PAR BED and the
+#                                                                                decoy-free fasta (+ .fai), built likewise
 #   $UGC_WGW_SMOKE_DIR/data/<ID>.chr20.hifi_reads.bam           HG002, HG003, HG004, HG002ds
 #   $UGC_WGW_SMOKE_DIR/data/samples.tsv, cohort.txt, data.lock  driver inputs and provenance
 set -euo pipefail
@@ -39,17 +41,21 @@ mkdir -p "$smoke/references" "$smoke/data" "$smoke/downloads"
 
 # ---- 1. references from the data container (background while the BAM slices download) ----
 prepare_references() {
-  local image subdir data_path manifest_path extras extras_file built_name built_md5 built_source built_image
-  image=""; subdir=""; data_path=""; manifest_path=""; extras=""; extras_file=""; built_name=""; built_md5=""; built_source=""; built_image=""
-  eval "$(python3 - "$repo/references.lock" <<'PY'
+  local image subdir data_path manifest_path plan=$smoke/downloads/references-plan.txt
+  image=""; subdir=""; data_path=""; manifest_path=""
+  eval "$(python3 - "$repo/references.lock" "$plan" <<'PY'
 import json, shlex, sys
 b = json.load(open(sys.argv[1]))["bundles"]
-r, x = b["hifi-wdl-resources"], b["ugc-wgw-extras"]
-built = (x.get("built") or [{}])[0]
+r = b["hifi-wdl-resources"]
+with open(sys.argv[2], "w") as out:   # the other entries: shipped files and files built as install-bundle.sh does
+    for key, x in b.items():
+        if key == "hifi-wdl-resources":
+            continue
+        out.write("\x1f".join(["files", key, x["install_subdir"], " ".join(f["name"] for f in x["files"])]) + "\n")
+        for bt in x.get("built", []):
+            out.write("\x1f".join(["built", key, x["install_subdir"], bt["name"], bt["md5"], bt["image"], bt["source_file"], bt["command"]]) + "\n")
 for k, v in {"image": r["source"], "subdir": r["install_subdir"], "data_path": r["container_paths"]["data"],
-             "manifest_path": r["container_paths"]["manifest"], "extras": x["install_subdir"], "extras_file": x["files"][0]["name"],
-             "built_name": built.get("name", ""), "built_md5": built.get("md5", ""), "built_source": built.get("source_file", ""),
-             "built_image": built.get("image", "")}.items():
+             "manifest_path": r["container_paths"]["manifest"]}.items():
     print(f"{k}={shlex.quote(v)}")
 PY
 )"
@@ -88,30 +94,38 @@ print(f"[prepare] {len(r['files'])} reference files verified", file=sys.stderr)
 PY
     touch "$marker"
   fi
-  mkdir -p "$smoke/references/$extras"
-  cp "$repo/references/$extras_file" "$smoke/references/$extras/"
-  # the reference's pbmm2 index, built once as install-bundle.sh does (references.lock ugc-wgw-extras.built), md5-verified
-  if [ -n "$built_name" ]; then
-    local mmi=$smoke/references/$extras/$built_name
-    if [ -f "$mmi" ] && [ "$(md5sum "$mmi" | cut -d' ' -f1)" = "$built_md5" ] && [ "$force" -eq 0 ]; then
-      log "references: pbmm2 index present and verified"
-    else
-      local isif=$sif_cache/docker___${built_image//[\/:]/_}.sif
-      if [ ! -f "$isif" ]; then
-        log "references: pulling the pbmm2 image into $sif_cache"
-        printf '%s\n' "$built_image" > "$smoke/downloads/pbmm2-manifest.txt"
-        "$repo/scripts/populate-sif-cache.sh" --dir "$sif_cache" "$smoke/downloads/pbmm2-manifest.txt"
-      fi
-      log "references: building the pbmm2 index with $(basename "$isif") (about a minute, 12 GB of memory)"
-      local tmp_mmi=${built_name%.mmi}.building.mmi   # pbmm2 index insists on the .mmi suffix
-      rm -f "$mmi" "$smoke/references/$extras/$tmp_mmi"
-      apptainer exec --bind "$smoke/references/$extras:/mnt/ugc-extras" --bind "$tree:/mnt/ugc-references:ro" "$isif" \
-        pbmm2 index --num-threads "$threads" --preset HIFI "/mnt/ugc-references/$built_source" "/mnt/ugc-extras/$tmp_mmi" > "$smoke/downloads/pbmm2-index.log" 2>&1
-      [ "$(md5sum "$smoke/references/$extras/$tmp_mmi" | cut -d' ' -f1)" = "$built_md5" ] || { echo "[prepare] built pbmm2 index differs from references.lock" >&2; exit 1; }
-      mv "$smoke/references/$extras/$tmp_mmi" "$mmi"
-      log "references: pbmm2 index built and verified"
+  local kind entry xsubdir names name md5 bimage source command target tmp_name cmd isif
+  while IFS=$'\x1f' read -r kind entry xsubdir names _; do
+    [ "$kind" = files ] || continue
+    mkdir -p "$smoke/references/$xsubdir"
+    for name in $names; do cp "$repo/references/$name" "$smoke/references/$xsubdir/"; done
+  done < "$plan"
+  # derived reference files (references.lock built[]), built once as install-bundle.sh does and md5-verified
+  while IFS=$'\x1f' read -r kind entry xsubdir name md5 bimage source command; do
+    [ "$kind" = built ] || continue
+    target=$smoke/references/$xsubdir/$name
+    if [ -f "$target" ] && [ "$(md5sum "$target" | cut -d' ' -f1)" = "$md5" ] && [ "$force" -eq 0 ]; then
+      log "references: $name present and verified"
+      continue
     fi
-  fi
+    isif=$sif_cache/docker___${bimage//[\/:]/_}.sif
+    if [ ! -f "$isif" ]; then
+      log "references: pulling $bimage into $sif_cache"
+      printf '%s\n' "$bimage" > "$smoke/downloads/built-image-manifest.txt"
+      "$repo/scripts/populate-sif-cache.sh" --dir "$sif_cache" "$smoke/downloads/built-image-manifest.txt"
+    fi
+    tmp_name=${name%.*}.building.${name##*.}
+    cmd=${command//\{source\}//mnt/ugc-references/$source}
+    cmd=${cmd//\{out\}//mnt/ugc-references/$xsubdir/$tmp_name}
+    cmd=${cmd//\{dir\}//mnt/ugc-references/$xsubdir}
+    cmd=${cmd//--num-threads 8/--num-threads $threads}
+    log "references: building $name ($entry) with $(basename "$isif")"
+    rm -f "$target" "$smoke/references/$xsubdir/$tmp_name"
+    apptainer exec --bind "$smoke/references:/mnt/ugc-references" "$isif" sh -c "$cmd" > "$smoke/downloads/build-$name.log" 2>&1
+    [ "$(md5sum "$smoke/references/$xsubdir/$tmp_name" | cut -d' ' -f1)" = "$md5" ] || { echo "[prepare] built $name differs from references.lock" >&2; exit 1; }
+    mv "$smoke/references/$xsubdir/$tmp_name" "$target"
+    log "references: $name built and verified"
+  done < "$plan"
   log "references: ready"
 }
 

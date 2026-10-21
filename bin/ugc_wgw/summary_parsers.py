@@ -186,6 +186,44 @@ def parse_bcftools_stats(lines: Iterable[str]) -> dict[str, object]:
     return {"sn": sn, "tstv": tstv, "st": st, "idd": idd, "qual": qual, "dp": dp, "psc": psc}
 
 
+def parse_kv_table(lines: Iterable[str]) -> dict[str, object]:
+    """A two-column metric<TAB>value table (the reliable-region summary, the concordance TSV); numbers become numbers."""
+    out: dict[str, object] = {}
+    for line in lines:
+        f = line.rstrip("\n").split("\t")
+        if len(f) >= 2 and f[0] and not f[0].startswith("#"):
+            out[f[0]] = _num(f[1])
+    return out
+
+
+FLAGGER_LABELS = ("Err", "Dup", "Hap", "Col")
+
+
+def parse_flagger_summary(lines: Iterable[str]) -> dict[str, object]:
+    """HMM-Flagger's prediction_summary_final.tsv: the base_level percentage row of the whole_genome annotation gives
+    the share of the assembly in each label (Err, Dup, Hap, Col in --labelNames order); non_hap_pct sums all but Hap."""
+    for line in lines:
+        f = line.rstrip("\n").split("\t")
+        if len(f) >= 11 and f[0] == "PREDICTION" and f[1] == "base_level" and f[2] == "percentage" and "whole_genome" in f[4].lower():
+            pct = {label.lower() + "_pct": _float(v) for label, v in zip(FLAGGER_LABELS, f[7:11])}
+            known = [v for k, v in pct.items() if v is not None]
+            hap = pct.get("hap_pct")
+            return {**pct, "non_hap_pct": round(sum(v for k, v in pct.items() if k != "hap_pct" and v is not None), 2) if known else None,
+                    "hap_fraction": round(hap / 100.0, 4) if hap is not None else None}
+    return {}
+
+
+def parse_trioeval(lines: Iterable[str]) -> dict[str, object]:
+    """yak trioeval: the W line (switch errors, evaluated sites, rate) and the H line (Hamming)."""
+    out: dict[str, object] = {}
+    for line in lines:
+        f = line.rstrip("\n").split("\t")
+        if len(f) >= 4 and f[0] in ("W", "H"):
+            key = "switch" if f[0] == "W" else "hamming"
+            out[key + "_errors"], out[key + "_sites"], out[key + "_rate"] = _int(f[1]), _int(f[2]), _float(f[3])
+    return out
+
+
 def parse_mosdepth_summary(lines: Iterable[str]) -> dict[str, object]:
     """mosdepth summary: per-contig rows, their `<contig>_region` twins and the `total` rows."""
     chrom: list[dict[str, object]] = []

@@ -556,6 +556,48 @@ class SummaryEndToEnd(unittest.TestCase):
         one.pop("generated_at"), two.pop("generated_at")
         self.assertEqual(one, two)
 
+    def test_assembly_only_and_pass_list(self):
+        db = DB(self.cfg.db_path)
+        try:
+            # S1: trio-binned assembly with calls, concordance and masks; S2: assembly only (no calling yet)
+            seed_success(self.cfg, db, "assembly", "sample", "S1", {"sample_id": "S1", "hifi_reads": ["/dev/null"], "father_id": "F", "mother_id": "M",
+                                                                      "father_hifi_reads": ["/f"], "mother_hifi_reads": ["/m"]}, mode="assembly")
+            seed_success(self.cfg, db, "assembly_call", "sample", "S1", {"sample_id": "S1", "hap_fastas": ["/a", "/b"], "haplotype_labels": ["pat", "mat"], "trio": True,
+                                                                           "flagger_bed": "/f.bed", "read_small_variant_vcf": "/r.vcf.gz"}, mode="assembly")
+            seed_success(self.cfg, db, "assembly", "sample", "S2", {"sample_id": "S2", "hifi_reads": ["/dev/null"]}, mode="assembly")
+        finally:
+            db.close()
+        out = self.tmp / "asm"
+        code, _, err = run_cli(["--project", self.proj, "summary", "--samples", "S1", "S2", "--out-dir", str(out), "--pass-list", str(out / "pass.txt")])
+        self.assertEqual(code, 0, err)
+        d1 = json.loads((out / "S1.summary.json").read_text())
+        self.assertTrue({"assembly", "assembly_call"} <= set(d1["runs"]), d1["runs"])
+        self.assertTrue(d1["assembly"]["trio"])
+        self.assertEqual(d1["assembly"]["haplotypes"][1]["trio_eval"]["switch_rate"], 0.005)
+        self.assertEqual(d1["assembly"]["concordance"]["het_loss_rate"], 0.02)
+        self.assertEqual(d1["assembly"]["concordance"]["region"], "reliable.bed")
+        s1 = self.check_html(out / "S1.summary.html")
+        self.assertIn("trioeval mat", s1)
+        self.assertIn("het loss", s1)
+        d2 = json.loads((out / "S2.summary.json").read_text())
+        self.assertIn("assembly", d2["runs"])
+        self.assertNotIn("assembly_call", d2["runs"])
+        self.assertEqual(d2["assembly"]["flagger"]["hap_pct"], 95.99)
+        self.assertIsNone(d2["assembly"]["reliable"])
+        self.assertEqual([f["code"] for f in d2["qc"]["flags"] if f["code"].startswith("asm_")], [])   # the shared setup's read-based warnings do not count
+        self.assertEqual((out / "pass.txt").read_text().split(), ["S1", "S2"])
+        # thresholds decide: a strict Flagger limit fails both, a strict switch-error limit fails the trio only
+        code, _, err = run_cli(["--project", self.proj, "summary", "--samples", "S1", "S2", "--out-dir", str(out), "--pass-list", str(out / "pass2.txt"),
+                                "--threshold", "asm_switch_error_max=0.0045"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual((out / "pass2.txt").read_text().split(), ["S2"])
+        d1 = json.loads((out / "S1.summary.json").read_text())
+        self.assertEqual([f["code"] for f in d1["qc"]["flags"] if f["severity"] == "fail"], ["asm_switch_error"])
+        code, _, err = run_cli(["--project", self.proj, "summary", "--samples", "S1", "S2", "--out-dir", str(out), "--pass-list", str(out / "pass3.txt"),
+                                "--threshold", "asm_flagger_err_pct_max=1"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual((out / "pass3.txt").read_text().strip(), "")
+
     def test_joint_and_partial(self):
         db = DB(self.cfg.db_path)
         try:
@@ -563,6 +605,8 @@ class SummaryEndToEnd(unittest.TestCase):
             seed_success(self.cfg, db, "downstream", "sample", "S1", {"sample_id": "S1", "sex": "MALE", "upstream_msg": ["joint message"]}, mode="joint")
             seed_success(self.cfg, db, "upstream", "sample", "S2", {"sample_id": "S2", "hifi_reads": ["/dev/null"], "inferred_sex": "FEMALE"}, mode="joint")
             seed_success(self.cfg, db, "assembly", "sample", "S1", {"sample_id": "S1", "hifi_reads": ["/dev/null"]}, mode="assembly")
+            seed_success(self.cfg, db, "assembly_call", "sample", "S1", {"sample_id": "S1", "hap_fastas": ["/a", "/b"], "haplotype_labels": ["hap1", "hap2"], "trio": False,
+                                                                           "flagger_bed": "/f.bed"}, mode="assembly")
         finally:
             db.close()
         code, out, err = run_cli(["--project", self.proj, "summary", "--mode", "joint", "--samples", "S1", "S2", "--out-dir", str(self.tmp / "joint")])
@@ -572,12 +616,22 @@ class SummaryEndToEnd(unittest.TestCase):
         self.assertIn('id="sec-assembly"', s1)
         self.assertIn("trio-binned", s1) if False else None
         d1 = json.loads((self.tmp / "joint" / "S1.summary.json").read_text())
-        self.assertEqual(set(d1["runs"]), {"upstream", "downstream", "assembly"})
+        self.assertEqual(set(d1["runs"]), {"upstream", "downstream", "assembly", "assembly_call"})
         self.assertEqual(d1["qc"]["status"], "warn")
         self.assertNotIn("sex_mismatch", {f["code"] for f in d1["qc"]["flags"]})
         self.assertEqual(len(d1["assembly"]["haplotypes"]), 2)
         self.assertEqual(d1["assembly"]["haplotypes"][0]["stats"]["n50"], 60000000)
-        self.assertEqual(d1["assembly"]["haplotypes"][1]["paftools"]["snps"], 2700001)
+        self.assertEqual(d1["assembly"]["haplotypes"][1]["name"], "hap2")
+        self.assertEqual(d1["assembly"]["calls"]["dipcall"]["snps"], 3800000)
+        self.assertEqual(d1["assembly"]["calls"]["pav"]["indels"], 750000)
+        self.assertEqual(d1["assembly"]["karyotype"]["karyotype"], "unknown")
+        self.assertIn("inferred karyotype", s1)
+        # the QC pieces of the fixtures: Flagger's shares, the reliable region, the concordance (assembly_call was seeded with a read VCF? no: without)
+        self.assertEqual(d1["assembly"]["flagger"]["non_hap_pct"], 4.01)
+        self.assertEqual(d1["assembly"]["reliable"]["reliable_fraction_of_reference"], 0.9139)
+        self.assertIsNone(d1["assembly"]["concordance"])
+        self.assertIn("Assembly QC", s1)
+        self.assertEqual([f["code"] for f in d1["qc"]["flags"] if f["code"].startswith("asm_")], [])
         self.assertEqual(d1["tandem_repeats"]["n_named"], 3)   # downstream's trgt_vcf
         self.assertEqual(d1["coverage"]["ratios"]["sex_from_ratio"], "MALE")   # upstream's mosdepth summary
         # upstream only: a partial page, the downstream-only sections say so
@@ -624,6 +678,45 @@ class SummaryEndToEnd(unittest.TestCase):
         self.assertEqual(c2["missing_members"], ["S3"])
         self.assertEqual(c2["runs"], {})
         self.assertIn("no summarised run", self.check_html(self.out_dir / "C2.summary.html"))
+
+    def test_cohort_page_assembly(self):
+        db = DB(self.cfg.db_path)
+        try:
+            for sid in ("S1", "S2"):
+                seed_success(self.cfg, db, "assembly", "sample", sid, {"sample_id": sid, "hifi_reads": ["/dev/null"]}, mode="assembly")
+                seed_success(self.cfg, db, "assembly_call", "sample", sid, {"sample_id": sid, "hap_fastas": ["/a", "/b"], "haplotype_labels": ["hap1", "hap2"],
+                                                                            "trio": False}, mode="assembly")
+            seed_success(self.cfg, db, "cohort_pangenome", "cohort", "C1", {"cohort_id": "C1", "sample_ids": ["S1", "S2"], "hap1_fastas": ["/a", "/a"],
+                                                                            "hap2_fastas": ["/b", "/b"], "trios": [False, False], "sample_sexes": ["", "XY"],
+                                                                            "sv_vcf": "/dev/null", "sv_vcf_index": "/dev/null"}, mode="assembly")
+        finally:
+            db.close()
+        code, out, err = run_cli(["--project", self.proj, "summary", "--mode", "assembly", "--cohort", "C1", "--out-dir", str(self.tmp / "asm")])
+        self.assertEqual(code, 0, err)
+        self.assertEqual([Path(p).name for p in out.strip().splitlines()], ["S1.summary.html", "S2.summary.html", "C1.summary.html"])
+        cd = json.loads((self.tmp / "asm" / "C1.summary.json").read_text())
+        self.assertEqual(set(cd["runs"]), {"cohort_pangenome"})
+        cp = cd["callsets"]["cohort_pangenome"]
+        self.assertEqual(cp["chromosomes"], ["chr1", "chr20", "chrX"])
+        self.assertEqual(cp["graph"]["chromosomes"]["chr20"], {"nodes": 501000, "edges": 701000, "length": 61000000})
+        self.assertEqual((cp["graph"]["nodes"], cp["graph"]["length"]), (1503000, 183000000))
+        self.assertEqual([g["genome"] for g in cp["split"]["genomes"]], ["S1.1", "S1.2", "S2.1", "S2.2"])
+        self.assertEqual(cp["split"]["ambiguous_contigs"], 18 + 18 + 19 + 19)
+        self.assertEqual(cp["summary"]["pangenome"]["records"]["total"], 4100000)
+        self.assertEqual(cp["summary"]["samples"]["n_in_vcf"]["pangenome"], 2)
+        self.assertEqual(cp["truvari"]["recall"], 0.8)
+        self.assertEqual([r["in_pangenome_vcf"] for r in cp["samples"]], ["yes", "yes"])
+        self.assertEqual(sorted(cd["assembly"]), ["S1", "S2"])                       # the members' assembly rows come along
+        self.assertEqual(cd["warnings"], [])
+        text = self.check_html(self.tmp / "asm" / "C1.summary.html")
+        for needle in ('id="sec-pangenome"', "Pangenome graph (cohort_pangenome)", "Per chromosome", "Contigs binned by the split",
+                       "truvari bench", "Allele frequencies of the vcfwave VCF", "cohort_freq has not run", "not haplotypes"):
+            self.assertIn(needle, text, needle)
+        # without the stage the assembly-mode page says so; the standalone page has no pangenome section at all
+        self.assertEqual(run_cli(["--project", self.proj, "summary", "--mode", "assembly", "--cohort", "C2", "--out-dir", str(self.tmp / "asm2")])[0], 1)  # unknown cohort
+        code, out, err = run_cli(["--project", self.proj, "summary", "--cohort", "C1"])
+        self.assertEqual(code, 0, err)
+        self.assertNotIn('id="sec-pangenome"', (self.out_dir / "C1.summary.html").read_text())
 
     def test_cohort_page_joint(self):
         db = DB(self.cfg.db_path)

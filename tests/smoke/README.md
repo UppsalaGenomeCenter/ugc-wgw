@@ -30,12 +30,18 @@ tests/smoke/run.sh status
 `all` runs `ugc-wgw submit --mode standalone --cohort SMOKE` (four `singleton`
 runs, then `cohort_merge` and `cohort_freq`), `--mode joint --cohort SMOKEJ`
 (`upstream` ×4, `cohort_call`, `downstream` ×4, `cohort_merge`,
-`cohort_freq`) and `--mode assembly
---samples HG002` (trio-binned with HG003 and HG004). It is resumable: the
+`cohort_freq`) and `--mode assembly` (`assembly` ×4, HG002 trio-binned with
+HG003 and HG004, then `assembly_call` ×4; chr20-only assemblies, so every
+sample infers karyotype `unknown`). It is resumable: the
 driver skips what already succeeded. Two cohort IDs are used because results
 paths do not encode the mode, so the standalone `cohort_merge` would count as
 done in joint mode.
 
 Logs of every submit are under `$UGC_WGW_SMOKE_DIR/logs/`; the project is
 `$UGC_WGW_SMOKE_DIR/project`, results under `$UGC_WGW_SMOKE_DIR/results`.
+`run.sh init` renders the reference map once (`maps/`); after a change to the
+map template or to the references (a new `references.lock` entry), run
+`prepare.sh --references-only` and `run.sh init --force` (the call cache is
+kept), or the stages that read the new keys fail at their first task with
+"Map key not found".
 

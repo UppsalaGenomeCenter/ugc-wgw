@@ -1,0 +1,24 @@
+{
+  "ugc_wgw_assembly_call.ugc_wgw_version": "<ugc_wgw_version>",
+  "ugc_wgw_assembly_call.sample_id": "String",
+  "ugc_wgw_assembly_call.hap_fastas": [
+    "File (the assembly stage's hap_fastas: hap1, hap2)"
+  ],
+  "ugc_wgw_assembly_call.haplotype_labels": [
+    "String (the assembly stage's haplotype_labels)"
+  ],
+  "ugc_wgw_assembly_call.trio": "Boolean (the assembly stage's trio)",
+  "ugc_wgw_assembly_call.read_small_variant_vcf": "File? (optional: the sample's read-based small-variant VCF)",
+  "ugc_wgw_assembly_call.read_small_variant_vcf_index": "File? (optional)",
+  "ugc_wgw_assembly_call.align_threads": 16,
+  "ugc_wgw_assembly_call.align_mem_gb": 32,
+  "ugc_wgw_assembly_call.dipcall_threads": 8,
+  "ugc_wgw_assembly_call.dipcall_mem_gb": 48,
+  "ugc_wgw_assembly_call.pav_threads": 8,
+  "ugc_wgw_assembly_call.pav_align_threads": 4,
+  "ugc_wgw_assembly_call.pav_mem_gb": 40,
+  "ugc_wgw_assembly_call.ref_map_file": "<local_path_prefix>/ugc_wgw_ref_map.GRCh38_GIABv3.tsv",
+  "ugc_wgw_assembly_call.ugc_wgw_container_registry": "<ugc_wgw_container_registry>",
+  "ugc_wgw_assembly_call.backend": "HPC",
+  "ugc_wgw_assembly_call.preemptible": true
+}

@@ -292,6 +292,72 @@ class ParserTest(unittest.TestCase):
         g = sp.parse_gfatools_stats(GFATOOLS.splitlines())
         self.assertEqual((g["total_length"], g["n_sequences"], g["aun"], g["n50"], g["l50"]), (68817513, 51, 582777, 20000000, 2))
         self.assertEqual(g["nl"][0], [0, 31943945, 1])
+        self.assertEqual((g["genome_size"], sp.parse_caln50 is sp.parse_gfatools_stats), (3100000000, True))
+
+    def test_assembly_parsers(self):
+        from .fixtures import CHROM_COVERAGE, DIP_BED, FLAGGER_SUMMARY, RELIABLE_BED, TRUVARI_JSON
+        fl = sp.parse_flagger_summary(FLAGGER_SUMMARY.splitlines())
+        self.assertEqual((fl["hap_pct"], fl["unk_pct"], fl["non_hap_pct"], fl["hap_fraction"]), (95.99, 0.0, 4.01, 0.9599))
+        self.assertEqual(fl["bp"], {"err": 37000000, "dup": 41000000, "hap": 2900000000, "col": 42000000, "unk": 0})
+        self.assertEqual(fl["blocks"]["dup"], 62)
+        te = sp.parse_trioeval(["S\tc1\t4403\t197\t4300\t30\t17\t150", "S\tc2\t1\t0\t0\t0\t0\t0", "S\tc3\t10\t10\t5\t2\t3\t5", "W\t426\t50814\t0.008384", "H\t1409\t50864\t0.027701", "bogus"])
+        self.assertEqual((te["switch_errors"], te["hamming_rate"], te["n_contigs"]), (426, 0.027701, 2))      # c2 has fewer than two blocks
+        self.assertEqual([(c["name"], c["switches"], c["hamming"]) for c in te["contigs"]], [("c1", 47, 197), ("c3", 5, 10)])
+        cc = sp.parse_chrom_coverage(CHROM_COVERAGE.format(h1="pat", h2="mat").splitlines())
+        self.assertEqual(cc["haplotypes"], ["pat", "mat"])
+        self.assertEqual([(r["haplotype"], r["chrom"]) for r in cc["rows"]], [("pat", "chr1"), ("pat", "chr20"), ("pat", "chrX"), ("mat", "chr20"), ("mat", "chrY"), ("pat", "other"), ("mat", "other")])
+        self.assertEqual(cc["rows"][-2], {"haplotype": "pat", "chrom": "other", "aligned_bases": 50000, "contigs": 2, "chrom_length": 186739, "fraction": None})
+        self.assertEqual(cc["lengths"]["chrY"], 57227415)
+        bb = sp.bed_bins([l.encode() for l in DIP_BED.splitlines(True)], {"chr20": 64444167, "chr1": 248956422}, bin_bp=1_000_000)
+        c20 = bb["chroms"]["chr20"]
+        self.assertEqual((len(c20["bins"]), c20["bp"], c20["len"]), (65, 3298175, 64444167))
+        self.assertEqual(c20["bins"][0], round((393022 - 63840 + 1000000 - 408057) / 1e6, 3))      # two intervals inside the first bin
+        self.assertEqual(c20["bins"][1], round((1877050 - 1000000) / 1e6, 3))                       # the second interval crosses the bin edge
+        self.assertEqual(c20["bins"][2], 1.0)
+        self.assertEqual(c20["bins"][3], 0.5)
+        self.assertEqual(bb["chroms"]["chr1"]["bins"][1], 0.2)
+        self.assertEqual(list(bb["chroms"]), ["chr1", "chr20"])                                      # contig order, unknown contigs skipped
+        self.assertEqual(sp.bed_bins([b"chrQ\t0\t10\n"], {}, contigs=["chrQ"])["chroms"]["chrQ"], {"len": 10, "bins": [1.0], "bp": 10})
+        self.assertEqual(sp.bed_bp_by_chrom([l.encode() for l in RELIABLE_BED.splitlines(True)] + [b"#x\n", b"track name=y\n", b"chr2\ta\tb\n"]), {"chr20": 3248175, "chr1": 200000})
+        self.assertEqual(sp.parse_regroup_log(["from_haplotype\tcontig\tlength\tto_haplotype", "hap1\tc9\t12345\thap2"]), [{"from_haplotype": "hap1", "contig": "c9", "length": 12345, "to_haplotype": "hap2"}])
+        tv = sp.parse_truvari_summary(TRUVARI_JSON)
+        self.assertEqual((tv["gt_concordance"], tv["TP-base_TP-gt"], tv["params"]["sizemax"]), (0.95, 22800, 50000))
+        self.assertNotIn("gt_matrix", tv)
+        self.assertEqual(sp.parse_truvari_summary("x"), {})
+        cs = sp.parse_contig_sizes(["Contig\tGRCh38\tA.1\tA.2\t_MINIGRAPH_\tmin\tmax\tavg", "_AMBIGUOUS_\t0\t100\t200\t0\t0\t200\t100",
+                                    "chr20\t64444167\t64000000\t66000000\t64444167\t64000000\t66000000\t65000000", "chrX\t156040895\t0\t0\t156040895\t0\t0\t0"])
+        self.assertEqual(cs["genomes"], ["A.1", "A.2"])
+        self.assertEqual(cs["chromosomes"]["chr20"], {"ref_bp": 64444167, "hap_bp_min": 64000000, "hap_bp_max": 66000000, "hap_bp_avg": 65000000, "hap_bp_total": 130000000})
+        self.assertEqual((cs["assigned_bp"], cs["ambiguous_bp"]), ({"A.1": 64000000, "A.2": 66000000}, {"A.1": 100, "A.2": 200}))
+        self.assertEqual(sp.parse_name_map(["sample_id\tsafe_name\ttrio", "HG-1\tHG_1\ttrue", "X\tX\tfalse"]), {"HG-1": {"safe_name": "HG_1", "trio": True}, "X": {"safe_name": "X", "trio": False}})
+        bs = sp.parse_bcftools_stats(BCFTOOLS_STATS.splitlines() + ["PSC\t0\tS2\t1\t2\t3\t4\t5\t6\t7.0\t8\t0\t0\t9"])
+        self.assertEqual((bs["psc"]["sample"], [r["sample"] for r in bs["psc_all"]], bs["psc_all"][1]["n_missing"]), ("HG002", ["HG002", "S2"], 9))
+
+    def test_tier2_parsers(self):
+        from .fixtures import CALL_SPECTRA, CONTIG_QC, DEGREE, GENOME_BP_HEADER, MEMBERS_HEADER, REFGAPS
+        cq = sp.parse_contig_qc(CONTIG_QC.format(h1="pat", h2="mat").splitlines())
+        h1 = cq["haplotypes"][0]
+        self.assertEqual((h1["haplotype"], h1["contigs"], h1["bp"], h1["n_bp"], h1["gaps"], h1["telo_bp"]), ("pat", 2, 65000000, 100, 1, 6000))
+        self.assertEqual(h1["telo_ends"], {"0": 0, "1": 2, "2": 0})
+        self.assertEqual(h1["flagger_bp"], {"err": 20000, "dup": 500000, "hap": 64290000, "col": 190000})
+        self.assertEqual(h1["non_hap_pct"], round(710000 / 65000000 * 100, 2))
+        self.assertAlmostEqual(h1["gc_pct"], (40.9 * 60000000 + 41.5 * 5000000) / 65000000, places=2)
+        self.assertEqual(cq["haplotypes"][1]["telo_ends"], {"0": 1, "1": 0, "2": 1})
+        self.assertEqual([c["contig"] for c in cq["top_contigs"]], ["h1tg000001l", "h2tg000001l", "h1tg000002l", "h2tg000002l"])
+        self.assertEqual(cq["top_contigs"][0]["non_hap_bp"], 700000)
+        cs = sp.parse_call_spectra(CALL_SPECTRA.splitlines())
+        self.assertEqual(cs["dipcall"]["by_filter"], {"ASM_UNRELIABLE": 20000, "PASS": 4380700})
+        self.assertEqual(cs["dipcall"]["by_type"]["SNV"], {"ASM_UNRELIABLE": 20000, "PASS": 3780000})
+        self.assertEqual(cs["pav"]["sv_sizes"], {"DEL": {"1k-10k": 250}, "INS": {"100-1k": 900}, "INV": {"10k-100k": 12}})
+        self.assertEqual((cs["pav"]["pass_total"], cs["pav"]["total"]), (4301162, 4495162))
+        ms = sp.parse_member_stats((MEMBERS_HEADER + "A\t1\t2\t3\t4\t5\t100\t0.9500\nB\t1\t2\t3\t4\t6\t100\t0.9400\n").splitlines())
+        self.assertEqual(ms[1], {"sample_id": "B", "n_ref_hom": 1, "n_nonref_hom": 2, "n_hets": 3, "n_singletons": 4, "n_missing": 6, "n_sites": 100, "call_rate": 0.94})
+        gb = sp.parse_genome_bp((GENOME_BP_HEADER + "GRCh38#0\t1\t64444167\nA#1\t3\t60000000\nA#2\t2\t62000000\n").splitlines())
+        self.assertEqual(gb, {"ref_bp": 64444167, "haplotypes": 2, "bp_min": 60000000, "bp_max": 62000000, "bp_avg": 61000000, "bp_total": 122000000})
+        dg = sp.parse_degree_stats(DEGREE.splitlines() + ["9\t5\t0\t0\t0", "12\t1\t0\t0\t0"])
+        self.assertEqual((dg["1"], dg["4"], dg["8+"]), (736985, 2878, 6))
+        rg = sp.parse_refgaps([l.encode() for l in REFGAPS.format(chrom="chr20").splitlines(True)])
+        self.assertEqual(rg, {"chr20": {"n": 2, "bp": 60000 + 28557053 - 26386225}})
 
     def test_files_gzip_dims_and_vcf_samples(self):
         tmp = Path(tempfile.mkdtemp())
@@ -579,13 +645,34 @@ class SummaryEndToEnd(unittest.TestCase):
         s1 = self.check_html(out / "S1.summary.html")
         self.assertIn("trioeval mat", s1)
         self.assertIn("het loss", s1)
+        self.assertIn("contigs with the most switches", s1)
+        self.assertIn("Concordance with the read-based SNVs", s1)
+        self.assertEqual(d1["schema"], 2)
+        self.assertEqual(d1["assembly"]["parents"], {"hap1": "F", "hap2": "M"})
+        self.assertEqual(d1["assembly"]["haplotypes"][0]["trio_eval"]["n_contigs"], 1)
+        self.assertEqual(d1["assembly"]["haplotypes"][0]["trio_eval"]["contigs"][0]["switches"], 13 + 13)   # c1 + c2 of the fixture's S line
+        self.assertEqual(d1["assembly"]["summary"]["switch_max"], 0.005)
+        self.assertEqual(d1["assembly"]["summary"]["genotype_concordance"], 0.9865)
+        self.assertTrue(d1["provenance"]["containers"], d1["provenance"])           # an assembly-only sample has provenance now
         d2 = json.loads((out / "S2.summary.json").read_text())
         self.assertIn("assembly", d2["runs"])
         self.assertNotIn("assembly_call", d2["runs"])
         self.assertEqual(d2["assembly"]["flagger"]["hap_pct"], 95.99)
         self.assertIsNone(d2["assembly"]["reliable"])
-        self.assertEqual([f["code"] for f in d2["qc"]["flags"] if f["code"].startswith("asm_")], [])   # the shared setup's read-based warnings do not count
+        self.assertEqual([f["code"] for f in d2["qc"]["flags"] if f["code"].startswith("asm_") and f["severity"] == "fail"], [])   # the shared setup's read-based warnings do not count
         self.assertEqual((out / "pass.txt").read_text().split(), ["S1", "S2"])
+        # a schema-1 digest on disk is rebuilt, not reused
+        old = json.loads((out / "S2.summary.json").read_text()); old["schema"] = 1; old["assembly"] = {}
+        (out / "S2.summary.json").write_text(json.dumps(old))
+        self.assertEqual(run_cli(["--project", self.proj, "summary", "--samples", "S2", "--out-dir", str(out)])[0], 0)
+        self.assertEqual(json.loads((out / "S2.summary.json").read_text())["schema"], 2)
+        self.assertEqual(json.loads((out / "S2.summary.json").read_text())["assembly"]["flagger"]["hap_pct"], 95.99)
+        # the concordance gate: a strict minimum fails the trio sample (0.9865 in the fixture), the assembly-only sample has no concordance
+        code, _, err = run_cli(["--project", self.proj, "summary", "--samples", "S1", "S2", "--out-dir", str(out), "--pass-list", str(out / "pass4.txt"),
+                                "--threshold", "asm_genotype_concordance_min=0.99"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual((out / "pass4.txt").read_text().split(), ["S2"])
+        self.assertEqual([f["code"] for f in json.loads((out / "S1.summary.json").read_text())["qc"]["flags"] if f["severity"] == "fail"], ["asm_concordance_low"])
         # thresholds decide: a strict Flagger limit fails both, a strict switch-error limit fails the trio only
         code, _, err = run_cli(["--project", self.proj, "summary", "--samples", "S1", "S2", "--out-dir", str(out), "--pass-list", str(out / "pass2.txt"),
                                 "--threshold", "asm_switch_error_max=0.0045"])
@@ -630,8 +717,45 @@ class SummaryEndToEnd(unittest.TestCase):
         self.assertEqual(d1["assembly"]["flagger"]["non_hap_pct"], 4.01)
         self.assertEqual(d1["assembly"]["reliable"]["reliable_fraction_of_reference"], 0.9139)
         self.assertIsNone(d1["assembly"]["concordance"])
-        self.assertIn("Assembly QC", s1)
-        self.assertEqual([f["code"] for f in d1["qc"]["flags"] if f["code"].startswith("asm_")], [])
+        for needle in ("Flagger: what the reads say", "Chromosomes", "Where the assembly is reliable", "Karyotype evidence", "Calls against the reference",
+                       "Reliable region", "indel length (sites)", "substitution spectrum", "NGx curve", "hap1 bp"):
+            self.assertIn(needle, s1, needle)
+        self.assertEqual([f["code"] for f in d1["qc"]["flags"] if f["code"].startswith("asm_")], ["asm_karyotype_unknown"])   # warn: chr20-only fixture
+        self.assertEqual(d1["assembly"]["assembler_version"], "0.25.0-r726")
+        self.assertIsNone(d1["assembly"]["parents"])
+        self.assertEqual(d1["assembly"]["calls"]["dipcall"]["tstv"], 1.92)
+        self.assertEqual(d1["assembly"]["calls"]["dipcall"]["psc"]["n_hets"], 2900000)
+        self.assertEqual(d1["assembly"]["calls"]["dipcall"]["hethom"], 1.933)
+        self.assertEqual(dict(d1["assembly"]["calls"]["pav"]["idd"])[">=+50"], 20)
+        self.assertEqual(d1["assembly"]["flagger"]["bp"]["hap"], 2900000000)
+        self.assertEqual(d1["assembly"]["flagger"]["unk_pct"], 0.0)
+        cc = d1["assembly"]["chrom_coverage"]
+        self.assertEqual(cc["haplotypes"], ["hap1", "hap2"])
+        self.assertEqual([(r["chrom"], r["contigs"]) for r in cc["rows"] if r["haplotype"] == "hap1"], [("chr1", 1), ("chr20", 3), ("chrX", 1), ("other", 2)])
+        reg = d1["assembly"]["regions"]
+        self.assertEqual(reg["dip"]["chroms"]["chr20"]["bp"], 329182 + 1468993 + 1500000)
+        self.assertEqual(reg["reliable"]["chroms"]["chr20"]["bp"], reg["dip"]["chroms"]["chr20"]["bp"] - 50000)
+        self.assertEqual(len(reg["dip"]["chroms"]["chr20"]["bins"]), 65)           # 64,444,167 bp in 1 Mb bins
+        self.assertEqual(reg["dip"]["chroms"]["chr1"]["len"], 248956422)           # length from chrom_coverage, not from the BED
+        self.assertEqual(d1["assembly"]["haplotypes"][0]["lowq"], {"n": 3, "bp": 5083 + 1469 + 10})
+        self.assertEqual(d1["assembly"]["haplotypes"][0]["hap_bed_bp"], 340000 + 1495000 + 1610000 + 220000)
+        self.assertEqual(d1["assembly"]["haplotypes"][0]["unreliable_bp"], 60000)
+        self.assertEqual(d1["assembly"]["haplotypes"][1]["unreliable_bp"], 10000)
+        self.assertEqual(d1["assembly"]["haplotypes"][0]["pav_callable_bp"], 1840000 + 1610000 + 220000)
+        self.assertEqual(d1["assembly"]["karyotype"]["moved"], [])
+        summ = d1["assembly"]["summary"]
+        self.assertEqual((summ["hap_length_min"], summ["ng50_min"], summ["contigs"], summ["dipcall_snvs"], summ["chrx_fraction"]), (3015000000, 57000000, 820, 3800000, 0.0))
+        self.assertIsNone(summ["switch_max"])
+        self.assertIn("chrom_coverage", d1["files"])                          # the assembly files are summarised and listed
+        self.assertIn("dipcall_vcf_stats", d1["files"])
+        # Tier 2 files: per-haplotype Flagger and sequence QC from contig_qc, the callers' spectra
+        self.assertEqual(d1["assembly"]["haplotypes"][0]["seq"]["telo_ends"], {"0": 0, "1": 2, "2": 0})
+        self.assertEqual(d1["assembly"]["haplotypes"][1]["flagger"]["bp"]["dup"], 300000)
+        self.assertEqual(d1["assembly"]["contig_qc"]["top_contigs"][0]["contig"], "h1tg000001l")
+        self.assertEqual(d1["assembly"]["calls"]["pav"]["spectra"]["sv_sizes"]["INV"], {"10k-100k": 12})
+        self.assertEqual((summ["pav_sv_pass"], summ["dipcall_pass_fraction"], summ["telo_ends_max"]), (1162, round(4380700 / 4400700, 4), 1))
+        for needle in ("Sequence QC per haplotype", "contigs with the most non-Hap bases", "Calls by FILTER class", "PASS structural variants by size", "Per haplotype"):
+            self.assertIn(needle, s1, needle)
         self.assertEqual(d1["tandem_repeats"]["n_named"], 3)   # downstream's trgt_vcf
         self.assertEqual(d1["coverage"]["ratios"]["sex_from_ratio"], "MALE")   # upstream's mosdepth summary
         # upstream only: a partial page, the downstream-only sections say so
@@ -685,7 +809,7 @@ class SummaryEndToEnd(unittest.TestCase):
             for sid in ("S1", "S2"):
                 seed_success(self.cfg, db, "assembly", "sample", sid, {"sample_id": sid, "hifi_reads": ["/dev/null"]}, mode="assembly")
                 seed_success(self.cfg, db, "assembly_call", "sample", sid, {"sample_id": sid, "hap_fastas": ["/a", "/b"], "haplotype_labels": ["hap1", "hap2"],
-                                                                            "trio": False}, mode="assembly")
+                                                                            "trio": False, "flagger_bed": "/f.bed"}, mode="assembly")
             seed_success(self.cfg, db, "cohort_pangenome", "cohort", "C1", {"cohort_id": "C1", "sample_ids": ["S1", "S2"], "hap1_fastas": ["/a", "/a"],
                                                                             "hap2_fastas": ["/b", "/b"], "trios": [False, False], "sample_sexes": ["", "XY"],
                                                                             "sv_vcf": "/dev/null", "sv_vcf_index": "/dev/null"}, mode="assembly")
@@ -698,8 +822,15 @@ class SummaryEndToEnd(unittest.TestCase):
         self.assertEqual(set(cd["runs"]), {"cohort_pangenome"})
         cp = cd["callsets"]["cohort_pangenome"]
         self.assertEqual(cp["chromosomes"], ["chr1", "chr20", "chrX"])
-        self.assertEqual(cp["graph"]["chromosomes"]["chr20"], {"nodes": 501000, "edges": 701000, "length": 61000000})
+        c20 = cp["graph"]["chromosomes"]["chr20"]
+        self.assertEqual((c20["nodes"], c20["edges"], c20["length"]), (501000, 701000, 61000000))
+        self.assertEqual((c20["ref_length"], c20["hap_bp_min"], c20["hap_bp_avg"], c20["hap_bp_max"]), (64444167, 65000000, 65000000, 65000000))   # contig_sizes.tsv
         self.assertEqual((cp["graph"]["nodes"], cp["graph"]["length"]), (1503000, 183000000))
+        self.assertEqual(cp["contig_sizes"]["ambiguous_bp"]["S1.1"], 2000000)
+        self.assertEqual(cp["name_map"]["S2"], {"safe_name": "S2", "trio": False})
+        self.assertEqual((cp["truvari"]["gt_concordance"], cp["truvari"]["TP-base_TP-gt"], cp["truvari"]["params"]["sizemin"]), (0.95, 22800, 50))
+        self.assertNotIn("gt_matrix", cp["truvari"])
+        self.assertIn("freq_vcf", cp)
         self.assertEqual([g["genome"] for g in cp["split"]["genomes"]], ["S1.1", "S1.2", "S2.1", "S2.2"])
         self.assertEqual(cp["split"]["ambiguous_contigs"], 18 + 18 + 19 + 19)
         self.assertEqual(cp["summary"]["pangenome"]["records"]["total"], 4100000)
@@ -708,10 +839,43 @@ class SummaryEndToEnd(unittest.TestCase):
         self.assertEqual([r["in_pangenome_vcf"] for r in cp["samples"]], ["yes", "yes"])
         self.assertEqual(sorted(cd["assembly"]), ["S1", "S2"])                       # the members' assembly rows come along
         self.assertEqual(cd["warnings"], [])
+        # the assembly metrics are distributions with a direction; the member rows carry the karyotype
+        self.assertEqual(cd["distributions"]["asm_reliable_fraction"]["values"], {"S1": 0.9139, "S2": 0.9139})
+        self.assertEqual((cd["distributions"]["asm_flagger_non_hap"]["direction"], cd["distributions"]["asm_flagger_non_hap"]["threshold"]), ("max", 10.0))
+        self.assertEqual(cd["distributions"]["asm_flagger_non_hap"]["beyond_threshold"], [])
+        self.assertEqual(cd["distributions"]["asm_dipcall_hethom"]["values"]["S1"], 1.933)
+        self.assertEqual(cd["sex"]["karyotype"], {"unknown": 2})
+        self.assertEqual([r["karyotype"] for r in cd["members"]], ["unknown", "unknown"])
+        # Tier 2: the members' genotypes, the per-chromosome haplotype sequence, degrees, gaps and the summary's level rows
+        self.assertEqual([m["sample_id"] for m in cp["members"]], ["S1", "S2"])
+        self.assertEqual(cp["member_distributions"]["call_rate"]["threshold"], 0.9)
+        self.assertEqual(cp["member_distributions"]["call_rate"]["beyond_threshold"], [])
+        self.assertEqual(c20["genome_haplotypes"], 4)
+        self.assertEqual(c20["genome_bp_min"], 61_000_000 - 2 * 50_000)   # member 0, haplotype 2 of the fixture
+        self.assertEqual(c20["refgaps"], {"n": 2, "bp": 60000 + 28557053 - 26386225})
+        self.assertEqual(cp["degree"]["1"], 736985 * 3)
+        self.assertEqual(cd["distributions"]["asm_pav_sv_pass"]["values"]["S1"], 1162)
         text = self.check_html(self.tmp / "asm" / "C1.summary.html")
         for needle in ('id="sec-pangenome"', "Pangenome graph (cohort_pangenome)", "Per chromosome", "Contigs binned by the split",
-                       "truvari bench", "Allele frequencies of the vcfwave VCF", "cohort_freq has not run", "not haplotypes"):
+                       "truvari bench", "Allele frequencies of the vcfwave VCF", "cohort_freq has not run", "not haplotypes",
+                       "graph / reference", "Shortest haplotype as a fraction", "genotype concordance", "assigned bp h1 / h2",
+                       "2 assemblies (one row per member", "PAV SNVs / indels", "karyotype from the assembly", "assembly: Flagger non-Hap %",
+                       "Graph structure", "Node degree", "Haplotype sequence in each chromosome", "genotypes in the graph VCF", "call rate in the graph VCF"):
             self.assertIn(needle, text, needle)
+        # a tight Flagger limit puts both members above the threshold in the distributions (direction max)
+        code, out, err = run_cli(["--project", self.proj, "summary", "--mode", "assembly", "--cohort", "C1", "--out-dir", str(self.tmp / "asm"),
+                                  "--threshold", "asm_flagger_err_pct_max=1"])
+        self.assertEqual(code, 0, err)
+        cd2 = json.loads((self.tmp / "asm" / "C1.summary.json").read_text())
+        self.assertEqual(cd2["distributions"]["asm_flagger_non_hap"]["beyond_threshold"], ["S1", "S2"])
+        self.assertIn("above threshold", self.check_html(self.tmp / "asm" / "C1.summary.html"))
+        # the member call-rate threshold is a cohort-page signal: raised above the fixtures' rates it lists both members
+        code, out, err = run_cli(["--project", self.proj, "summary", "--mode", "assembly", "--cohort", "C1", "--out-dir", str(self.tmp / "asm"),
+                                  "--threshold", "pg_member_call_rate_min=0.99"])
+        self.assertEqual(code, 0, err)
+        cd3 = json.loads((self.tmp / "asm" / "C1.summary.json").read_text())
+        self.assertEqual(cd3["callsets"]["cohort_pangenome"]["member_distributions"]["call_rate"]["beyond_threshold"], ["S1", "S2"])
+        self.assertIn("Members below the call-rate threshold", self.check_html(self.tmp / "asm" / "C1.summary.html"))
         # without the stage the assembly-mode page says so; the standalone page has no pangenome section at all
         self.assertEqual(run_cli(["--project", self.proj, "summary", "--mode", "assembly", "--cohort", "C2", "--out-dir", str(self.tmp / "asm2")])[0], 1)  # unknown cohort
         code, out, err = run_cli(["--project", self.proj, "summary", "--cohort", "C1"])

@@ -15,9 +15,9 @@ arrays of files from every member of a cohort.
 | `downstream` | sample | Upstream's post-phasing half: HiPhase, TRGT, pbjam and variant stats, MethBat methylation, StarPhase. |
 | `cohort_merge` | cohort | svx or bcftools SV merge, `trgt merge` and trgt-lps, optional phased small-variant merge, optional GLnexus. |
 | `cohort_freq` | cohort | Allele counts and frequencies of the cohort's joint small-variant VCF and merged SV VCF, overall and per sex, as sites-only VCFs with a summary. |
-| `assembly` | sample | hifiasm (trio-binned when both parents are registered) and gfatools per haplotype, behind an output contract: `hap_fastas`, `haplotype_labels`, `assembler_version`. |
+| `assembly` | sample | hifiasm (trio-binned when both parents are registered) and gfatools per haplotype, behind an output contract: `hap_fastas`, `haplotype_labels`, `assembler_version`, and the QC outputs `flagger_bed` and `flagger_summary` (HMM-Flagger) and `trio_eval` (yak trioeval, trio-binned samples only). |
 | `assembly_call` | sample | The haplotypes aligned to the decoy-free GRCh38 (minimap2 2.31), assembled bases per chromosome and the inferred karyotype, dipcall and PAV 3 calls. |
-| `cohort_pangenome` | cohort | A Minigraph-Cactus graph of the members' haplotype assemblies on the decoy-free GRCh38, built per chromosome; its cohort VCFs (raw and vcfwave) with allele frequencies; optionally truvari against the cohort's read-based SV merge. |
+| `cohort_pangenome` | cohort | A Minigraph-Cactus graph of the members' haplotype assemblies on the decoy-free GRCh38, built per chromosome; its cohort VCFs (raw and vcfwave) with allele frequencies; truvari against the `cohort_merge` SV VCF of the cohort that `pangenome_sv_cohort` names in `config.json`, else this cohort's own, when one exists. |
 
 Stages never call each other. The driver passes outputs of one stage as inputs
 of the next, by reading the earlier run's `outputs.json`.
@@ -46,7 +46,7 @@ the same.
 ## Version
 
 The ugc-pacbio-wgw version is the content of `VERSION` in the installed code,
-for example `0.8.0`. It is part of every results path and every manifest, and
+for example `0.11.0`. It is part of every results path and every manifest, and
 it gates the driver: a stage counts as done for a subject only if it succeeded
 **at the current version**. Installing a new version therefore starts every
 subject from the first stage again unless you pass `--any-version`, which lets

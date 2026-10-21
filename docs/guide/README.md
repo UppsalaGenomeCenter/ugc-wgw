@@ -22,7 +22,7 @@ reference page is [`../../bin/README.md`](../../bin/README.md).
 | [10 Upgrading](10-upgrading.md) | A new bundle version must coexist with, or replace, the current one. |
 | [11 Reference](11-reference.md) | Every command, flag, config key and file name in one place. |
 | [12 Task resources](12-resources.md) | A job was refused or killed for cores, memory or time, or the requests must fit the cluster. |
-| [Workflow call graphs](workflow-graphs.md) | Generated exact call graphs of the seven entrypoints. |
+| [Workflow call graphs](workflow-graphs.md) | Generated exact call graphs of the nine entrypoints. |
 | [Task resources, inventory](task-resources.md) | Generated table of what every task asks SLURM for. |
 
 ## Reading the diagrams
@@ -38,7 +38,7 @@ shipped inside every bundle: on the HPC it is at
 | Placeholder | Meaning |
 |---|---|
 | `<prefix>` | The install root on the HPC, e.g. `/proj/ugc`. Holds `versions/`, `current`, `call_cache/`, `references/`. |
-| `<v>` | A ugc-pacbio-wgw version, e.g. `0.8.0`. Appears in install paths and in every results path. |
+| `<v>` | A ugc-pacbio-wgw version, e.g. `0.11.0`. Appears in install paths and in every results path. |
 | `<project>` | A directory holding `.ugc-wgw/` (config, state database, logs). One project per campaign. |
 | `<results>` | The results root, `<project>` unless `ugc-wgw init --results` said otherwise. |
 | `ugc-wgw` | `<prefix>/current/code/bin/ugc-wgw`. Put it on `PATH` or define an alias. |
@@ -54,7 +54,7 @@ run, `submit` under `tmux`, watching and retrying, the result pages. In
 three lines:
 
 ```bash
-./install-bundle.sh --bundle ugc-pacbio-wgw-0.8.0.tar --prefix /proj/ugc --references /proj/ugc/references --site site.cfg --activate
+./install-bundle.sh --bundle ugc-pacbio-wgw-0.11.0.tar --prefix /proj/ugc --references /proj/ugc/references --site site.cfg --activate
 ugc-wgw init <project> --install /proj/ugc/current --ref-map <ref_map from the installer's report>
 ugc-wgw samples add samples.tsv && ugc-wgw cohort freeze C1 --samples cohort.txt && ugc-wgw -v submit --mode standalone --cohort C1
 ```

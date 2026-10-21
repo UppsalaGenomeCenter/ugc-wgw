@@ -7,6 +7,7 @@ import "ugc_wgw/cohort/concat.wdl" as Concat
 import "ugc_wgw/cohort/freq.wdl" as Freq
 import "ugc_wgw/pangenome/cactus_chrom.wdl" as Chrom
 import "ugc_wgw/pangenome/cactus_split.wdl" as Split
+import "ugc_wgw/pangenome/member_stats.wdl" as MemberStats
 import "ugc_wgw/pangenome/names.wdl" as Names
 import "ugc_wgw/pangenome/truvari.wdl" as Truvari
 import "ugc_wgw/pangenome/vcf_post.wdl" as Post
@@ -40,6 +41,18 @@ workflow ugc_wgw_cohort_pangenome {
       chrom_graph_stats: {
         description: "graph-stats.tsv per chromosome (nodes, edges, length)"
       },
+      chrom_path_stats: {
+        description: "cactus-graphmap-join's path-stats per chromosome: every haplotype path fragment with its length"
+      },
+      chrom_refgaps: {
+        description: "The reference intervals the graph does not cover, per chromosome (the join's refgaps BED)"
+      },
+      chrom_genome_bp: {
+        description: "Paths and bp per genome (sample#haplotype) in each chromosome's graph"
+      },
+      chrom_degree_stats: {
+        description: "vg stats -D of each chromosome's GBZ: the node degree histogram"
+      },
       chrom_logs: {
         description: "The Cactus logs per chromosome, tarred"
       },
@@ -54,6 +67,12 @@ workflow ugc_wgw_cohort_pangenome {
       },
       ambiguous_contigs: {
         description: "genome, assigned, ambiguous contig counts from the split"
+      },
+      member_stats_shards: {
+        description: "bcftools stats --samples - of the vcfwave VCF per requested chromosome"
+      },
+      member_stats: {
+        description: "<cohort_id>.pangenome.<ref_name>.members.tsv: per member hom-ref, hom-alt and het genotypes, singletons, missing genotypes, sites and call rate in the graph VCF"
       },
       freq_vcf: {
         description: "<cohort_id>.pangenome.<ref_name>.freq.vcf.gz: sites-only frequencies of the vcfwave VCF (AC, AN, AF, NS, per-stratum tags)"
@@ -317,6 +336,21 @@ workflow ugc_wgw_cohort_pangenome {
       runtime_attributes = default_runtime_attributes
     }
   }
+  # per-member genotype statistics of the vcfwave VCF, one shard per requested chromosome
+  scatter (i in range(length(requested))) {
+    call MemberStats.ugc_wgw_pangenome_member_stats as member_stats_shard { input:
+      vcf = post_wave.vcf,
+      vcf_index = post_wave.vcf_index,
+      regions_bed = ugc_wgw_pangenome_names.chrom_beds[i],
+      out_prefix = "~{out_prefix}.wave.~{requested[i]}",
+      runtime_attributes = default_runtime_attributes
+    }
+  }
+  call MemberStats.ugc_wgw_pangenome_member_stats_gather { input:
+    stats = member_stats_shard.stats,
+    out_prefix = out_prefix,
+    runtime_attributes = default_runtime_attributes
+  }
   call Concat.ugc_wgw_bcftools_concat as concat_freq { input:
     vcfs = freq_shard.shard_vcf,
     vcf_indices = freq_shard.shard_vcf_index,
@@ -371,7 +405,13 @@ workflow ugc_wgw_cohort_pangenome {
     Array[File] chrom_gbzs = ugc_wgw_cactus_chrom.gbz
     Array[File] chrom_gfas = ugc_wgw_cactus_chrom.gfa
     Array[File] chrom_graph_stats = ugc_wgw_cactus_chrom.graph_stats
+    Array[File] chrom_path_stats = ugc_wgw_cactus_chrom.path_stats
+    Array[File] chrom_refgaps = ugc_wgw_cactus_chrom.refgaps
+    Array[File] chrom_genome_bp = ugc_wgw_cactus_chrom.genome_bp
+    Array[File] chrom_degree_stats = ugc_wgw_cactus_chrom.degree_stats
     Array[File] chrom_logs = ugc_wgw_cactus_chrom.logs
+    Array[File] member_stats_shards = member_stats_shard.stats
+    File member_stats = ugc_wgw_pangenome_member_stats_gather.members
     File name_map = ugc_wgw_pangenome_names.name_map
     File split_log = ugc_wgw_cactus_split.split_log
     File contig_sizes = ugc_wgw_cactus_split.contig_sizes

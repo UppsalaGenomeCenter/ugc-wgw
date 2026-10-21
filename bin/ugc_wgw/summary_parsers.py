@@ -154,7 +154,8 @@ def parse_two_line_tsv(lines: Iterable[str]) -> dict[str, str]:
 
 
 def parse_bcftools_stats(lines: Iterable[str]) -> dict[str, object]:
-    """bcftools stats: SN, TSTV, ST, IDD, QUAL, DP and PSC sections (the `# CODE` header lines are comments)."""
+    """bcftools stats: SN, TSTV, ST, IDD, QUAL, DP and PSC sections (the `# CODE` header lines are comments).
+    `psc` is the first sample's row (one-sample files), `psc_all` every PSC row in file order."""
     sn: dict[str, int] = {}
     tstv: dict[str, float] = {}
     st: dict[str, int] = {}
@@ -162,6 +163,7 @@ def parse_bcftools_stats(lines: Iterable[str]) -> dict[str, object]:
     qual: list[list[float]] = []
     dp: list[list[object]] = []
     psc: dict[str, object] = {}
+    psc_all: list[dict[str, object]] = []
     for p in _rows(lines):
         code = p[0]
         try:
@@ -181,9 +183,10 @@ def parse_bcftools_stats(lines: Iterable[str]) -> dict[str, object]:
                 psc = {"sample": p[2], "n_ref_hom": int(p[3]), "n_nonref_hom": int(p[4]), "n_hets": int(p[5]),
                        "n_transitions": int(p[6]), "n_transversions": int(p[7]), "n_indels": int(p[8]),
                        "average_depth": float(p[9]), "n_singletons": int(p[10]), "n_missing": int(p[13])}
+                psc_all.append(psc)
         except ValueError:
             continue
-    return {"sn": sn, "tstv": tstv, "st": st, "idd": idd, "qual": qual, "dp": dp, "psc": psc}
+    return {"sn": sn, "tstv": tstv, "st": st, "idd": idd, "qual": qual, "dp": dp, "psc": psc_all[0] if psc_all else {}, "psc_all": psc_all}
 
 
 def parse_kv_table(lines: Iterable[str]) -> dict[str, object]:
@@ -196,31 +199,53 @@ def parse_kv_table(lines: Iterable[str]) -> dict[str, object]:
     return out
 
 
-FLAGGER_LABELS = ("Err", "Dup", "Hap", "Col")
+FLAGGER_LABELS = ("Err", "Dup", "Hap", "Col", "Unk")
 
 
 def parse_flagger_summary(lines: Iterable[str]) -> dict[str, object]:
-    """HMM-Flagger's prediction_summary_final.tsv: the base_level percentage row of the whole_genome annotation gives
-    the share of the assembly in each label (Err, Dup, Hap, Col in --labelNames order); non_hap_pct sums all but Hap."""
+    """HMM-Flagger's prediction_summary_final.tsv, whole_genome annotation (v1.2.0 writes no per-contig row):
+    the base_level percentage row gives each label's share of the assembly (`err_pct` ... `unk_pct`, non_hap_pct =
+    Err + Dup + Col), the base_level count row the bases (`bp`), the overlap_based count row the flagged blocks
+    (`blocks`); Err, Dup, Hap, Col, Unk in --labelNames order."""
+    out: dict[str, object] = {}
     for line in lines:
         f = line.rstrip("\n").split("\t")
-        if len(f) >= 11 and f[0] == "PREDICTION" and f[1] == "base_level" and f[2] == "percentage" and "whole_genome" in f[4].lower():
-            pct = {label.lower() + "_pct": _float(v) for label, v in zip(FLAGGER_LABELS, f[7:11])}
-            known = [v for k, v in pct.items() if v is not None]
+        if len(f) < 12 or f[0] != "PREDICTION" or "whole_genome" not in f[4].lower():
+            continue
+        values = [_float(v) for v in f[7:12]]
+        if f[1] == "base_level" and f[2] == "percentage":
+            pct = {label.lower() + "_pct": v for label, v in zip(FLAGGER_LABELS, values)}
+            known = [v for v in pct.values() if v is not None]
             hap = pct.get("hap_pct")
-            return {**pct, "non_hap_pct": round(sum(v for k, v in pct.items() if k != "hap_pct" and v is not None), 2) if known else None,
-                    "hap_fraction": round(hap / 100.0, 4) if hap is not None else None}
-    return {}
+            out.update(pct)
+            out["non_hap_pct"] = round(sum(v for k, v in pct.items() if k not in ("hap_pct", "unk_pct") and v is not None), 2) if known else None
+            out["hap_fraction"] = round(hap / 100.0, 4) if hap is not None else None
+        elif f[1] == "base_level" and f[2] == "count":
+            out["bp"] = {label.lower(): (int(v) if v is not None else None) for label, v in zip(FLAGGER_LABELS, values)}
+        elif f[1] == "overlap_based" and f[2] == "count":
+            out["blocks"] = {label.lower(): (int(v) if v is not None else None) for label, v in zip(FLAGGER_LABELS, values)}
+    return out
 
 
-def parse_trioeval(lines: Iterable[str]) -> dict[str, object]:
-    """yak trioeval: the W line (switch errors, evaluated sites, rate) and the H line (Hamming)."""
+def parse_trioeval(lines: Iterable[str], top: int = 20) -> dict[str, object]:
+    """yak trioeval: the W line (switch errors, evaluated sites, rate), the H line (Hamming), and the per-contig S
+    lines (`S name d0 d1 c0 c1 c2 c3`, trioeval.c: d0/d1 paternal and maternal k-mer blocks, c1 + c2 the switches
+    between them, min(d0, d1) the Hamming errors): `n_contigs` evaluated (d0 + d1 >= 2) and the `top` contigs by
+    switches as {name, pat_blocks, mat_blocks, switches, hamming}."""
     out: dict[str, object] = {}
+    contigs: list[dict[str, object]] = []
     for line in lines:
         f = line.rstrip("\n").split("\t")
         if len(f) >= 4 and f[0] in ("W", "H"):
             key = "switch" if f[0] == "W" else "hamming"
             out[key + "_errors"], out[key + "_sites"], out[key + "_rate"] = _int(f[1]), _int(f[2]), _float(f[3])
+        elif len(f) >= 8 and f[0] == "S":
+            d0, d1, c0, c1, c2, c3 = (_int(x) or 0 for x in f[2:8])
+            if d0 + d1 >= 2:
+                contigs.append({"name": f[1], "pat_blocks": d0, "mat_blocks": d1, "switches": c1 + c2, "hamming": min(d0, d1), "blocks": d0 + d1})
+    if contigs:
+        out["n_contigs"] = len(contigs)
+        out["contigs"] = sorted(contigs, key=lambda c: (-int(c["switches"]), -int(c["hamming"]), str(c["name"])))[:top]  # type: ignore[call-overload]
     return out
 
 
@@ -624,15 +649,18 @@ def parse_freq_samples(lines: Iterable[str]) -> list[dict[str, str]]:
     return rows
 
 
-def parse_gfatools_stats(lines: Iterable[str]) -> dict[str, object]:
-    """gfatools stat: SZ (total length), NN (sequences), NL rows (x, Nx, Lx), AU (auN)."""
-    out: dict[str, object] = {"total_length": None, "n_sequences": None, "aun": None, "nl": [], "n50": None, "l50": None}
+def parse_caln50(lines: Iterable[str]) -> dict[str, object]:
+    """calN50.js output (the assembly stage runs it with -L3.1g, so Nx and auN are NGx and auNG against 3.1 Gb):
+    GS (genome size used), SZ (total length), NN (sequences), NL rows (x, NGx, LGx), AU (auNG)."""
+    out: dict[str, object] = {"genome_size": None, "total_length": None, "n_sequences": None, "aun": None, "nl": [], "n50": None, "l50": None}
     nl: list[list[int]] = []
     for p in _rows(lines):
         if p[0] == "CC":
             continue
         try:
-            if p[0] == "SZ":
+            if p[0] == "GS":
+                out["genome_size"] = int(p[1])
+            elif p[0] == "SZ":
                 out["total_length"] = int(p[1])
             elif p[0] == "NN":
                 out["n_sequences"] = int(p[1])
@@ -647,6 +675,155 @@ def parse_gfatools_stats(lines: Iterable[str]) -> dict[str, object]:
         if x == 50:
             out["n50"], out["l50"] = nx, lx
     return out
+
+
+parse_gfatools_stats = parse_caln50   # the older name of the same parser
+
+
+def parse_chrom_coverage(lines: Iterable[str], contigs: Iterable[str] = PRIMARY_CONTIGS) -> dict[str, object]:
+    """assembly_call's chrom_coverage.tsv (haplotype, chrom, aligned_bases, contigs, chrom_length, fraction): the rows
+    of the primary contigs in reference order per haplotype, plus one `other` row per haplotype that sums the rest;
+    `haplotypes` in file order and `lengths` {chrom: chrom_length} for the primary contigs."""
+    keep = list(contigs)
+    order = {c: i for i, c in enumerate(keep)}
+    _cols, rows = table(lines)
+    haps: list[str] = []
+    primary: list[dict[str, object]] = []
+    other: dict[str, dict[str, object]] = {}
+    lengths: dict[str, int] = {}
+    for r in rows:
+        hap = r.get("haplotype", "")
+        if hap and hap not in haps:
+            haps.append(hap)
+        chrom = r.get("chrom", "")
+        bases, n, length, frac = _int(r.get("aligned_bases")) or 0, _int(r.get("contigs")) or 0, _int(r.get("chrom_length")) or 0, _float(r.get("fraction"))
+        if chrom in order:
+            primary.append({"haplotype": hap, "chrom": chrom, "aligned_bases": bases, "contigs": n, "chrom_length": length, "fraction": frac})
+            if length:
+                lengths[chrom] = length
+        else:
+            o = other.setdefault(hap, {"haplotype": hap, "chrom": "other", "aligned_bases": 0, "contigs": 0, "chrom_length": 0, "fraction": None})
+            o["aligned_bases"] = int(o["aligned_bases"]) + bases  # type: ignore[arg-type]
+            o["contigs"] = int(o["contigs"]) + n  # type: ignore[arg-type]
+            o["chrom_length"] = int(o["chrom_length"]) + length  # type: ignore[arg-type]
+    primary.sort(key=lambda r: (haps.index(str(r["haplotype"])), order.get(str(r["chrom"]), 99)))
+    out_rows = primary + [other[h] for h in haps if h in other]
+    return {"haplotypes": haps, "rows": out_rows, "lengths": lengths}
+
+
+def _bed_intervals(lines: Iterable[bytes]) -> Iterator[tuple[str, int, int]]:
+    for line in lines:
+        if line.startswith(b"#") or line.startswith(b"track"):
+            continue
+        parts = line.split(b"\t", 3)
+        if len(parts) < 3:
+            continue
+        try:
+            start, end = int(parts[1]), int(parts[2])
+        except ValueError:
+            continue
+        if end > start:
+            yield parts[0].decode("ascii", "replace"), start, end
+
+
+def bed_bp_by_chrom(lines: Iterable[bytes]) -> dict[str, int]:
+    """Bases covered per contig by a BED (intervals assumed non-overlapping, as dipcall and bedtools write them)."""
+    out: dict[str, int] = {}
+    for chrom, start, end in _bed_intervals(lines):
+        out[chrom] = out.get(chrom, 0) + (end - start)
+    return out
+
+
+def bed_bins(lines: Iterable[bytes], lengths: dict[str, int], bin_bp: int = 1_000_000,
+             contigs: Iterable[str] = PRIMARY_CONTIGS) -> dict[str, object]:
+    """Covered fraction per `bin_bp` bin per contig for a BED of non-overlapping intervals (dip.bed, reliable.bed):
+    an interval spanning several bins is split at the bin edges; the last bin is scaled by its real width. Contigs
+    without a known length take their last interval's end. Same shape as aggregate_region_bed: {bin_bp, chroms:
+    {chrom: {len, bins, bp}}}, bins in contig order."""
+    keep = list(contigs)
+    covered: dict[str, dict[int, int]] = defaultdict(dict)
+    total: dict[str, int] = {}
+    ends: dict[str, int] = {}
+    keep_set = set(keep)
+    for chrom, start, end in _bed_intervals(lines):
+        if chrom not in keep_set:
+            continue
+        total[chrom] = total.get(chrom, 0) + (end - start)
+        ends[chrom] = max(ends.get(chrom, 0), end)
+        c = covered[chrom]
+        for b in range(start // bin_bp, (end - 1) // bin_bp + 1):
+            lo, hi = max(start, b * bin_bp), min(end, (b + 1) * bin_bp)
+            if hi > lo:
+                c[b] = c.get(b, 0) + (hi - lo)
+    chroms: dict[str, object] = {}
+    for chrom in keep:
+        length = lengths.get(chrom) or ends.get(chrom)
+        if not length:
+            continue
+        n = (length + bin_bp - 1) // bin_bp
+        c = covered.get(chrom, {})
+        bins = [round(c.get(i, 0) / min(bin_bp, length - i * bin_bp), 3) for i in range(n)]
+        chroms[chrom] = {"len": length, "bins": bins, "bp": total.get(chrom, 0)}
+    return {"bin_bp": bin_bp, "chroms": chroms}
+
+
+def parse_regroup_log(lines: Iterable[str]) -> list[dict[str, object]]:
+    """assembly_call's regroup log: the contigs moved between dipcall's haplotype copies (header only when none)."""
+    _cols, rows = table(lines)
+    return [{k: _num(v) for k, v in r.items()} for r in rows]
+
+
+TRUVARI_KEYS = ("TP-base", "TP-comp", "FP", "FN", "precision", "recall", "f1", "gt_concordance", "base cnt", "comp cnt",
+                "TP-base_TP-gt", "TP-base_FP-gt", "TP-comp_TP-gt", "TP-comp_FP-gt")
+
+
+def parse_truvari_summary(doc: object) -> dict[str, object]:
+    """truvari bench summary.json: the scalar figures (TRUVARI_KEYS), the `weighted` precision/recall/f1 and the bench
+    parameters that matter for reading them (sizemin, sizefilt, sizemax, pctseq); gt_matrix is dropped."""
+    if not isinstance(doc, dict):
+        return {}
+    out: dict[str, object] = {k: doc.get(k) for k in TRUVARI_KEYS if k in doc}
+    w = doc.get("weighted")
+    if isinstance(w, dict):
+        out["weighted"] = {k: w.get(k) for k in ("precision", "recall", "f1")}
+    params = doc.get("params")
+    if isinstance(params, dict):
+        out["params"] = {k: params.get(k) for k in ("sizemin", "sizefilt", "sizemax", "pctseq", "pctsize", "refdist") if k in params}
+    return out
+
+
+def parse_contig_sizes(lines: Iterable[str]) -> dict[str, object]:
+    """cactus-graphmap-split's contig_sizes.tsv: rows per reference contig (plus `_AMBIGUOUS_`), columns the reference,
+    every genome (haplotype), `_MINIGRAPH_`, min, max, avg. Per chromosome: the reference length and the haplotypes'
+    min/avg/max bp; per genome: the total assigned bp and the bp left ambiguous."""
+    cols, rows = table(lines)
+    if not cols:
+        return {}
+    skip = {cols[0], "_MINIGRAPH_", "min", "max", "avg"}
+    ref_col = cols[1] if len(cols) > 1 else ""
+    genomes = [c for c in cols[2:] if c not in skip]
+    chroms: dict[str, dict[str, object]] = {}
+    totals = {g: 0 for g in genomes}
+    ambiguous = {g: 0 for g in genomes}
+    for r in rows:
+        name = r.get(cols[0], "")
+        vals = {g: (_int(r.get(g)) or 0) for g in genomes}
+        if name == "_AMBIGUOUS_":
+            ambiguous = vals
+            continue
+        for g, v in vals.items():
+            totals[g] += v
+        present = [v for v in vals.values()]
+        chroms[name] = {"ref_bp": _int(r.get(ref_col)) or 0, "hap_bp_min": min(present) if present else 0,
+                        "hap_bp_max": max(present) if present else 0,
+                        "hap_bp_avg": round(sum(present) / len(present)) if present else 0, "hap_bp_total": sum(present)}
+    return {"genomes": genomes, "chromosomes": chroms, "assigned_bp": totals, "ambiguous_bp": ambiguous}
+
+
+def parse_name_map(lines: Iterable[str]) -> dict[str, dict[str, object]]:
+    """cohort_pangenome's name_map.tsv: {sample_id: {safe_name, trio}}."""
+    _cols, rows = table(lines)
+    return {r["sample_id"]: {"safe_name": r.get("safe_name", ""), "trio": r.get("trio", "").lower() == "true"} for r in rows if r.get("sample_id")}
 
 
 def tsv_dims(path: Path) -> tuple[list[str], int]:
@@ -734,3 +911,114 @@ def scan_tool_versions(code_dir: Path, roots: Iterable[str] = ("vendor/hifi-huma
                     if rel not in rec["files"]:  # type: ignore[operator]
                         rec["files"].append(rel)  # type: ignore[union-attr]
     return sorted(found.values(), key=lambda r: (str(r["tool"]).lower(), str(r["version"])))
+
+
+def parse_contig_qc(lines: Iterable[str], top: int = 30) -> dict[str, object]:
+    """The assembly stage's contig_qc.tsv (haplotype, contig, length, gc_pct, n_bp, gaps, telo_5p_bp, telo_3p_bp, err_bp,
+    dup_bp, hap_bp, col_bp): per haplotype the totals (contigs, bp, GC %, N bp, gaps, contigs with 0/1/2 telomeric ends,
+    telomere bp, Flagger bp per label) and the `top` contigs by non-Hap bp."""
+    _cols, rows = table(lines)
+    per_hap: dict[str, dict[str, object]] = {}
+    contigs: list[dict[str, object]] = []
+    for r in rows:
+        hap = r.get("haplotype", "")
+        if not hap:
+            continue
+        g = per_hap.setdefault(hap, {"haplotype": hap, "contigs": 0, "bp": 0, "gc_weighted": 0.0, "n_bp": 0, "gaps": 0, "telo_ends": {"0": 0, "1": 0, "2": 0},
+                                     "telo_bp": 0, "flagger_bp": {"err": 0, "dup": 0, "hap": 0, "col": 0}})
+        length = _int(r.get("length")) or 0
+        t5, t3 = _int(r.get("telo_5p_bp")) or 0, _int(r.get("telo_3p_bp")) or 0
+        fl = {k: (_int(r.get(k + "_bp")) or 0) for k in ("err", "dup", "hap", "col")}
+        g["contigs"] = int(g["contigs"]) + 1  # type: ignore[arg-type]
+        g["bp"] = int(g["bp"]) + length  # type: ignore[arg-type]
+        g["gc_weighted"] = float(g["gc_weighted"]) + (_float(r.get("gc_pct")) or 0.0) * length  # type: ignore[arg-type]
+        g["n_bp"] = int(g["n_bp"]) + (_int(r.get("n_bp")) or 0)  # type: ignore[arg-type]
+        g["gaps"] = int(g["gaps"]) + (_int(r.get("gaps")) or 0)  # type: ignore[arg-type]
+        g["telo_ends"][str((t5 > 0) + (t3 > 0))] += 1  # type: ignore[index]
+        g["telo_bp"] = int(g["telo_bp"]) + t5 + t3  # type: ignore[arg-type]
+        for k, v in fl.items():
+            g["flagger_bp"][k] += v  # type: ignore[index]
+        contigs.append({"haplotype": hap, "contig": r.get("contig"), "length": length, "gc_pct": _float(r.get("gc_pct")), "n_bp": _int(r.get("n_bp")) or 0,
+                        "telo_ends": (t5 > 0) + (t3 > 0), "non_hap_bp": fl["err"] + fl["dup"] + fl["col"], **{k + "_bp": v for k, v in fl.items()}})
+    for g in per_hap.values():
+        bp = int(g["bp"])  # type: ignore[arg-type]
+        g["gc_pct"] = round(float(g["gc_weighted"]) / bp, 2) if bp else None  # type: ignore[arg-type]
+        del g["gc_weighted"]
+        fbp: dict[str, int] = g["flagger_bp"]  # type: ignore[assignment]
+        labelled = sum(fbp.values())
+        g["non_hap_pct"] = round((fbp["err"] + fbp["dup"] + fbp["col"]) / labelled * 100, 2) if labelled else None
+    contigs.sort(key=lambda c: (-int(c["non_hap_bp"]), -int(c["length"])))  # type: ignore[call-overload]
+    return {"haplotypes": list(per_hap.values()), "top_contigs": contigs[:top]}
+
+
+def parse_call_spectra(lines: Iterable[str]) -> dict[str, object]:
+    """The assembly_call stage's call_spectra.tsv (caller, filter_class, type, size_bin, contig_class, count) as nested counts:
+    per caller {by_filter: {class: n}, by_type: {type: {filter_class: n}}, sv_sizes: {type: {size_bin: n}} (PASS, 50 bp and
+    longer), pass_total, total}."""
+    _cols, rows = table(lines)
+    out: dict[str, dict[str, object]] = {}
+    for r in rows:
+        caller = r.get("caller", "")
+        n = _int(r.get("count")) or 0
+        if not caller or not n:
+            continue
+        c = out.setdefault(caller, {"by_filter": {}, "by_type": {}, "sv_sizes": {}, "pass_total": 0, "total": 0})
+        fc, kind, size_bin = r.get("filter_class", ""), r.get("type", ""), r.get("size_bin", "")
+        c["by_filter"][fc] = c["by_filter"].get(fc, 0) + n  # type: ignore[index]
+        c["by_type"].setdefault(kind, {})  # type: ignore[union-attr]
+        c["by_type"][kind][fc] = c["by_type"][kind].get(fc, 0) + n  # type: ignore[index]
+        c["total"] = int(c["total"]) + n  # type: ignore[arg-type]
+        if fc == "PASS":
+            c["pass_total"] = int(c["pass_total"]) + n  # type: ignore[arg-type]
+            if kind in ("INS", "DEL", "INV", "OTHER"):
+                c["sv_sizes"].setdefault(kind, {})  # type: ignore[union-attr]
+                c["sv_sizes"][kind][size_bin] = c["sv_sizes"][kind].get(size_bin, 0) + n  # type: ignore[index]
+    return out
+
+
+def parse_member_stats(lines: Iterable[str]) -> list[dict[str, object]]:
+    """cohort_pangenome's members.tsv: one row per member, numbers converted."""
+    _cols, rows = table(lines)
+    return [{k: _num(v) for k, v in r.items()} for r in rows if r.get("sample_id")]
+
+
+def parse_genome_bp(lines: Iterable[str]) -> dict[str, object]:
+    """A chromosome's genome-bp.tsv (genome sample#haplotype, paths, bp): the reference row apart, the haplotypes' bp
+    min/avg/max and the number of haplotypes with any sequence in the graph."""
+    _cols, rows = table(lines)
+    ref_bp = None
+    haps: dict[str, int] = {}
+    for r in rows:
+        g = r.get("genome", "")
+        bp = _int(r.get("bp")) or 0
+        if g.startswith("GRCh38") or g.startswith("_"):
+            ref_bp = bp
+        elif g:
+            haps[g] = bp
+    vals = list(haps.values())
+    return {"ref_bp": ref_bp, "haplotypes": len(haps), "bp_min": min(vals) if vals else None, "bp_max": max(vals) if vals else None,
+            "bp_avg": round(sum(vals) / len(vals)) if vals else None, "bp_total": sum(vals)}
+
+
+def parse_degree_stats(lines: Iterable[str]) -> dict[str, int]:
+    """vg stats -D: {degree: node sides} (the Degree and Sides columns), degrees of 8 and above summed as `8+`."""
+    _cols, rows = table(lines)
+    out: dict[str, int] = {}
+    for r in rows:
+        d, sides = _int(r.get("Degree")), _int(r.get("Sides"))
+        if d is None or sides is None:
+            continue
+        key = str(d) if d < 8 else "8+"
+        out[key] = out.get(key, 0) + sides
+    return out
+
+
+def parse_refgaps(lines: Iterable[bytes]) -> dict[str, dict[str, int]]:
+    """A refgaps BED (chrom start end refgap): per chromosome the gaps and their bp."""
+    out: dict[str, dict[str, int]] = {}
+    for chrom, start, end in _bed_intervals(lines):
+        g = out.setdefault(chrom, {"n": 0, "bp": 0})
+        g["n"] += 1
+        g["bp"] += end - start
+    return out
+

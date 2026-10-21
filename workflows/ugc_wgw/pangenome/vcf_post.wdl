@@ -131,7 +131,7 @@ PY
 
 task ugc_wgw_pangenome_freq_summary {
   meta {
-    description: "The frequency VCF of the graph (sites only, AC/AN/AF/NS and the XX/XY strata from bcftools +fill-tags) read once into the cohort_freq summary shape (resource pangenome; metric, key, value): members by stratum and sex source, records by type (SNV, MNV, INDEL below 50 bp, INS/DEL from 50 bp, MIXED; by the allele length difference), by contig class and by FILTER, call rate (NS over members; a missing genotype means no assembled sequence at the site), the cohort_freq allele-frequency bins, and records with carriers per stratum; plus the samples table."
+    description: "The frequency VCF of the graph (sites only, AC/AN/AF/NS and the XX/XY strata from bcftools +fill-tags) read once into the cohort_freq summary shape (resource pangenome; metric, key, value): members by stratum and sex source, records by type (SNV, MNV, INDEL below 50 bp, INS/DEL from 50 bp, MIXED; by the allele length difference), by contig class, by FILTER, by nesting level (INFO/LV of vg deconstruct: 0 top level, 1, 2+), by vcfwave's TYPE and by its allele LEN bins (the records vcfwave realigned carry them; the rest count as '.'), call rate (NS over members; a missing genotype means no assembled sequence at the site), the cohort_freq allele-frequency bins, and records with carriers per stratum; plus the samples table."
     outputs: {
       summary: {
         description: "<out_prefix>.summary.tsv"
@@ -187,7 +187,7 @@ task ugc_wgw_pangenome_freq_summary {
     bcftools --version | head -1 >&2
     has_tag() { bcftools view --header-only "~{freq_vcf}" | grep -q "^##INFO=<ID=$1,"; }
     fmt='%CHROM\t%POS\t%REF\t%ALT\t%FILTER\t%INFO/AC\t%INFO/AN\t%INFO/AF\t%INFO/NS'
-    for t in AC_XX AC_XY; do if has_tag $t; then fmt="$fmt\t%INFO/$t"; else fmt="$fmt\t."; fi; done
+    for t in AC_XX AC_XY LV TYPE LEN; do if has_tag $t; then fmt="$fmt\t%INFO/$t"; else fmt="$fmt\t."; fi; done
     bcftools query --format "$fmt\n" "~{freq_vcf}" > sites.tsv
     python3 - "~{out_prefix}" sites.tsv "~{vcf_samples}" "~{write_lines(sample_ids)}" "~{write_lines(sample_sexes)}" "~{write_lines(sample_sex_sources)}" <<'PY'
 import collections, sys
@@ -217,12 +217,21 @@ def nums(field):
         except ValueError: pass
     return out
 by_type = collections.Counter(); by_class = collections.Counter(); by_filter = collections.Counter(); bins = collections.Counter()
+by_level = collections.Counter(); by_vg_type = collections.Counter(); by_len = collections.Counter()
+len_edges = [(2, "1"), (10, "2-9"), (50, "10-49"), (1000, "50-999"), (10000, "1k-9.9k")]
 strata = {"XX": 0, "XY": 0}
 total = ac_gt0 = singletons = low_ns = ns_n = 0; ns_sum = 0.0
 for line in open(sites):
     f = line.rstrip("\n").split("\t")
     if len(f) < 11: continue
     chrom, pos, ref, alt, filt, ac, an, af, ns, acxx, acxy = f[:11]
+    lv, vg_type, vg_len = (f[11:14] + [".", ".", "."])[:3]
+    by_level["." if lv in ("", ".") else ("2+" if lv.isdigit() and int(lv) >= 2 else lv)] += 1
+    for t in (vg_type.split(",") if vg_type not in ("", ".") else ["."]): by_vg_type[t] += 1
+    lens = nums(vg_len)
+    if lens:
+        m = max(abs(x) for x in lens)
+        by_len[next((label for edge, label in len_edges if m < edge), ">=10k")] += 1
     total += 1
     alts = alt.split(",")
     kinds = set()
@@ -249,6 +258,10 @@ add(r, "records", "total", total)
 for k, v in sorted(by_type.items()): add(r, "records_by_type", k, v)
 for k, v in sorted(by_class.items()): add(r, "records_by_contig_class", k, v)
 for k, v in sorted(by_filter.items()): add(r, "records_by_filter", k, v)
+for k, v in sorted(by_level.items()): add(r, "records_by_level", k, v)
+for k, v in sorted(by_vg_type.items()): add(r, "records_by_vg_type", k, v)
+for k in [label for _e, label in len_edges] + [">=10k"]:
+    if by_len.get(k): add(r, "records_by_len_bin", k, by_len[k])
 add(r, "records", "ac_gt0", ac_gt0)
 add(r, "records", "singletons", singletons)
 for k in ("<0.001", "<0.01", "<0.05", ">=0.05"): add(r, "records_by_af_bin", k, bins[k])

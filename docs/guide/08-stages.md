@@ -9,11 +9,12 @@ in [workflow-graphs.md](workflow-graphs.md). Upstream documents its tools in
 
 Every stage takes `ugc_wgw_version` (echoed back and checked), `ref_map_file`
 (the one rendered map, chapter 04), `backend` (`HPC`) and `preemptible` from
-the driver; `cohort_merge` and `assembly` also take `ugc_wgw_container_registry`
-for the images this repository builds. `ugc-wgw stage-inputs --stage <stage>`
-prints these tables from the installed WDL: every input with its type,
-default, description, who fills it and the project's override; `--nested`
-adds the inputs of the tasks inside (chapter 05).
+the driver; `cohort_merge`, `assembly` and `assembly_call` also take
+`ugc_wgw_container_registry` for the images this repository builds.
+`ugc-wgw stage-inputs --stage <stage>` prints these tables from the
+installed WDL: every input with its type, default, description, who fills it
+and the project's override; `--nested` adds the inputs of the tasks inside
+(chapter 05).
 
 Per-sample resource requests are upstream's own and unchanged: every task's
 request is in the generated [inventory](task-resources.md), and chapter 12
@@ -377,6 +378,9 @@ flowchart TD
   fa --> fl["HMM-Flagger: reads to hap1+hap2 (minimap2 map-hifi), correct_bam, bam2cov, hmm_flagger"]
   cf --> fl
   fl --> fb[/"flagger_bed, flagger_summary"/]
+  fb --> cq["contig QC: seqtk comp, gap, telo per haplotype + Flagger bp per contig"]
+  fa --> cq
+  cq --> cqo[/"contig_qc"/]
   y1 --> te["yak trioeval per haplotype (trio only)"]
   y2 --> te
   fa --> te
@@ -394,6 +398,9 @@ the per-base coverage into `Err`, `Dup`, `Hap` and `Col` regions
 (`flagger_bed`, with the shares in `flagger_summary`); trio-binned samples
 also get `yak trioeval` per haplotype against the parental k-mer tables,
 with the thresholds the binning used (switch and Hamming error rates).
+Since 0.12.0 a small task (seqtk, in the Flagger image) writes one row per
+contig with its length, GC, N bases and runs, telomeric bases at each end
+(the assembly's motif) and Flagger's bases per label (`contig_qc`).
 
 | Driver fills | You may override |
 |---|---|
@@ -416,10 +423,11 @@ later releases change only the stages after the contract, and
 version (chapter 10).
 
 Outputs: per-haplotype FASTAs and statistics, graphs, Flagger's BED and
-summary, trioeval per haplotype (trio), `trio`, `hap1_parent`, `hap2_parent`
-(chapter 07). `haplotype_labels` gives the order of every per-haplotype
-array: `hap1`, `hap2`, or `pat`, `mat` when trio-binned. The QC flags the
-summary derives from these (chapter 11, `asm_*` thresholds) feed
+summary, the per-contig QC table, trioeval per haplotype (trio), `trio`,
+`hap1_parent`, `hap2_parent` (chapter 07). `haplotype_labels` gives the
+order of every per-haplotype array: `hap1`, `hap2`, or `pat`, `mat` when
+trio-binned. The QC flags the summary derives from these (chapter 11,
+`asm_*` thresholds) feed
 `ugc-wgw summary --pass-list`, the sample list a pangenome cohort is frozen
 from (chapter 06).
 
@@ -448,8 +456,11 @@ flowchart TD
   rel --> fp
   rv[/"read_small_variant_vcf (singleton or downstream, any version)"/] --> con["PASS SNVs inside reliable.bed: genotype concordance, het loss, assembly-only hets"]
   fd --> con
-  fd --> out[/"dipcall_vcf, pav_vcf, chrom_coverage, inferred_karyotype, reliable_bed, concordance"/]
+  fd --> sp["both VCFs counted by FILTER class, type, size, contig class"]
+  fp --> sp
+  fd --> out[/"dipcall_vcf, pav_vcf, chrom_coverage, inferred_karyotype, reliable_bed, concordance, call_spectra"/]
   fp --> out
+  sp --> out
 ```
 
 Text version: minimap2 aligns each haplotype once (SAM, then `samtools sort`
@@ -468,7 +479,10 @@ to see everything. With a read-based VCF, dipcall's `PASS` SNVs are compared
 with the read-based ones inside `reliable.bed` (inside `dip.bed` when there
 is no Flagger mask): genotype concordance, the het-loss rate (read hets the
 assembly calls homozygous or not at all, the signature of collapsed
-haplotypes) and the assembly's hets the reads lack.
+haplotypes) and the assembly's hets the reads lack. Since 0.12.0 both
+primary VCFs are also counted by FILTER class, type, size bin and contig
+class (`call_spectra`, a bcftools query of about a minute), which is what
+the summary's PASS-versus-masked panels read.
 
 | Driver fills | You may override |
 |---|---|
@@ -512,10 +526,13 @@ flowchart TD
   end
   chrom --> post["concat; sample IDs restored; non-trio members unphased;<br/>header lines (the raw and the vcfwave VCF)"]
   post --> freq["ugc_wgw_bcftools_freq per chromosome on the vcfwave VCF,<br/>missing genotypes kept; concat; summary"]
+  post --> ms["bcftools stats per chromosome: each member's genotypes, gathered"]
+  chrom --> gs[/"path-stats, refgaps, genome-bp, degree per chromosome"/]
   sv[/"cohort_merge SV VCF of pangenome_sv_cohort, else of this cohort, if any"/] --> tv["truvari bench, 50 bp and longer, sequence comparison off"]
   post --> tv
-  post --> out[/"pangenome_vcf, pangenome_wave_vcf, chrom_gbzs, chrom_gfas,<br/>freq_vcf, freq_summary, truvari_summary"/]
+  post --> out[/"pangenome_vcf, pangenome_wave_vcf, chrom_gbzs, chrom_gfas,<br/>freq_vcf, freq_summary, member_stats, truvari_summary"/]
   freq --> out
+  ms --> out
   tv --> out
 ```
 
@@ -534,10 +551,16 @@ restore the sample IDs (`bcftools reheader`), unphase the members that were
 not trio-binned (`+setGT`) and add the header lines (cohort, chromosomes,
 the ambiguity rule, the phase policy); the `cohort_freq` tasks run per
 chromosome on the vcfwave VCF with missing genotypes kept, their shards are
-concatenated and `ugc_wgw_pangenome_freq_summary` writes the summary; with a
-read-based SV merge, a biallelic copy of the vcfwave VCF (`bcftools norm -m
--any`; truvari refuses multiallelic records) goes through
-`ugc_wgw_truvari_bench`; the manifest.
+concatenated and `ugc_wgw_pangenome_freq_summary` writes the summary (since
+0.12.0 also records by nesting level, vcfwave type and allele length);
+`ugc_wgw_pangenome_member_stats` runs `bcftools stats --samples -` per
+chromosome on the same VCF and the gather task sums each member's
+genotypes, singletons, missing calls and call rate (`member_stats`); the
+chromosome task keeps the join's path statistics and reference gaps and adds
+the bases per genome and the node degree histogram; with a read-based SV
+merge, a biallelic copy of the vcfwave VCF (`bcftools norm -m -any`; truvari
+refuses multiallelic records) goes through `ugc_wgw_truvari_bench`; the
+manifest.
 
 Contigs enter a chromosome's graph only when enough of their length aligns
 to one reference contig (75, 50 or 25 % below 100 kb, below 1 Mb and from 1
@@ -569,6 +592,7 @@ default rule gives 64 GB for every human chromosome but chr1 and chr2 (80
 and 78 GB). Chapter 12 gets the scaling table once the pilot has run.
 
 Outputs: the graph's cohort VCF and its vcfwave form, the GBZ and GFA per
-chromosome with their statistics and logs, the name map and the split's
-tables, the frequency VCF with its summary and samples tables, truvari's
-figures (chapter 07).
+chromosome with their statistics (graph size, path fragments, reference
+gaps, bases per genome, node degrees) and logs, the name map and the split's
+tables, the frequency VCF with its summary and samples tables, the members'
+genotype statistics, truvari's figures (chapter 07).

@@ -12,7 +12,7 @@ shared by all versions.
 
 | File | Purpose |
 |---|---|
-| `ugc-pacbio-wgw-<v>.tar` | The bundle. About 26 GB with all images, the reference data container among them. |
+| `ugc-pacbio-wgw-<v>.tar` | The bundle. About 27 GB with all images (33 in 0.11.0), the reference data container among them. |
 | `ugc-pacbio-wgw-<v>.tar.sha256` | Checksum of the tar; the installer verifies it when present. |
 | `install-bundle.sh` | The installer, shipped loose so it can run before anything is unpacked. It is also inside the tar. |
 
@@ -194,7 +194,7 @@ tasks would need more than this, is in chapter 12.
 ### 3. Verify without installing
 
 ```bash
-./install-bundle.sh --bundle ugc-pacbio-wgw-0.8.0.tar --prefix /proj/ugc --verify-only
+./install-bundle.sh --bundle ugc-pacbio-wgw-0.11.0.tar --prefix /proj/ugc --verify-only
 ```
 
 This checks the tar's `.sha256`, unpacks into `<prefix>/.staging/`, verifies
@@ -204,12 +204,12 @@ from the wheels, runs `miniwdl check --strict` on every entrypoint, checks
 that the `ugc_wgw_resources` task plugin is registered in that environment,
 prints the engine and plugin versions, says whether the reference data
 container is in the bundle, and removes the staging directory. It ends with
-`verify-only passed for ugc-pacbio-wgw-0.8.0`.
+`verify-only passed for ugc-pacbio-wgw-0.11.0`.
 
 ### 4. Install and activate
 
 ```bash
-./install-bundle.sh --bundle ugc-pacbio-wgw-0.8.0.tar --prefix /proj/ugc \
+./install-bundle.sh --bundle ugc-pacbio-wgw-0.11.0.tar --prefix /proj/ugc \
     --references /proj/ugc/references --site site.cfg --activate
 ```
 
@@ -219,19 +219,19 @@ version is installed but not current. The last lines of the output are the
 paths the driver needs and the `ugc-wgw init` line to copy:
 
 ```
-install_dir=/proj/ugc/versions/0.8.0
-code=/proj/ugc/versions/0.8.0/code
-miniwdl=/proj/ugc/versions/0.8.0/venv/bin/miniwdl
-cfg=/proj/ugc/versions/0.8.0/miniwdl.cfg
-sif_cache=/proj/ugc/versions/0.8.0/sif
+install_dir=/proj/ugc/versions/0.11.0
+code=/proj/ugc/versions/0.11.0/code
+miniwdl=/proj/ugc/versions/0.11.0/venv/bin/miniwdl
+cfg=/proj/ugc/versions/0.11.0/miniwdl.cfg
+sif_cache=/proj/ugc/versions/0.11.0/sif
 references=/proj/ugc/references/hifi-wdl-resources-v4.0.0-GRCh38_GIABv3
-ref_map=/proj/ugc/versions/0.8.0/references/ugc_wgw_ref_map.GRCh38_GIABv3.tsv
-inputs_templates=/proj/ugc/versions/0.8.0/inputs
-ugc_wgw=/proj/ugc/versions/0.8.0/code/bin/ugc-wgw
+ref_map=/proj/ugc/versions/0.11.0/references/ugc_wgw_ref_map.GRCh38_GIABv3.tsv
+inputs_templates=/proj/ugc/versions/0.11.0/inputs
+ugc_wgw=/proj/ugc/versions/0.11.0/code/bin/ugc-wgw
 resources=/proj/ugc/resources.tsv
 profiles=/proj/ugc/profiles
-plugin=ugc-wgw-miniwdl 0.3.0
-# next: /proj/ugc/versions/0.8.0/code/bin/ugc-wgw init <project_dir> --install /proj/ugc/versions/0.8.0 --ref-map ... [--profile cpu|parabricks]
+plugin=ugc-wgw-miniwdl 0.5.0
+# next: /proj/ugc/versions/0.11.0/code/bin/ugc-wgw init <project_dir> --install /proj/ugc/versions/0.11.0 --ref-map ... [--profile cpu|parabricks]
 ```
 
 The rendered map is checked against the container's `manifest.json`; a

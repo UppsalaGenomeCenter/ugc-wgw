@@ -31,8 +31,8 @@ ugc-wgw init /proj/ugc/projects/cohort2026 --install /proj/ugc/current \
 A profile is a JSON file with the project keys that depend on the cluster
 and the sample set: `stage_inputs`, `deepvariant`, `gpu_type`,
 `parabricks_gpus`, `max_inflight`, `poll_interval`, `assembly_use_parents`,
-`prices`, `summary_thresholds` and `input_thresholds`, plus a
-`description`. `NAME` is looked
+`pangenome_sv_cohort`, `prices`, `summary_thresholds` and
+`input_thresholds`, plus a `description`. `NAME` is looked
 up as `<prefix>/profiles/NAME.json` (the installer places the examples
 there once and never overwrites them, so a site edits them in place), then
 as `backends/hpc/profiles/NAME.json` in the code; a path to a file works
@@ -54,7 +54,7 @@ Provenance.
 | `--venv DIR` | | Engine virtual environment, used only to report the miniwdl-slurm version in manifests. |
 | `--results DIR` | the project dir | Results root. |
 | `--ref-map FILE` | required | The reference map rendered by the installer (`ref_map=` in its report): reference files, scalars and scatter regions of one build. Passed to every stage. |
-| `--registry STR` | `ghcr.io/uppsalagenomecenter` | Registry prefix of the ugc-built images (svx, trgt-lps, hifiasm), as they were cached. |
+| `--registry STR` | `ghcr.io/uppsalagenomecenter` | Registry prefix of the ugc-built images (hifiasm, minimap2, svx, trgt-lps), as they were cached. |
 | `--profile NAME\|FILE` | none | A site profile applied before the flags below (above). |
 | `--max-inflight N` | `4` | Default number of concurrent miniwdl runs for `submit`. |
 | `--poll-interval SEC` | `30` | Default seconds between polls in `submit`. |
@@ -82,12 +82,13 @@ sorted by key.
 | `code_dir`, `miniwdl`, `miniwdl_cfg`, `venv_dir` | from `init` | Engine paths. `venv_dir` may be `null`. |
 | `results_dir` | project dir | Results root. |
 | `ref_map_file` | from `init` | The reference map. The 0.1.0 keys `ugc_wgw_ref_map_file` and `tertiary_map_file` are ignored with a warning. |
-| `ugc_wgw_container_registry` | `ghcr.io/uppsalagenomecenter` | Passed to `cohort_merge` and `assembly`. |
+| `ugc_wgw_container_registry` | `ghcr.io/uppsalagenomecenter` | Passed to `cohort_merge`, `assembly` and `assembly_call`. |
 | `backend` | `"HPC"` | Passed to every stage; selects upstream's HPC backend configuration. |
 | `preemptible` | `true` | Passed to every stage; has no effect on the HPC. |
 | `max_inflight` | `4` | Concurrency cap for `submit` unless overridden on the command line. |
 | `poll_interval` | `30.0` | Seconds between polls. |
 | `assembly_use_parents` | `true` | Master switch for trio binning in assembly mode. |
+| `pangenome_sv_cohort` | `""` | The cohort whose `cohort_merge` SV VCF `cohort_pangenome` compares its graph with (truvari); empty = the pangenome cohort's own merge, when it has one. |
 | `deepvariant` | `"cpu"` | `cpu`, `gpu` or `parabricks`: fills `use_gpu`, `use_parabricks_deepvariant` and Parabricks' GPU count for `singleton` and `upstream`; the GPU type goes to the plugin at submit (chapter 12). |
 | `gpu_type`, `parabricks_gpus` | `""`, `4` | The gres type (applied by the plugin at submit, not an input: changing it keeps the call cache; empty = any GPU of the partition) and the Parabricks GPU count (even) behind that switch. |
 | `stage_inputs` | `{}` | Per-stage input overrides, below. |
@@ -144,8 +145,8 @@ entrypoint (the driver itself sets
 `upstream.parabricks_deepvariant.run_parabricks_deepvariant.gpuCount` for
 Parabricks); the driver checks only that the first segment is a call of the
 entrypoint, miniwdl checks the rest when the run starts, and
-`ugc-wgw stage-inputs --nested` checks it before. The DeepVariant flavour is not a stage input but
-the `deepvariant` key above, which sets `use_gpu` and
+`ugc-wgw stage-inputs --nested` checks it before. The DeepVariant flavour is
+not a stage input but the `deepvariant` key above, which sets `use_gpu` and
 `use_parabricks_deepvariant` consistently for both stages (the GPU type
 reaches the plugin outside the inputs, chapter 12); `stage_inputs` still
 win over it.
@@ -283,14 +284,18 @@ Freeze when the membership is final. The cohort is immutable and the order is
 the order of every array the cohort stages receive. A joint-mode `submit`
 needs `--cohort` from the first stage on, because the plan for `downstream`
 depends on it; a standalone `submit` needs it only when `cohort_merge` should
-run. There is no unfreeze; a changed membership is a new cohort ID, and the
-cohort stages run again for it while the per-sample stages are re-used.
+run, and an assembly-mode `submit` only when `cohort_pangenome` should run
+(chapter 06 shows how that cohort is frozen from the assembly QC). There is
+no unfreeze; a changed membership is a new cohort ID, and the cohort stages
+run again for it while the per-sample stages are re-used.
 
 ## Assembly mode and the pedigree
 
-Assembly has no cohort and no prerequisites. When a sample is submitted in
-assembly mode, the driver decides between trio binning and sample mode from
-the pedigree at input-generation time:
+`assembly` and `assembly_call` have no cohort, and `assembly` has no
+prerequisites; `cohort_pangenome` needs a frozen cohort and every member's
+`assembly` and `assembly_call` at the current version (or `--any-version`).
+When a sample is submitted in assembly mode, the driver decides between trio
+binning and sample mode from the pedigree at input-generation time:
 
 ```mermaid
 flowchart TD

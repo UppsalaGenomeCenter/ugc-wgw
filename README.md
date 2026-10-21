@@ -21,8 +21,11 @@ data, into one verifiable offline bundle.
   repeats (`trgt merge`, trgt-lps) and small variants (GLnexus), and compute
   allele frequencies. Two modes: standalone (per-sample DeepVariant, cohort
   merges afterwards) and joint (GLnexus genotypes before phasing, as
-  upstream's family workflow does). De novo assembly and assembly-based calling (hifiasm, trio-binned
-  when parents are present) is a third mode.
+  upstream's family workflow does). A third mode assembles each sample de
+  novo (hifiasm, trio-binned when parents are present), checks the assembly
+  (HMM-Flagger, yak trioeval), calls variants from it (dipcall, PAV 3) and
+  builds the cohort's pangenome graph (Minigraph-Cactus) with its VCFs and
+  allele frequencies.
 - **A driver, `ugc-wgw`,** that registers samples, freezes cohorts, generates
   every input file, submits runs at a chosen concurrency, retries transient
   failures, records provenance in a manifest per run, and reports
@@ -71,29 +74,33 @@ python3 -m venv .venv && .venv/bin/pip install -r bundle/requirements.txt
 scripts/make-bundle.sh --version vX.Y.Z --out bundle/out --python-version 3.12
 ```
 
-The three images this repository builds itself (svx, trgt-lps, hifiasm) are
-published on GHCR under `ghcr.io/uppsalagenomecenter/`; `image_manifest.ugc-wgw.txt` pins
-them by digest, and `containers/` holds their Dockerfiles.
+The four images this repository builds itself (hifiasm, minimap2, svx,
+trgt-lps) are published on GHCR under `ghcr.io/uppsalagenomecenter/`;
+`image_manifest.ugc-wgw.txt` pins them by digest, together with the published
+images of the assembly stages (dipcall, HMM-Flagger, secphase, PAV 3,
+Minigraph-Cactus, Truvari), and `containers/` holds the Dockerfiles of ours.
 
 ## Documentation
 
 The operator guide is [`docs/guide/`](docs/guide/README.md): a quick start,
-the concepts, choosing a mode, installing, project setup, running, results,
-the stages, troubleshooting, upgrading, a command reference and the task
-resource model. `bin/README.md` is the driver's reference page. The design
+an overview, the concepts, choosing a mode, installing, project setup,
+running, results, the stages, troubleshooting, upgrading, a command reference
+and the task resource model, plus the generated call graphs of the
+entrypoints and the inventory of what every task asks SLURM for.
+`bin/README.md` is the driver's reference page. The design
 notes and the per-workflow derivation notes of the internal repository are
 not part of this copy; ask if you need them.
 
 ## Layout
 
 ```
-workflows/        the seven entrypoints (ugc_wgw_*.wdl), our tasks (ugc_wgw/), one override
+workflows/        the nine entrypoints (ugc_wgw_*.wdl), our tasks (ugc_wgw/), three overrides (overrides/)
 vendor/           PacBio's HiFi-human-WGS-WDL at the pinned tag (upstream.lock)
 bin/              the ugc-wgw driver (stdlib Python)
 plugins/          the miniwdl task plugin that applies the site resource policy
 scripts/          bundle build and install, SIF cache, image digests, manifest conversion
 backends/hpc/     miniwdl.cfg and inputs templates rendered by the installer
-references/       reference map template and scatter regions (references.lock)
+references/       reference map template, scatter regions and the assembly references (references.lock)
 containers/       Dockerfiles of the images we build
 tests/            unit tests, static checks, bundle round trip, smoke harness
 docs/guide/       the operator guide
@@ -115,8 +122,9 @@ ugc-wgw is released under the MIT licence (`LICENSE`). The vendored
 workflows are PacBio's HiFi-human-WGS-WDL, BSD-3-Clause-Clear
 (`vendor/hifi-human-wgs-wdl/LICENSE`); the tools it runs (pbmm2,
 DeepVariant, HiPhase, sawfish, TRGT, Paraphase, mitorsaw, MethBat, StarPhase,
-kivvi, pbjam, GLnexus, hifiasm, svx, trgt-lps and others) are cited in the
-analysis summaries and in `vendor/hifi-human-wgs-wdl/docs/`.
+kivvi, pbjam, GLnexus, svx, trgt-lps, hifiasm, minimap2, yak, HMM-Flagger
+and secphase, dipcall, PAV 3, Minigraph-Cactus, Truvari and others) are cited
+in the analysis summaries and in `vendor/hifi-human-wgs-wdl/docs/`.
 
 Logo fixed by **[Gemini](https://gemini.google.com/)** <br>
 Code fixed by **[Claude](https://claude.ai/)** <br>

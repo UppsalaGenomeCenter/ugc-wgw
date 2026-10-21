@@ -165,6 +165,7 @@ def make_outputs(stage: str, inputs: dict[str, object], run_dir: pathlib.Path,
         files["assembler_version"] = f"{sid}.asm.hifiasm.version.txt"
         files["flagger_bed"] = f"{sid}.asm.flagger.bed"
         files["flagger_summary"] = f"{sid}.asm.flagger.summary.tsv"
+        files["contig_qc"] = f"{sid}.asm.contig_qc.tsv"
         if v.get("keep_read_alignment"):
             f("read_alignment_bam", f"{sid}.asm.reads.bam")
         strings.update({"trio": trio, "haplotype_labels": ["pat", "mat"] if trio else haps, "assembler_used": str(v.get("assembler") or "hifiasm")})
@@ -189,6 +190,7 @@ def make_outputs(stage: str, inputs: dict[str, object], run_dir: pathlib.Path,
         files["pav_raw_vcf"] = f"{sid}.pav.raw.vcf.gz"
         files["pav_raw_vcf_index"] = f"{sid}.pav.raw.vcf.gz.csi"
         files["pav_callable_beds"] = [f"{sid}.pav.callable_ref_{h}.bed" for h in ("h1", "h2")]
+        files["call_spectra"] = f"{sid}.asm.call_spectra.tsv"
         if v.get("flagger_bed"):
             files["unreliable_beds"] = [f"{sid}.{h}.asm.unreliable.bed" for h in labels]
             files["reliable_bed"] = f"{sid}.asm.reliable.bed"
@@ -211,6 +213,12 @@ def make_outputs(stage: str, inputs: dict[str, object], run_dir: pathlib.Path,
         files["chrom_gfas"] = [f"{pre}.{c}.gfa.gz" for c in chroms]
         files["chrom_graph_stats"] = [f"{pre}.{c}.graph-stats.tsv" for c in chroms]
         files["chrom_logs"] = [f"{pre}.{c}.cactus-logs.tar.gz" for c in chroms]
+        files["chrom_path_stats"] = [f"{pre}.{c}.path-stats.tsv.gz" for c in chroms]
+        files["chrom_refgaps"] = [f"{pre}.{c}.refgaps.bed.gz" for c in chroms]
+        files["chrom_genome_bp"] = [f"{pre}.{c}.genome-bp.tsv" for c in chroms]
+        files["chrom_degree_stats"] = [f"{pre}.{c}.degree.tsv" for c in chroms]
+        files["member_stats_shards"] = [f"{pre}.wave.{c}.stats.txt" for c in chroms]
+        files["member_stats"] = f"{pre}.members.tsv"
         files["name_map"] = f"{sid}.pangenome.name_map.tsv"
         files["split_log"] = f"{pre}.split.log"
         files["contig_sizes"] = f"{pre}.contig_sizes.tsv"

@@ -29,6 +29,18 @@ task ugc_wgw_cactus_chrom {
       graph_stats: {
         description: "graph-stats.tsv: nodes, edges, length"
       },
+      path_stats: {
+        description: "<cohort_id>.pangenome.<ref_name>.<chromosome>.path-stats.tsv.gz: cactus-graphmap-join's path-stats (ref_chrom, path, length), one row per path fragment of every haplotype in the graph"
+      },
+      refgaps: {
+        description: "<cohort_id>.pangenome.<ref_name>.<chromosome>.refgaps.bed.gz: the join's reference intervals the graph does not cover"
+      },
+      genome_bp: {
+        description: "<cohort_id>.pangenome.<ref_name>.<chromosome>.genome-bp.tsv: paths and bp per genome (sample#haplotype) in the chromosome's graph"
+      },
+      degree_stats: {
+        description: "<cohort_id>.pangenome.<ref_name>.<chromosome>.degree.tsv: vg stats -D of the GBZ (node degree histogram)"
+      },
       logs: {
         description: "The four Cactus logs, tarred"
       }
@@ -112,8 +124,15 @@ task ugc_wgw_cactus_chrom {
     mv "join/~{chromosome}.gbz" "~{out_prefix}.gbz"
     mv "join/~{chromosome}.gfa.gz" "~{out_prefix}.gfa.gz"
     cp "join/~{chromosome}.stats/graph-stats.tsv" "~{out_prefix}.graph-stats.tsv"
+    # the join's other statistics (deleted with join/ otherwise): every path fragment's length and the reference gaps
+    cp "join/~{chromosome}.stats/path-stats.tsv.gz" "~{out_prefix}.path-stats.tsv.gz"
+    cp "join/~{chromosome}.stats/refgaps.bed.gz" "~{out_prefix}.refgaps.bed.gz"
+    # bp per genome (PanSN sample#haplotype) over its path fragments, and the node degree histogram of the GBZ
+    zcat "~{out_prefix}.path-stats.tsv.gz" | awk -F'\t' 'NR > 1 && NF >= 3 { n = split($2, a, "#"); g = (n >= 2) ? a[1] "#" a[2] : $2; paths[g]++; bp[g] += $3 }
+      END { print "genome\tpaths\tbp"; for (g in paths) print g "\t" paths[g] "\t" bp[g] }' | { read -r h; echo "$h"; sort; } > "~{out_prefix}.genome-bp.tsv"
+    vg stats -D "~{out_prefix}.gbz" > "~{out_prefix}.degree.tsv"
     tar -czf "~{out_prefix}.cactus-logs.tar.gz" step4.minigraph.log step5.graphmap.log step6.align.log step7.join.log
-    cat "~{out_prefix}.graph-stats.tsv" >&2
+    cat "~{out_prefix}.graph-stats.tsv" "~{out_prefix}.genome-bp.tsv" >&2
     rm -rf work tmp split construct map align join js4 js5 js6 js7
   >>>
 
@@ -125,6 +144,10 @@ task ugc_wgw_cactus_chrom {
     File gbz = "~{out_prefix}.gbz"
     File gfa = "~{out_prefix}.gfa.gz"
     File graph_stats = "~{out_prefix}.graph-stats.tsv"
+    File path_stats = "~{out_prefix}.path-stats.tsv.gz"
+    File refgaps = "~{out_prefix}.refgaps.bed.gz"
+    File genome_bp = "~{out_prefix}.genome-bp.tsv"
+    File degree_stats = "~{out_prefix}.degree.tsv"
     File logs = "~{out_prefix}.cactus-logs.tar.gz"
   }
 

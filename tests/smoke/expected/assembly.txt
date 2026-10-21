@@ -8,3 +8,4 @@ assembler_version/*.hifiasm.version.txt
 flagger_bed/*.asm.flagger.bed
 flagger_summary/*.asm.flagger.summary.tsv
 ugc_wgw_manifest/*.assembly.ugc_wgw_manifest.json
+contig_qc/*.asm.contig_qc.tsv

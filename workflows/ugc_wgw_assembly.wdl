@@ -7,6 +7,7 @@ version 1.0
 import "../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/samtools.wdl" as Samtools
 import "../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/backend_configuration/backend_configuration.wdl" as BackendConfiguration
 import "ugc_wgw/assembly/flagger.wdl" as Flagger
+import "ugc_wgw/assembly/contig_qc.wdl" as ContigQC
 import "ugc_wgw/assembly/gfatools.wdl" as Gfatools
 import "ugc_wgw/assembly/hifiasm.wdl" as Hifiasm
 import "ugc_wgw/assembly/yak.wdl" as Yak
@@ -43,6 +44,9 @@ workflow ugc_wgw_assembly {
       },
       flagger_summary: {
         description: "Flagger's summary table (prediction_summary_final.tsv)"
+      },
+      contig_qc: {
+        description: "<sample_id>.asm.contig_qc.tsv: per contig the length, GC %, N bases and runs, telomeric bases at each end, and Flagger's Err/Dup/Hap/Col bases"
       },
       trio_eval: {
         description: "yak trioeval per haplotype (switch and Hamming error), trio-binned samples only"
@@ -145,7 +149,7 @@ workflow ugc_wgw_assembly {
       description: "yak trioeval -d; default: the -d the binning used"
     }
     ref_map_file: {
-      description: "ugc-wgw reference map (docs/DESIGN.md §10.4); keys used here: name"
+      description: "ugc-wgw reference map (docs/DESIGN.md §10.4); no key is read by this stage (the assembly is reference-free; assembly_call and cohort_pangenome read the asm_* keys)"
     }
     ugc_wgw_container_registry: {
       description: "Registry holding the ugc-built images (hifiasm)"
@@ -346,6 +350,14 @@ workflow ugc_wgw_assembly {
     File kept_bam = ugc_wgw_flagger_align.bam
     File kept_bam_index = ugc_wgw_flagger_align.bam_index
   }
+  call ContigQC.ugc_wgw_assembly_contig_qc { input:
+    sample_id = sample_id,
+    hap_fastas = ugc_wgw_gfatools_gfa2fa.zipped_fasta,
+    haplotype_labels = labels,
+    flagger_bed = ugc_wgw_flagger_hmm.prediction_bed,
+    telomere_motif = hifiasm_telomere_motif,
+    runtime_attributes = default_runtime_attributes
+  }
 
   # trio QC: each haplotype against the parental k-mer tables, with the binning's thresholds
   if (is_trio) {
@@ -387,6 +399,7 @@ workflow ugc_wgw_assembly {
     Array[File] assembly_lowQ_beds = select_first([ugc_wgw_hifiasm_assemble.assembly_lowQ_beds])
     File flagger_bed = ugc_wgw_flagger_hmm.prediction_bed
     File flagger_summary = ugc_wgw_flagger_hmm.summary_tsv
+    File contig_qc = ugc_wgw_assembly_contig_qc.contig_qc
     Array[File]? trio_eval = ugc_wgw_yak_trioeval.trioeval
     File? read_alignment_bam = kept_bam
     File? read_alignment_bam_index = kept_bam_index

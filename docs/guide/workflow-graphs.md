@@ -3,7 +3,7 @@
 
 # Workflow call graphs
 
-Exact call graphs of the seven entrypoints, rendered from the miniwdl AST by
+Exact call graphs of the nine entrypoints, rendered from the miniwdl AST by
 `scripts/wdl-graph.py`. A workflow called directly by an entrypoint is inlined
 as a box; a workflow it calls in turn is one node. Simplified diagrams with
 the switches and resources explained are in `08-stages.md`.
@@ -431,7 +431,7 @@ flowchart TD
 
 ## ugc_wgw_assembly
 
-Source `workflows/ugc_wgw_assembly.wdl`, depth 1, Mermaid source 1192 characters.
+Source `workflows/ugc_wgw_assembly.wdl`, depth 1, Mermaid source 1255 characters.
 
 Inlined workflows: none.
 
@@ -465,12 +465,13 @@ flowchart TD
   n10["ugc_wgw_flagger_align"]
   n11["ugc_wgw_flagger_correct_bam"]
   n12["ugc_wgw_flagger_hmm"]
+  n13["ugc_wgw_assembly_contig_qc"]
   subgraph s8["if is_trio"]
     subgraph s9["scatter i in range(length(labels))"]
-      n13["ugc_wgw_yak_trioeval"]
+      n14["ugc_wgw_yak_trioeval"]
     end
   end
-  n14["ugc_wgw_manifest_write"]
+  n15["ugc_wgw_manifest_write"]
   n1 --> n8
   n1 --> n10
   n2 --> n4
@@ -480,22 +481,24 @@ flowchart TD
   n4 --> n5
   n4 --> n6
   n4 --> n8
-  n4 --> n13
+  n4 --> n14
   n5 --> n8
-  n5 --> n13
+  n5 --> n14
   n6 --> n8
-  n6 --> n13
+  n6 --> n14
   n8 -.-> s7
   n9 --> n10
   n9 --> n13
+  n9 --> n14
   n10 --> n11
   n10 --> n12
   n11 --> n12
+  n12 --> n13
 ```
 
 ## ugc_wgw_assembly_call
 
-Source `workflows/ugc_wgw_assembly_call.wdl`, depth 1, Mermaid source 685 characters.
+Source `workflows/ugc_wgw_assembly_call.wdl`, depth 1, Mermaid source 746 characters.
 
 Inlined workflows: none.
 
@@ -517,27 +520,30 @@ flowchart TD
   end
   n7["finish_dipcall"]
   n8["finish_pav"]
+  n9["ugc_wgw_asm_call_spectra"]
   subgraph s4["if defined(read_small_variant_vcf)"]
-    n9["ugc_wgw_asm_concordance"]
+    n10["ugc_wgw_asm_concordance"]
   end
-  n10["ugc_wgw_manifest_write"]
+  n11["ugc_wgw_manifest_write"]
   n1 --> n2
   n1 --> n5
   n2 --> n3
   n3 --> n6
   n3 --> n7
-  n3 --> n9
+  n3 --> n10
   n4 --> n8
   n5 --> n6
   n6 --> n7
   n6 --> n8
-  n6 --> n9
+  n6 --> n10
   n7 --> n9
+  n7 --> n10
+  n8 --> n9
 ```
 
 ## ugc_wgw_cohort_pangenome
 
-Source `workflows/ugc_wgw_cohort_pangenome.wdl`, depth 1, Mermaid source 647 characters.
+Source `workflows/ugc_wgw_cohort_pangenome.wdl`, depth 1, Mermaid source 825 characters.
 
 Inlined workflows: none.
 
@@ -555,25 +561,32 @@ flowchart TD
   subgraph s2["scatter i in range(length(requested))"]
     n6["freq_shard"]
   end
-  n7["concat_freq"]
-  n8["ugc_wgw_pangenome_freq_summary"]
-  subgraph s3["if defined(sv_vcf)"]
-    n9["ugc_wgw_vcf_split_multiallelic"]
-    n10["ugc_wgw_truvari_bench"]
+  subgraph s3["scatter i in range(length(requested))"]
+    n7["member_stats_shard"]
   end
-  n11["ugc_wgw_manifest_write"]
+  n8["ugc_wgw_pangenome_member_stats_gather"]
+  n9["concat_freq"]
+  n10["ugc_wgw_pangenome_freq_summary"]
+  subgraph s4["if defined(sv_vcf)"]
+    n11["ugc_wgw_vcf_split_multiallelic"]
+    n12["ugc_wgw_truvari_bench"]
+  end
+  n13["ugc_wgw_manifest_write"]
   n1 --> n2
   n1 --> n3
   n1 --> n4
   n1 --> n5
   n1 --> n6
+  n1 --> n7
   n2 --> n3
   n3 --> n4
   n3 --> n5
   n5 --> n6
-  n5 --> n9
-  n6 --> n7
-  n6 --> n8
+  n5 --> n7
+  n5 --> n11
+  n6 --> n9
+  n6 --> n10
   n7 --> n8
   n9 --> n10
+  n11 --> n12
 ```

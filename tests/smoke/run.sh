@@ -396,6 +396,6 @@ case "$1" in
   summary) cmd_summary ;;
   sacct) cmd_sacct ;;
   -h|--help) usage ;;
-  singleton|upstream|cohort_call|downstream|cohort_merge|cohort_freq|assembly) cmd_stage "$@" ;;
+  singleton|upstream|cohort_call|downstream|cohort_merge|cohort_freq|assembly|assembly_call|cohort_pangenome) cmd_stage "$@" ;;
   *) die "unknown command $1" ;;
 esac

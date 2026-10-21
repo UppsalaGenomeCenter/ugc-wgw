@@ -43,6 +43,7 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 ENTRYPOINTS = ["ugc_wgw_singleton", "ugc_wgw_upstream", "ugc_wgw_cohort_call", "ugc_wgw_downstream", "ugc_wgw_cohort_merge", "ugc_wgw_cohort_freq",
                "ugc_wgw_assembly", "ugc_wgw_assembly_call", "ugc_wgw_cohort_pangenome"]
 OUTPUT = REPO / "docs" / "guide" / "workflow-graphs.md"
+_WORDS = {6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten", 11: "eleven", 12: "twelve"}
 DEFAULT_DEPTH = 1
 DEPTH: Dict[str, int] = {}  # per-entrypoint override of DEFAULT_DEPTH
 HIDE = frozenset({"backend_configuration"})  # call names never drawn
@@ -450,7 +451,7 @@ def markdown(depth: Optional[int] = None, hide: frozenset = HIDE, max_chars: int
         "",
         "# Workflow call graphs",
         "",
-        "Exact call graphs of the seven entrypoints, rendered from the miniwdl AST by",
+        f"Exact call graphs of the {_WORDS.get(len(ENTRYPOINTS), str(len(ENTRYPOINTS)))} entrypoints, rendered from the miniwdl AST by",
         "`scripts/wdl-graph.py`. A workflow called directly by an entrypoint is inlined",
         "as a box; a workflow it calls in turn is one node. Simplified diagrams with",
         "the switches and resources explained are in `08-stages.md`.",

@@ -108,7 +108,8 @@ image means the bundle was built without it (`--images ugc-wgw` or `none`) or a
 new tool was added without repopulating the cache; the maintainer rebuilds the
 bundle. A different registry name in the rendered inputs
 (`ugc_wgw_container_registry`) than the one the SIFs were cached under has the
-same symptom for the svx and trgt-lps tasks.
+same symptom for the svx and trgt-lps tasks of `cohort_merge` and the hifiasm
+and minimap2 tasks of `assembly` and `assembly_call`.
 
 Apptainer runs with `--containall --no-mount hostfs`: only the task's
 working directory and the declared inputs are visible inside the container,

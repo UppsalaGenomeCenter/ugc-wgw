@@ -5,22 +5,22 @@
 ```mermaid
 flowchart LR
   subgraph prefix["prefix"]
-    v1["versions/0.7.0: code, sif, venv, miniwdl.cfg, references, inputs"]
-    v2["versions/0.8.0: code, sif, venv, miniwdl.cfg, references, inputs"]
-    cur["current -> versions/0.8.0, after --activate"]
+    v1["versions/0.9.4: code, sif, venv, miniwdl.cfg, references, inputs"]
+    v2["versions/0.11.0: code, sif, venv, miniwdl.cfg, references, inputs"]
+    cur["current -> versions/0.11.0, after --activate"]
     cc["call_cache, shared"]
     refs["references, shared"]
     pol["resources.tsv, shared"]
   end
   subgraph proj["project A"]
-    cfgA["config.json: code_dir, miniwdl, miniwdl_cfg = versions/0.7.0 paths"]
+    cfgA["config.json: code_dir, miniwdl, miniwdl_cfg = versions/0.9.4 paths"]
   end
   subgraph proj2["project B"]
-    cfgB["config.json = versions/0.8.0 paths"]
+    cfgB["config.json = versions/0.11.0 paths"]
   end
   subgraph res["results"]
-    r1["samples/S1/0.7.0/singleton/current"]
-    r2["samples/S1/0.8.0/singleton/current"]
+    r1["samples/S1/0.9.4/singleton/current"]
+    r2["samples/S1/0.11.0/singleton/current"]
   end
   cfgA --> v1
   cfgB --> v2
@@ -59,9 +59,10 @@ touched.
 Either create a new project against the new install (chapter 05) and register
 the same sample sheet and cohort list, or edit the four engine paths in
 `.ugc-wgw/config.json` (`code_dir`, `miniwdl`, `miniwdl_cfg`, `venv_dir`) and
-the three reference map paths to the new version's directories. The driver reads
-`VERSION` from `code_dir` on every command, so after the edit every subject is
-"not done" at the new version and `submit` starts from the first stage.
+the one reference map path (`ref_map_file`) to the new version's
+directories. The driver reads `VERSION` from `code_dir` on every command, so
+after the edit every subject is "not done" at the new version and `submit`
+starts from the first stage.
 
 What actually re-runs is decided by miniwdl's call cache, not by the driver:
 a task whose inputs, command and image digest are unchanged replays from the
@@ -73,7 +74,7 @@ what changed in each release.
 
 `--any-version` on `submit` accepts an earlier stage's success at any version
 as a prerequisite and reads its outputs. Use it to run `cohort_merge` at
-version 0.8.0 over `singleton` results produced at 0.7.0 without re-running
+version 0.11.0 over `singleton` results produced at 0.9.4 without re-running
 the samples, or to `downstream` old `upstream` results after a phasing-only
 change. The run manifest records, per member, the version and run ID whose
 outputs were used, so the mixture is traceable. Do not use it across an
@@ -115,11 +116,12 @@ stage read (`cohort_members` in `run_manifest.json`).
 
 ## SIF cache and storage
 
-Each version carries its own `sif/` (about 26 GB with every image). Unchanged
-images are duplicated between versions; remove `versions/<old>/` when no
-project references it any more (`grep -l versions/<old> */.ugc-wgw/config.json`
-across your projects) and its results have their manifests. The call cache
-grows with every distinct task execution; it is safe to delete entries, at
-the price of recomputation. Successful runs' work directories are already
-reclaimed by `delete_work = success`; failed attempts keep theirs until you
-remove the attempt directory by hand, which the driver never does.
+Each version carries its own `sif/` (about 27 GB with every image; 33 SIFs
+in 0.11.0). Unchanged images are duplicated between versions; remove
+`versions/<old>/` when no project references it any more
+(`grep -l versions/<old> */.ugc-wgw/config.json` across your projects) and
+its results have their manifests. The call cache grows with every distinct
+task execution; it is safe to delete entries, at the price of
+recomputation. Successful runs' work directories are already reclaimed by
+`delete_work = success`; failed attempts keep theirs until you remove the
+attempt directory by hand, which the driver never does.

@@ -10,6 +10,7 @@ import "ugc_wgw/assembly/dipcall.wdl" as Dipcall
 import "ugc_wgw/assembly/masking.wdl" as Masking
 import "ugc_wgw/assembly/pav.wdl" as Pav
 import "ugc_wgw/assembly/vcf_finish.wdl" as VcfFinish
+import "ugc_wgw/assembly/call_spectra.wdl" as CallSpectra
 import "ugc_wgw/provenance.wdl" as Provenance
 
 workflow ugc_wgw_assembly_call {
@@ -66,6 +67,9 @@ workflow ugc_wgw_assembly_call {
       },
       pav_vcf_stats: {
         description: "bcftools stats of pav_vcf"
+      },
+      call_spectra: {
+        description: "<sample_id>.asm.call_spectra.tsv: both callers' records by FILTER class (PASS, ASM_UNRELIABLE, OTHER, BOTH), type, size bin and contig class"
       },
       pav_raw_vcf: {
         description: "PAV's VCF as written (phased in haplotype order)"
@@ -331,6 +335,15 @@ workflow ugc_wgw_assembly_call {
     runtime_attributes = default_runtime_attributes
   }
 
+  call CallSpectra.ugc_wgw_asm_call_spectra { input:
+    sample_id = sample_id,
+    dipcall_vcf = finish_dipcall.vcf_out,
+    dipcall_vcf_index = finish_dipcall.vcf_index,
+    pav_vcf = finish_pav.vcf_out,
+    pav_vcf_index = finish_pav.vcf_index,
+    runtime_attributes = default_runtime_attributes
+  }
+
   # concordance with the read-based calls, inside the reliable region (dip.bed without a Flagger mask)
   if (defined(read_small_variant_vcf)) {
     call Concordance.ugc_wgw_asm_concordance { input:
@@ -372,6 +385,7 @@ workflow ugc_wgw_assembly_call {
     File pav_vcf = finish_pav.vcf_out
     File pav_vcf_index = finish_pav.vcf_index
     File pav_vcf_stats = finish_pav.stats
+    File call_spectra = ugc_wgw_asm_call_spectra.call_spectra
     File pav_raw_vcf = ugc_wgw_pav.vcf
     File pav_raw_vcf_index = ugc_wgw_pav.vcf_index
     Array[File] pav_callable_beds = ugc_wgw_pav.callable_beds

@@ -87,7 +87,7 @@ writes, not from CPU counts.
 | `--mode M` | The stage sequence (default `standalone`). |
 | `--stage S` | Only this stage of the mode; the others are still consulted for prerequisites. Required for `retry`. |
 | `--samples ID ...` or `--samples-file F` | Only these samples; default all registered samples (or the cohort's members with `--cohort`). |
-| `--cohort ID` | The cohort for the cohort stages; also restricts samples to its members. Required from the first stage on in `joint` mode. |
+| `--cohort ID` | The cohort for the cohort stages; also restricts samples to its members. Required from the first stage on in `joint` mode, and for `cohort_pangenome` in `assembly` mode. |
 | `--any-version` | Accept a prerequisite that succeeded at an older ugc-wgw version; the manifest records which. |
 | `--max-inflight N`, `--poll-interval SEC` | Override the project defaults. |
 | `--dry-run` | Compute the plan and print the first wave, change nothing. |
@@ -95,7 +95,10 @@ writes, not from CPU counts.
 
 Without `--cohort` a standalone `submit` runs `singleton` for every selected
 sample and reports `cohort_merge needs --cohort <id>` as blocked, which is the
-expected way to run per-sample work before the cohort is frozen.
+expected way to run per-sample work before the cohort is frozen. An
+assembly-mode `submit` behaves the same: `assembly` and `assembly_call` run
+and `cohort_pangenome needs --cohort <id>` is reported until the pangenome
+cohort is frozen (below).
 
 ## Dry run
 
@@ -116,14 +119,14 @@ cohort.
 
 ```
 # resources: cpu_max=48 memory_max=375G policy=/proj/ugc/resources.tsv (2 rows) deepvariant=cpu
-# ugc-wgw dry-run: mode=joint version=0.8.0 runnable=3 blocked=1 active=0 done=0
+# ugc-wgw dry-run: mode=joint version=0.11.0 runnable=3 blocked=1 active=0 done=0
 
-## sample S1 / upstream -> /proj/ugc/results/c26/samples/S1/0.8.0/upstream/attempt-1
+## sample S1 / upstream -> /proj/ugc/results/c26/samples/S1/0.11.0/upstream/attempt-1
 { "ugc_wgw_upstream.hifi_reads": [...], ... }
 # inputs: 14 read file(s), 61.2 GB, present and complete
 # env: MINIWDL__UGC_WGW__GPU_TYPE='l40s'  (the plugin's gres type; not an input, so not part of the call cache)
-miniwdl run /proj/ugc/versions/0.8.0/code/workflows/ugc_wgw_upstream.wdl -i .../inputs.json \
-    --dir .../attempt-1/. -o run.json --cfg /proj/ugc/versions/0.8.0/miniwdl.cfg --no-color --log-json
+miniwdl run /proj/ugc/versions/0.11.0/code/workflows/ugc_wgw_upstream.wdl -i .../inputs.json \
+    --dir .../attempt-1/. -o run.json --cfg /proj/ugc/versions/0.11.0/miniwdl.cfg --no-color --log-json
 ...
 # blocked: cohort C1 / cohort_call: waiting for upstream of S1, S2, S3
 ```

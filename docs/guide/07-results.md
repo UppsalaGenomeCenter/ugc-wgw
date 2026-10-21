@@ -36,8 +36,8 @@ to a path. Files live under `out/<name>/<basename>`; array outputs under
 
 ```bash
 python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["ugc_wgw_singleton.phased_small_variant_vcf"])' \
-    samples/HG002/0.8.0/singleton/current/outputs.json
-ls samples/HG002/0.8.0/singleton/current/out/phased_small_variant_vcf/
+    samples/HG002/0.11.0/singleton/current/outputs.json
+ls samples/HG002/0.11.0/singleton/current/out/phased_small_variant_vcf/
 ```
 
 The output names are upstream's; the tables below give the ones analysts
@@ -120,7 +120,8 @@ made (chapter 08).
 | `hap_fastas`, `assembly_stats` | Contigs per haplotype, `<sample_id>.asm.<bp\|dip>.<hap>.p_ctg.fasta.gz`, with calN50 statistics. `dip` means trio-binned, `bp` HiFi-only. |
 | `assembly_noseq_gfas`, `assembly_lowQ_beds` | Assembly graphs without sequence and low-quality regions. |
 | `flagger_bed`, `flagger_summary` | HMM-Flagger's prediction for the diploid assembly (`Err`, `Dup`, `Hap` or `Col` per interval, assembly coordinates) and its summary table; the `base_level percentage` row of `whole_genome` gives the shares. |
-| `trio_eval` | `yak trioeval` per haplotype (trio-binned samples): the `W` line is the switch error, `H` the Hamming error (count, sites, rate). |
+| `trio_eval` | `yak trioeval` per haplotype (trio-binned samples): the `W` line is the switch error, `H` the Hamming error (count, sites, rate); the `S` lines are per contig. |
+| `contig_qc` | `<sample_id>.asm.contig_qc.tsv`: per contig its haplotype, length, GC %, N bases and N runs, telomeric bases at the 5' and 3' ends (the assembly's motif), and Flagger's Err/Dup/Hap/Col bases. |
 | `read_alignment_bam`, `read_alignment_bam_index` | The reads aligned to the diploid assembly, only with `keep_read_alignment`. |
 | `trio`, `hap1_parent`, `hap2_parent` | Whether trio binning was used and which parent each haplotype follows. |
 
@@ -128,6 +129,7 @@ made (chapter 08).
 
 | Output | What it is |
 |---|---|
+| `haplotype_labels_out` | The assembly's `haplotype_labels` (`hap1`, `hap2`, or `pat`, `mat`), echoed: the order of the per-haplotype arrays below (`asm_bams`, `asm_pafs`, `pav_callable_beds`, `unreliable_beds`) without opening the `assembly` run. |
 | `asm_bams`, `asm_bam_indices`, `asm_pafs` | Each haplotype aligned to the decoy-free GRCh38: `<sample_id>.<hap>.asm.GRCh38_GIABv3.bam` for viewing, the same alignments as gzipped PAF. |
 | `chrom_coverage` | Per haplotype and chromosome: aligned bases, contigs, the chromosome length and the fraction assembled. |
 | `karyotype_json`, `inferred_karyotype` | `XX`, `XY` or `unknown`, from non-PAR chrX and chrY coverage, with the evidence and thresholds; `unknown` when too little of chrX was assembled (every chr20-only smoke sample). |
@@ -138,6 +140,7 @@ made (chapter 08).
 | `pav_raw_vcf`, `pav_raw_vcf_index`, `pav_callable_beds` | PAV's VCF as written (`.csi`) and the reference regions it could call, per haplotype. |
 | `unreliable_beds`, `reliable_bed`, `reliable_summary` | With a Flagger BED: its non-Hap regions lifted to the reference per haplotype, `dip.bed` minus them, and the bases of each with the reliable fraction of the reference. |
 | `concordance` | With a read-based VCF: dipcall's `PASS` SNVs against the read-based ones inside the reliable region, as `metric<TAB>value` (sites compared, concordant, genotype concordance, read hets, het loss and its rate, assembly-only hets). |
+| `call_spectra` | `<sample_id>.asm.call_spectra.tsv`: both primary VCFs counted by caller, FILTER class (`PASS`, `ASM_UNRELIABLE`, `OTHER`, `BOTH`), type (SNV, MNV, indel below 50 bp, INS, DEL, INV, other), size bin and contig class. |
 
 Genotypes: dipcall and PAV write phased genotypes in haplotype-column order.
 For a sample that was not trio-binned that order is hifiasm's local phasing,
@@ -155,6 +158,8 @@ Under `cohorts/<cohort_id>/<version>/cohort_pangenome/current/out/`.
 | `chromosomes_built` | The chromosomes built, the order of every per-chromosome array below. |
 | `chrom_gbzs`, `chrom_gfas` | The graph per chromosome, `<cohort_id>.pangenome.GRCh38_GIABv3.<chr>.gbz` and `.gfa.gz` (`vg` and `minigraph` read them). |
 | `chrom_graph_stats`, `chrom_logs` | `graph-stats.tsv` per chromosome (nodes, edges, length) and the Cactus logs of its construction, tarred. |
+| `chrom_path_stats`, `chrom_refgaps`, `chrom_genome_bp`, `chrom_degree_stats` | Per chromosome: the join's path statistics (every haplotype path fragment with its length) and reference gaps (intervals no haplotype covers), the paths and bases per genome (`sample#haplotype`), and `vg stats -D` of the GBZ (node degree histogram). |
+| `member_stats`, `member_stats_shards` | `<cohort_id>.pangenome.GRCh38_GIABv3.members.tsv`: per member the hom-ref, hom-alt and het genotypes, singletons, missing genotypes, sites and call rate in the vcfwave VCF (a missing genotype is a site without assembled sequence), summed from `bcftools stats` per chromosome. |
 | `name_map` | `<cohort_id>.pangenome.name_map.tsv`: sample ID, the Cactus-safe genome name (`<name>.1`, `<name>.2` are its haplotypes), trio. |
 | `split_log`, `contig_sizes`, `ambiguous_contigs` | `cactus-graphmap-split`'s log and `contig_sizes.tsv`, and per haplotype the contigs (and bases) assigned to a chromosome or left ambiguous; ambiguous contigs are in no graph. |
 | `freq_vcf`, `freq_vcf_index` | `<cohort_id>.pangenome.GRCh38_GIABv3.freq.vcf.gz`: sites-only allele counts and frequencies of the vcfwave VCF, overall and per karyotype (`_XX`, `_XY`), as `cohort_freq` writes them; a missing genotype stays missing, so `NS` reports how many members had assembled sequence at the site. |
@@ -180,7 +185,7 @@ failure. `<stage>/current/run_manifest.json` is the record to cite.
 | `schema` | `1`. |
 | `ugc_pacbio_wgw` | `version` and the `git_commit` of the installed code (on the HPC from the bundle's `manifest.json`, since the installed code is not a git checkout). |
 | `upstream` | The `sources` section of `upstream.lock`: vendored repositories, tags, commits. |
-| `references` | The `bundles` section of `references.lock`: the reference data container (build, digest, file md5s) and ugc-wgw-extras. |
+| `references` | The `bundles` section of `references.lock`: the reference data container (build, digest, file md5s), ugc-wgw-extras and ugc-wgw-asm (shipped files and the files the installer builds, with their checksums). |
 | `engine` | `miniwdl`, `miniwdl_slurm` and `apptainer` versions as probed by the driver. Empty when the run was finalised by a read-only command after a driver crash. |
 | `stage`, `mode`, `subject` | What ran: `subject` is `{"type": "sample" or "cohort", "id": ...}`. |
 | `cohort_members` | For a cohort stage (and for a trio assembly): per member, the stage, ugc-wgw version and run ID whose outputs were used. |
@@ -189,6 +194,7 @@ failure. `<stage>/current/run_manifest.json` is the record to cite.
 | `run_id`, `run_dir`, `attempt`, `status`, `exit_code` | The attempt and how it ended. |
 | `started_at`, `finished_at`, `host`, `slurm_job_ids` | Timestamps in UTC; the SLURM job ids of every task that was submitted (read from the task directories; empty without SLURM). |
 | `resource_policy` | The site resource policy at launch, `path` and `sha256` (chapter 12); `null` when the install has none. |
+| `gpu_type` | The gres type the `ugc_wgw_resources` plugin applied to the GPU tasks (chapter 12): `""` means any GPU, `null` the cpu flavour. |
 | `error` | Only when the status is not `success`: `class`, `kind`, `message`, `engine_message`, `exit_code`, `exit_status`, `task_dir`, `node`, `evidence` (the log file and line that decided the kind), `not_before` (earliest automatic re-attempt). |
 | `ugc_wgw_manifest` | Only on success: the workflow's own manifest, embedded (below). |
 
@@ -315,15 +321,19 @@ two numbers to carry into such an estimate.
 
 `ugc-wgw summary [--samples ID... | --samples-file F] [--cohort ID] [--mode M]
 [--any-version] [--out-dir DIR] [--force] [--threshold KEY=VALUE ...]
-[--jobs N]` writes what the analysis found, as self-contained HTML (inline
-styles, inline SVG charts, nothing fetched from the network), one page per
-sample and one per cohort, under `<results>/reports/summary/`
-(`<id>.summary.html`). It summarises the latest successful runs of the
-mode: `singleton` in standalone mode, `upstream` and `downstream` in joint
-mode, plus the sample's `assembly` when it ran. Without `--samples` or
-`--cohort` every registered sample is summarised; `--cohort` adds the
-cohort page and covers the cohort's members. The paths written are
-printed, one per line.
+[--jobs N] [--pass-list FILE]` writes what the analysis found, as
+self-contained HTML (inline styles, inline SVG charts, nothing fetched from
+the network), one page per sample and one per cohort, under
+`<results>/reports/summary/` (`<id>.summary.html`). It summarises the latest
+successful runs of the mode: `singleton` in standalone mode, `upstream` and
+`downstream` in joint mode, and with `--mode assembly` the assembly stages
+alone, with the cohort's `cohort_pangenome`; a sample's `assembly` and
+`assembly_call` runs join its page in every mode when they exist. Without
+`--samples` or `--cohort` every registered sample is summarised; `--cohort`
+adds the cohort page and covers the cohort's members. `--pass-list FILE`
+also writes the IDs whose assembly QC has no fail flag, in sample-sheet
+order: the input of `cohort freeze` for a pangenome cohort (chapter 06). The
+paths written are printed, one per line.
 
 The sample page has a fixed menu on the left and these sections: overview
 with the QC flags; reads; coverage (mean depth per chromosome, the
@@ -333,10 +343,30 @@ het/hom, substitution spectrum, indel lengths, site quality and depth
 histograms, runs of homozygosity); structural variants by type and size;
 phasing; tandem repeats (coverage dropouts and the catalog's known disease
 loci with their genotypes); methylation; the targeted callers (Paraphase,
-mitorsaw, StarPhase, kivvi); the workflow messages and the files read;
-software and workflow (tool versions as pinned in the WDL, engine versions,
-ugc-wgw and upstream commits, the reference build and its checksums, citations,
-the project URL).
+mitorsaw, StarPhase, kivvi); the assembly, when the sample has one; the
+workflow messages and the files read; software and workflow (tool versions
+as pinned in the WDL, engine versions, ugc-wgw and upstream commits, the
+reference build and its checksums, citations, the project URL).
+
+The Assembly section reads every file the assembly stages write: the
+haplotypes' contiguity (length, contigs, NG50, LG50 and auNG against a 3.1 Gb
+genome, hifiasm's low-quality regions, the NGx curve); Flagger's composition
+of the diploid assembly (Err, Dup, Hap, Col, Unk as a stacked bar, with the
+bases and the flagged blocks); for trio-binned samples the switch and
+Hamming errors with the contigs that carry the most switches; the
+chromosomes (assembled fraction per chromosome and haplotype, a track of
+`reliable.bed` and `dip.bed` coverage in 1 Mb bins, a per-chromosome table);
+the karyotype with its evidence (non-PAR chrX and chrY fractions against
+the stage's thresholds, dipcall's regrouping); both callers' statistics
+(records, SNVs, indels, Ts/Tv, het and hom-alt genotypes, het/hom, missing
+genotypes, the indel-length and substitution spectra, the reference covered
+by `dip.bed`, the haplotype BEDs and PAV's callable regions; both callers'
+records by FILTER class and type, and PAV's PASS structural variants by
+size); the reliable region in full; and the concordance with the sample's
+read-based SNVs. With the per-contig QC of 0.12.0 it also shows Flagger per
+haplotype, GC, N bases, telomeric contig ends and the contigs with the most
+non-Hap bases. A sample with only an assembly gets these sections,
+provenance and the files table like any other.
 
 The cohort page lists the members with their QC status (each row links to
 the sample page), draws every metric across the members (median,
@@ -344,7 +374,25 @@ interquartile box, outliers beyond median ± 3 MAD in red, QC thresholds as
 dashed lines), checks sex consistency, summarises the cohort call sets
 (joint VCF, merged SVs with the support histogram, trgt-lps), the
 `cohort_freq` summary (allele-frequency bins, singletons, call rate, sex
-strata) and the assemblies.
+strata), the pangenome graph (`cohort_pangenome`: the chromosomes built
+with their nodes, edges and length, the contigs the split assigned to a
+chromosome or left ambiguous per haplotype, the allele frequencies of the
+vcfwave VCF, truvari's recall, precision, F1 and genotype concordance
+against the read-based SV merge, the reference length and the haplotypes'
+sequence per chromosome, and the members in the graph VCF with the sequence
+the split assigned or left ambiguous for each) and the assemblies: one row
+per member with both haplotypes side by side, the trio QC, Flagger, the
+reliable fraction, the concordance and both callers' counts. The assembly
+metrics are part of the distributions (strips, outliers, threshold
+failures above or below the limit, as each threshold's direction says) and
+the sex section counts the assemblies' karyotypes next to the sheet and the
+coverage inference. The pangenome section further shows the graph's
+structure (haplotype sequence and reference gaps per chromosome, the node
+degree histogram, records by nesting level, vcfwave type and allele length)
+and the members' genotypes in the graph VCF (call rate, singletons, het and
+hom-alt counts as strips with outliers; members below
+`pg_member_call_rate_min`, 0.90, are listed as a signal for the next cohort
+freeze, not as a sample flag).
 
 QC flags are advisory checks by the driver, not the workflow's:
 `low_depth` (`depth_mean_min`, 20x), `low_mapped`
@@ -352,7 +400,13 @@ QC flags are advisory checks by the driver, not the workflow's:
 (`read_quality_median_min`, 25) fail the sample; `sex_mismatch` (sheet
 versus coverage), `sex_not_inferred` and `tool_status` (kivvi without
 reads, Paraphase regions failed for coverage, mitorsaw without haplotypes)
-warn; workflow messages are informational. Thresholds come from
+warn; workflow messages are informational. The assembly flags
+(`asm_flagger_err`, `asm_hap_length`, `asm_switch_error`,
+`asm_reliable_fraction`, `asm_het_loss`, `asm_concordance_low`) fail the
+sample and are what `--pass-list` gates on; `asm_karyotype_mismatch` (sheet
+versus the assembly) and `asm_karyotype_unknown` (too little non-PAR chrX
+assembled: the sample joins no sex stratum of the pangenome frequencies)
+warn. Thresholds come from
 `summary_thresholds` in `config.json` or `--threshold KEY=VALUE`; unknown
 keys are refused. Flags are re-evaluated whenever a page is written, so a
 changed threshold needs no rebuild.
@@ -360,8 +414,10 @@ changed threshold needs no rebuild.
 Each sample's numbers are also written as `<sample>.summary.json`, a digest
 the cohort page reads instead of the sample's files, so a cohort of a
 thousand samples renders from a thousand small JSON files. A digest is
-reused while the runs it came from are unchanged and rebuilt otherwise
-(`--force` rebuilds all). Building one costs about 15 s of pure Python per
+reused while the runs it came from are unchanged and its schema is current
+(0.12.0 moved to schema 2 for the assembly detail: every digest rebuilds
+once) and rebuilt otherwise (`--force` rebuilds all). Building one costs
+about 15 s of pure Python per
 sample (the 500 bp mosdepth bed and the TRGT outputs are streamed);
 `--jobs N` builds N in parallel. Set `project_url` in `config.json` to the
 repository the pages should link to.
@@ -371,11 +427,16 @@ repository the pages should link to.
 `.ugc-wgw/logs/ugc-wgw.log` is the human log (UTC timestamps).
 `.ugc-wgw/logs/events.jsonl` has one JSON object per line, `{"ts", "run_id",
 "level", "event", "detail"}`, also stored in the `events` table of the database.
-Events: `sample.added`, `sample.warning`, `cohort.frozen`, `submit.start`,
-`submit.stop`, `sample.removed`, `run.created`, `run.submitted` (with the
-command line), `run.running`, `run.blocked`, `run.auto_retry`,
-`run.terminating`, `run.success`, `run.failed`, `run.cancelled` (each with the
-kind, message, task directory, node and SLURM job ids), `run.reconciled`,
-`run.scancel`, `run.accounting` (the sacct read: `ok`, `partial` or
-`failed`, with the job counts). The sequence of a clean run is `created`,
-`submitted`, `running`, `success` and, on a cluster, `accounting`.
+Events: `sample.added`, `sample.warning`, `sample.input_dropped` (a read
+file `samples add --drop-empty` left out), `sample.removed`,
+`cohort.frozen`, `submit.start`, `submit.stop`, `submit.progress` (the
+progress summary, when the counts change or `progress_interval` elapses),
+`run.created`, `run.preflight` (the raw read files checked just before
+launch, with their number), `run.submitted` (with the command line),
+`run.running`, `run.blocked`, `run.auto_retry`, `run.terminating`,
+`run.success`, `run.failed`, `run.cancelled` (each with the kind, message,
+task directory, node and SLURM job ids), `run.reconciled`, `run.scancel`,
+`run.accounting` (the sacct read: `ok`, `partial` or `failed`, with the job
+counts). The sequence of a clean run is `created`, `submitted`, `running`,
+`success` and, on a cluster, `accounting`; a stage that reads raw read
+files has `preflight` between `created` and `submitted`.

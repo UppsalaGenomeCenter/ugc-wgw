@@ -1,6 +1,6 @@
 version 1.0
 # ugc-pacbio-wgw — PAV 3 (Phased Assembly Variant caller): small variants, SVs and inversions from two haplotype assemblies against the assembly reference
-# origin: none (pav3 batch, the upstream image; the Snakemake profile is the package's default with align_map threads raised)
+# origin: none (pav3 batch, the upstream image; the Snakemake profile is the package's default with align_map's threads set to align_threads and its memory lowered to 16 GiB)
 # see docs/DESIGN.md §5, §13; docs/ENTRYPOINTS.md §8.1
 import "../../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/structs.wdl"
 

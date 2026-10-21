@@ -21,10 +21,15 @@ cohort will not change; otherwise `standalone`. Joint mode is about
 consistency, not sensitivity: it finds no variant that standalone mode
 misses (below). Pedigree-aware phasing of a trio is not a driver mode; see
 the end of the chapter. Within it, `assembly` (hifiasm, up to a day per
-sample) and `assembly_call` (alignment and calling, an hour or two) are two
-stages, so a change to the callers never repeats the assembly; after an
-upgrade, `--any-version` lets `assembly_call` build on the assemblies of the
-previous version (chapter 10).
+sample), `assembly_call` (alignment and calling, an hour or two) and
+`cohort_pangenome` (the cohort's Minigraph-Cactus graph) are three stages, so
+a change to the callers never repeats the assembly; after an upgrade,
+`--any-version` lets `assembly_call` build on the assemblies of the previous
+version (chapter 10). The two sample stages need no cohort. `cohort_pangenome`
+needs `--cohort` naming a frozen cohort whose every member has `assembly` and
+`assembly_call` done, frozen from the assembly QC pass list (chapter 06); a
+pilot restricts it to a few chromosomes with the `chromosomes` stage input
+(chapter 08).
 
 ## What each mode gives and costs
 
@@ -69,7 +74,7 @@ at every position. GLnexus reads only those gVCFs: it unifies the alleles
 found across the cohort and derives every sample's genotype at every site
 from that sample's own record, never opening a BAM. A site that no sample
 called on its own cannot appear, so the union of the per-sample calls is
-the ceiling in both modes.
+the ceiling in both read-based modes.
 
 The local smoke test (four chr20 samples, the harness under `tests/smoke/`)
 shows the consequence: the cohort GLnexus VCF of `cohort_merge` in standalone
@@ -121,8 +126,16 @@ ugc-wgw init /proj/ugc/projects/cohort2026-asm --install /proj/ugc/current \
     --results /proj/ugc/results/cohort2026-asm
 cd /proj/ugc/projects/cohort2026-asm
 ugc-wgw samples add samples.tsv        # the same sheet: the pedigree drives trio binning
-ugc-wgw submit --mode assembly --max-inflight 4
+ugc-wgw submit --mode assembly --max-inflight 4            # assembly and assembly_call per sample
+ugc-wgw summary --mode assembly --pass-list pangenome.txt  # IDs whose assembly QC has no fail
+ugc-wgw cohort freeze PG2026 --samples pangenome.txt
+ugc-wgw submit --mode assembly --cohort PG2026 --max-inflight 4   # cohort_pangenome
 ```
+
+Without `--cohort` the first `submit` runs the two per-sample stages for
+every sample and reports `cohort_pangenome needs --cohort <id>` as blocked;
+the pangenome waits until a cohort has been frozen from the QC pass list and
+is named on the command line (chapter 06).
 
 The two projects run at the same time, on the same host or on different
 hosts. They share the call cache and the SIF cache and nothing else: each

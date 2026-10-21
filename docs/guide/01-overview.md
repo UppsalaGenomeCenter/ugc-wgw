@@ -15,7 +15,9 @@ adds:
 - A joint-call-then-phase mode, which is upstream's family semantics at cohort
   scale: genotypes are joint-called across the cohort before each sample is
   phased.
-- De novo assembly with hifiasm, trio-binned when the pedigree allows.
+- De novo assembly with hifiasm, trio-binned when the pedigree allows, with
+  assembly QC (HMM-Flagger, yak trioeval), assembly-based calling (dipcall,
+  PAV 3) and a cohort pangenome graph (Minigraph-Cactus).
 - A driver, `ugc-wgw`, that registers samples, freezes cohorts, generates every
   input file, submits runs with a concurrency cap, tracks state in a database
   and writes a provenance manifest per run.
@@ -45,7 +47,8 @@ flowchart LR
     b1(["upstream"]) --> b2{{"cohort_call"}} --> b3(["downstream"]) --> b4{{"cohort_merge"}} --> b5{{"cohort_freq"}}
   end
   subgraph assembly
-    c1(["assembly"])
+    direction LR
+    c1(["assembly"]) --> c2(["assembly_call"]) --> c3{{"cohort_pangenome"}}
   end
 ```
 
@@ -55,7 +58,7 @@ when every frozen member has finished the stage before. Text version:
 ```
 standalone:  singleton ──► cohort_merge ──► cohort_freq
 joint:       upstream ──► cohort_call ──► downstream ──► cohort_merge ──► cohort_freq
-assembly:    assembly                                 (independent)
+assembly:    assembly ──► assembly_call ──► cohort_pangenome
              per-sample stage    per-cohort stage (waits for every member)
 ```
 
@@ -63,7 +66,7 @@ assembly:    assembly                                 (independent)
 |---|---|---|
 | `standalone` | Upstream's singleton pipeline per sample, then cohort-level SV, TRGT and LPS files, plus an optional GLnexus cohort VCF. | Default choice. |
 | `joint` | Per-sample phased VCFs whose genotypes are consistent across the cohort (including hom-ref at sites variant elsewhere). | Needs a frozen cohort before phasing starts. |
-| `assembly` | Haplotype-resolved assemblies, aligned to the reference and called with paftools. | Independent of the other two. |
+| `assembly` | Haplotype-resolved assemblies with their QC; the haplotypes aligned to the decoy-free GRCh38 and called with dipcall and PAV 3 in `assembly_call`; the cohort's Minigraph-Cactus graph and its VCFs in `cohort_pangenome`. | Independent of the other two; its cohort stage needs a frozen cohort. |
 
 ## What an operator does
 

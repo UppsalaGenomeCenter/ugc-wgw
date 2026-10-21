@@ -31,7 +31,7 @@ from .report import Raw, _bytes, _esc, _table
 from .stages import namespace
 from .util import UgcError, diag, read_json, utc_now, write_json
 
-DIGEST_SCHEMA = 1
+DIGEST_SCHEMA = 2   # 2 (0.12.0): the assembly track's full detail; every per-sample digest rebuilds once
 # The public repository (scripts/export-public.sh fills the owner); `project_url` in config.json overrides it.
 DEFAULT_PROJECT_URL = "https://github.com/UppsalaGenomeCenter/ugc-wgw"
 
@@ -46,9 +46,11 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "asm_reliable_fraction_min": 0.5,     # reliable.bed as a fraction of the reference below which the assembly fails
     "asm_het_loss_max": 0.2,              # het-loss rate (read hets the assembly calls hom or not at all) above which it fails
     "asm_switch_error_max": 0.05,         # yak trioeval switch-error rate above which a trio-binned haplotype fails
+    "asm_genotype_concordance_min": 0.90, # genotype concordance with the sample's read-based SNVs below which the assembly fails (a swap scores 0.5-0.7)
+    "pg_member_call_rate_min": 0.90,      # a member's call rate in the pangenome VCF below which the cohort page lists it (no sample flag: the cohort is frozen)
 }
 
-STAGE_ORDER = ("singleton", "downstream", "upstream")  # which stage's file wins when several carry it
+STAGE_ORDER = ("singleton", "downstream", "upstream", "assembly_call", "assembly")  # which stage's file wins when several carry it
 SOURCE_MAP: dict[str, dict[str, str]] = {  # logical name -> {stage: output name}
     "stats_file": {"singleton": "stats_file", "downstream": "stats_file"},
     "msg_file": {"singleton": "msg_file", "downstream": "msg_file"},
@@ -75,6 +77,23 @@ SOURCE_MAP: dict[str, dict[str, str]] = {  # logical name -> {stage: output name
     "small_variant_vcf": {"singleton": "phased_small_variant_vcf", "downstream": "phased_small_variant_vcf", "upstream": "small_variant_vcf"},
     "small_variant_gvcf": {"singleton": "small_variant_gvcf", "upstream": "small_variant_gvcf"},
     "cpg_pileup_bed": {"singleton": "cpg_pileup_bed", "downstream": "cpg_pileup_bed"},
+    # the assembly track (arrays such as assembly_stats are read through Sources.paths)
+    "assembler_version": {"assembly": "assembler_version"},
+    "flagger_summary": {"assembly": "flagger_summary"},
+    "flagger_bed": {"assembly": "flagger_bed"},
+    "chrom_coverage": {"assembly_call": "chrom_coverage"},
+    "karyotype_json": {"assembly_call": "karyotype_json"},
+    "regroup_log": {"assembly_call": "regroup_log"},
+    "dipcall_vcf": {"assembly_call": "dipcall_vcf"},
+    "dipcall_vcf_stats": {"assembly_call": "dipcall_vcf_stats"},
+    "dipcall_bed": {"assembly_call": "dipcall_bed"},
+    "pav_vcf": {"assembly_call": "pav_vcf"},
+    "pav_vcf_stats": {"assembly_call": "pav_vcf_stats"},
+    "reliable_bed": {"assembly_call": "reliable_bed"},
+    "reliable_summary": {"assembly_call": "reliable_summary"},
+    "concordance": {"assembly_call": "concordance"},
+    "contig_qc": {"assembly": "contig_qc"},
+    "call_spectra": {"assembly_call": "call_spectra"},
 }
 STAT_ALIASES = {"small_variant_SNV_count": "SNV_count", "small_variant_INDEL_count": "INDEL_count",
                 "small_variant_TSTV_ratio": "TSTV_ratio", "small_variant_HETHOM_ratio": "HETHOM_ratio",
@@ -133,6 +152,24 @@ class Sources:
                 if isinstance(v, str) and v and Path(v).exists():
                     return Path(v)
         return None
+
+    def paths(self, stage: str, name: str) -> list[Path]:
+        """An Array[File] output of one stage, existing files only, in the array's order."""
+        v = self.output(stage, name)
+        return [Path(str(x)) for x in v if isinstance(x, str) and x and Path(x).exists()] if isinstance(v, list) else []
+
+    def containers(self) -> list[str]:
+        """Every image digest the summarised runs' manifests record (read and assembly runs together)."""
+        out: set[str] = set()
+        for stage in self._stages():
+            run = self.runs.get(stage)
+            if run:
+                p = run_files(run.run_path).manifest
+                if p.exists():
+                    doc = read_json(p)
+                    if isinstance(doc, dict):
+                        out.update(str(c.get("image")) for c in doc.get("containers", []) if isinstance(c, dict) and c.get("image"))
+        return sorted(out)
 
     def scalar(self, name: str) -> str | None:
         for stage in self._stages():
@@ -322,10 +359,17 @@ def qc_flags(digest: dict[str, object], thr: dict[str, float]) -> dict[str, obje
         if isinstance(hl, (int, float)) and hl > thr["asm_het_loss_max"]:
             flag("asm_het_loss", "fail", f"het-loss rate {sv.fmt(hl, 4)} against the read-based calls is above {sv.fmt(thr['asm_het_loss_max'], 2)} (collapsed haplotypes)",
                  hl, thr["asm_het_loss_max"])
+        gc = con.get("genotype_concordance")
+        if isinstance(gc, (int, float)) and gc < thr["asm_genotype_concordance_min"]:
+            flag("asm_concordance_low", "fail", f"genotype concordance {sv.fmt(gc, 4)} with the sample's read-based SNVs is below "
+                 f"{sv.fmt(thr['asm_genotype_concordance_min'], 2)} (a different sample, or a failed assembly)", gc, thr["asm_genotype_concordance_min"])
         kar = str(((asm.get("karyotype") or {}).get("karyotype")) or "")  # type: ignore[union-attr]
         sheet_k = {"MALE": "XY", "FEMALE": "XX"}.get(str(sample.get("sex_sheet") or "").upper())
         if sheet_k and kar in ("XX", "XY") and kar != sheet_k:
             flag("asm_karyotype_mismatch", "warn", f"sex in the sheet is {sample.get('sex_sheet')} ({sheet_k}) but the assembly infers {kar}", kar, sample.get("sex_sheet"))
+        elif kar == "unknown":
+            flag("asm_karyotype_unknown", "warn", "the assembly's karyotype is unknown (too little non-PAR chrX assembled): the sample is in no sex "
+                 "stratum of the pangenome frequencies", kar)
     if digest.get("messages"):
         flag("messages", "info", f"{len(digest['messages'])} workflow message(s)")  # type: ignore[arg-type]
     if digest.get("warnings"):
@@ -359,6 +403,162 @@ def _dp_bins(dp: list[list[object]]) -> list[list[object]]:
             x = x + 1
         out[sp._bin_label(x, edges, labels)] += int(genotypes)
     return [[label, out[label]] for label in labels]
+
+
+def _first_line(path: Path) -> str:
+    for line in sp.read_lines(path):
+        if line.strip():
+            return line.strip()
+    return ""
+
+
+def _by_label(paths: list[Path], labels: list[str], aliases: dict[str, list[str]] | None = None) -> list[Path | None]:
+    """Match an Array[File] to the haplotype labels by file name (`.pat.`, `_pat.`, `hap1`, `h1`...), index order as a
+    fallback when no name matches."""
+    out: list[Path | None] = []
+    for i, label in enumerate(labels):
+        wanted = [label] + (aliases or {}).get(label, []) + [f"hap{i + 1}", f"h{i + 1}"]
+        hit = next((q for q in paths if any(f".{w}." in q.name or f"_{w}." in q.name or f".{w}_" in q.name for w in wanted)), None)
+        out.append(hit if hit is not None else (paths[i] if i < len(paths) and not any(p.name == q.name for p in out if p) else None))
+    return out
+
+
+def _assembly_digest(src: Sources, safe) -> dict[str, object]:  # type: ignore[no-untyped-def]
+    """The assembly track (assembly and assembly_call runs) as plain numbers: contiguity per haplotype, Flagger's
+    composition, trio QC, per-chromosome coverage and reliability, the karyotype with its evidence, both callers'
+    statistics, the reliable region and the concordance, plus a flat `summary` block for the cohort distributions."""
+    asm: dict[str, object] = {}
+    if "assembly" not in src.docs:
+        return asm
+    doc = src.docs["assembly"]
+    ns = namespace("assembly") + "."
+    labels = [str(x) for x in doc.get(ns + "haplotype_labels")] if isinstance(doc.get(ns + "haplotype_labels"), list) else []  # type: ignore[union-attr]
+    stats_paths = src.paths("assembly", "assembly_stats")
+    labels = labels or [f"hap{i + 1}" for i in range(len(stats_paths))]
+    trio = bool(doc.get(ns + "trio"))
+    version_path = src.path("assembler_version")
+    asm = {"trio": trio, "assembler": doc.get(ns + "assembler_used"),
+           "assembler_version": (safe("assembler_version", _first_line, version_path) if version_path else None) or None,
+           "parents": {"hap1": doc.get(ns + "hap1_parent"), "hap2": doc.get(ns + "hap2_parent")} if trio else None,
+           "haplotypes": [], "calls": {}, "karyotype": None, "flagger": None, "reliable": None, "concordance": None,
+           "chrom_coverage": None, "regions": None, "summary": {}}
+    trio_paths = _by_label(src.paths("assembly", "trio_eval"), labels)
+    lowq_paths = _by_label([q for q in src.paths("assembly", "assembly_lowQ_beds") if "utg" not in q.name], labels)
+    for i, label in enumerate(labels):
+        g = (safe("assembly_stats", lambda q=stats_paths[i]: sp.parse_caln50(sp.read_lines(q))) or {}) if i < len(stats_paths) else {}
+        te = safe("trio_eval", lambda q=trio_paths[i]: sp.parse_trioeval(sp.read_lines(q))) if trio_paths[i] else None
+        lowq = None
+        if lowq_paths[i]:
+            bp = safe("assembly_lowQ_beds", lambda q=lowq_paths[i]: sp.bed_bp_by_chrom(sp.read_binary_lines(q)))
+            lowq = {"n": sum(1 for _ in sp.read_binary_lines(lowq_paths[i])), "bp": sum(bp.values())} if bp is not None else None
+        asm["haplotypes"].append({"name": label, "stats": g, "trio_eval": te or None, "lowq": lowq,  # type: ignore[attr-defined]
+                                  "unreliable_bp": None, "hap_bed_bp": None, "pav_callable_bp": None})
+    fs = src.path("flagger_summary")
+    if fs:
+        asm["flagger"] = safe("flagger_summary", lambda: sp.parse_flagger_summary(sp.read_lines(fs))) or None
+    cq_path = src.path("contig_qc")
+    cq = (safe("contig_qc", lambda: sp.parse_contig_qc(sp.read_lines(cq_path))) or None) if cq_path else None
+    if cq:
+        by_hap = {str(g["haplotype"]): g for g in cq.get("haplotypes", [])}  # type: ignore[union-attr]
+        for h in asm["haplotypes"]:  # type: ignore[union-attr]
+            g = by_hap.get(str(h["name"]))
+            if g:
+                h["flagger"] = {"bp": g.get("flagger_bp"), "non_hap_pct": g.get("non_hap_pct")}
+                h["seq"] = {"gc_pct": g.get("gc_pct"), "n_bp": g.get("n_bp"), "gaps": g.get("gaps"), "telo_ends": g.get("telo_ends"), "telo_bp": g.get("telo_bp")}
+        asm["contig_qc"] = {"top_contigs": cq.get("top_contigs", [])}
+    lengths: dict[str, int] = {}
+    if "assembly_call" in src.docs:
+        cdoc = src.docs["assembly_call"]
+        cns = namespace("assembly_call") + "."
+        for caller in ("dipcall", "pav"):
+            q = src.path(f"{caller}_vcf_stats")
+            if q:
+                bs = safe(f"{caller}_vcf_stats", lambda q=q: sp.parse_bcftools_stats(sp.read_lines(q))) or {}
+                sn, psc = bs.get("sn", {}), bs.get("psc", {})
+                hets, hom = psc.get("n_hets"), psc.get("n_nonref_hom")
+                asm["calls"][caller] = {  # type: ignore[index]
+                    "snps": sn.get("number of SNPs"), "indels": sn.get("number of indels"), "records": sn.get("number of records"),
+                    "mnps": sn.get("number of MNPs"), "others": sn.get("number of others"), "multiallelic": sn.get("number of multiallelic sites"),
+                    "tstv": (bs.get("tstv") or {}).get("ratio"),
+                    "psc": {k: psc.get(k) for k in ("n_hets", "n_nonref_hom", "n_singletons", "n_missing", "n_indels")},
+                    "hethom": round(hets / hom, 3) if isinstance(hets, int) and isinstance(hom, int) and hom else None,
+                    "st": bs.get("st", {}),
+                    "idd": _bin_series(bs.get("idd", []), [-49, -9, 1, 10, 50], ["<=-50", "-49..-10", "-9..-1", "+1..+9", "+10..+49", ">=+50"]) if bs.get("idd") else []}
+        cc_path = src.path("chrom_coverage")
+        cc = safe("chrom_coverage", lambda: sp.parse_chrom_coverage(sp.read_lines(cc_path))) if cc_path else None
+        if cc:
+            lengths = dict(cc.get("lengths", {}))
+            asm["chrom_coverage"] = {"haplotypes": cc.get("haplotypes", []), "rows": cc.get("rows", [])}
+        kj = src.path("karyotype_json")
+        kar = safe("karyotype_json", lambda: sp.load_json(kj)) if kj else None
+        asm["karyotype"] = kar if isinstance(kar, dict) else {"karyotype": cdoc.get(cns + "inferred_karyotype")}
+        rl = src.path("regroup_log")
+        moved = (safe("regroup_log", lambda: sp.parse_regroup_log(sp.read_lines(rl))) or []) if rl else []
+        asm["karyotype"]["moved"] = sorted(moved, key=lambda r: -float(r.get("length") or 0))[:20]  # type: ignore[index]
+        for key, out in (("reliable_summary", "reliable"), ("concordance", "concordance")):
+            q = src.path(key)
+            if q:
+                asm[out] = safe(key, lambda q=q: sp.parse_kv_table(sp.read_lines(q))) or None
+        cs_path = src.path("call_spectra")
+        spectra = (safe("call_spectra", lambda: sp.parse_call_spectra(sp.read_lines(cs_path))) or {}) if cs_path else {}
+        for caller, spec in spectra.items():
+            asm["calls"].setdefault(caller, {})["spectra"] = spec  # type: ignore[union-attr]
+        regions: dict[str, object] = {}
+        for key, name in (("dipcall_bed", "dip"), ("reliable_bed", "reliable")):
+            q = src.path(key)
+            if q:
+                b = safe(key, lambda q=q: sp.bed_bins(sp.read_binary_lines(q), lengths))
+                if b:
+                    regions[name] = b
+        asm["regions"] = regions or None
+        hap_beds = _by_label(src.paths("assembly_call", "dipcall_hap_beds"), labels)
+        unrel = _by_label(src.paths("assembly_call", "unreliable_beds"), labels)
+        callable_beds = _by_label(src.paths("assembly_call", "pav_callable_beds"), labels, {"pat": ["pat"], "mat": ["mat"]})
+        for i, h in enumerate(asm["haplotypes"]):  # type: ignore[union-attr]
+            for key, paths in (("hap_bed_bp", hap_beds), ("unreliable_bp", unrel), ("pav_callable_bp", callable_beds)):
+                if paths[i]:
+                    bp = safe(key, lambda q=paths[i]: sp.bed_bp_by_chrom(sp.read_binary_lines(q)))
+                    h[key] = sum(bp.values()) if bp is not None else None  # type: ignore[index]
+    asm["summary"] = _assembly_summary(asm)
+    return asm
+
+
+def _assembly_summary(asm: dict[str, object]) -> dict[str, object]:
+    """The flat per-sample numbers the cohort page draws distributions of."""
+    haps: list[dict[str, object]] = asm.get("haplotypes", [])  # type: ignore[assignment]
+    lengths = [h["stats"].get("total_length") for h in haps if isinstance(h.get("stats"), dict) and isinstance(h["stats"].get("total_length"), int)]  # type: ignore[index]
+    ng50s = [h["stats"].get("n50") for h in haps if isinstance(h.get("stats"), dict) and isinstance(h["stats"].get("n50"), int)]  # type: ignore[index]
+    contigs = [h["stats"].get("n_sequences") for h in haps if isinstance(h.get("stats"), dict) and isinstance(h["stats"].get("n_sequences"), int)]  # type: ignore[index]
+    switches = [(h.get("trio_eval") or {}).get("switch_rate") for h in haps if (h.get("trio_eval") or {}).get("switch_rate") is not None]  # type: ignore[union-attr]
+    hammings = [(h.get("trio_eval") or {}).get("hamming_rate") for h in haps if (h.get("trio_eval") or {}).get("hamming_rate") is not None]  # type: ignore[union-attr]
+    fl: dict[str, object] = asm.get("flagger") or {}  # type: ignore[assignment]
+    rel: dict[str, object] = asm.get("reliable") or {}  # type: ignore[assignment]
+    con: dict[str, object] = asm.get("concordance") or {}  # type: ignore[assignment]
+    kar: dict[str, object] = asm.get("karyotype") or {}  # type: ignore[assignment]
+    calls: dict[str, dict[str, object]] = asm.get("calls") or {}  # type: ignore[assignment]
+    dip, pav = calls.get("dipcall", {}), calls.get("pav", {})
+    return {"hap_length_min": min(lengths) if lengths else None, "hap_length_max": max(lengths) if lengths else None,
+            "ng50_min": min(ng50s) if ng50s else None, "contigs": sum(contigs) if contigs else None,
+            "flagger_non_hap_pct": fl.get("non_hap_pct"), "reliable_fraction": rel.get("reliable_fraction_of_reference"),
+            "het_loss": con.get("het_loss_rate"), "genotype_concordance": con.get("genotype_concordance"),
+            "switch_max": max(switches) if switches else None, "hamming_max": max(hammings) if hammings else None,
+            "dipcall_snvs": dip.get("snps"), "dipcall_indels": dip.get("indels"), "dipcall_hethom": dip.get("hethom"),
+            "pav_records": pav.get("records"), "pav_snvs": pav.get("snps"), "pav_indels": pav.get("indels"),
+            "pav_sv_pass": _sv_pass(pav), "dipcall_pass_fraction": _pass_fraction(dip),
+            "telo_ends_max": max([((h.get("seq") or {}).get("telo_ends") or {}).get("2", 0) for h in haps] or [0]) if any(h.get("seq") for h in haps) else None,  # type: ignore[union-attr]
+            "chrx_fraction": kar.get("chrx_fraction"), "chry_fraction": kar.get("chry_fraction")}
+
+
+def _sv_pass(call: dict[str, object]) -> int | None:
+    spec: dict[str, object] = call.get("spectra") or {}  # type: ignore[assignment]
+    sizes: dict[str, dict[str, int]] = spec.get("sv_sizes") or {}  # type: ignore[assignment]
+    return sum(n for by_bin in sizes.values() for n in by_bin.values()) if sizes else None
+
+
+def _pass_fraction(call: dict[str, object]) -> float | None:
+    spec: dict[str, object] = call.get("spectra") or {}  # type: ignore[assignment]
+    total, passed = spec.get("total"), spec.get("pass_total")
+    return round(passed / total, 4) if isinstance(total, int) and total and isinstance(passed, int) else None
 
 
 def build_digest(src: Sources, thr: dict[str, float], y_threshold: float = 0.1) -> dict[str, object]:
@@ -473,40 +673,7 @@ def build_digest(src: Sources, thr: dict[str, float], y_threshold: float = 0.1) 
                 files[logical] = {"path": str(p), "bytes": None}
     d["files"] = files
 
-    # assembly and assembly_call (when the sample has them)
-    asm: dict[str, object] = {}
-    if "assembly" in src.docs:
-        doc = src.docs["assembly"]
-        ns = namespace("assembly") + "."
-        stats_paths = doc.get(ns + "assembly_stats") if isinstance(doc.get(ns + "assembly_stats"), list) else []
-        haps = doc.get(ns + "haplotype_labels") if isinstance(doc.get(ns + "haplotype_labels"), list) else []
-        asm = {"trio": bool(doc.get(ns + "trio")), "assembler": doc.get(ns + "assembler_used"), "haplotypes": [], "calls": {}, "karyotype": None,
-               "flagger": None, "reliable": None, "concordance": None}
-        trio_paths = doc.get(ns + "trio_eval") if isinstance(doc.get(ns + "trio_eval"), list) else []
-        for i, p in enumerate(stats_paths):  # type: ignore[arg-type]
-            g = safe("assembly_stats", lambda p=p: sp.parse_gfatools_stats(sp.read_lines(Path(str(p))))) or {}
-            te = (safe("trio_eval", lambda q=trio_paths[i]: sp.parse_trioeval(sp.read_lines(Path(str(q))))) or None) if i < len(trio_paths) else None  # type: ignore[index, arg-type]
-            asm["haplotypes"].append({"name": str(haps[i]) if i < len(haps) else f"hap{i + 1}", "stats": g, "trio_eval": te})  # type: ignore[attr-defined, arg-type]
-        fs = doc.get(ns + "flagger_summary")
-        if fs:
-            asm["flagger"] = safe("flagger_summary", lambda q=fs: sp.parse_flagger_summary(sp.read_lines(Path(str(q))))) or None
-    if "assembly_call" in src.docs:
-        doc = src.docs["assembly_call"]
-        ns = namespace("assembly_call") + "."
-        asm.setdefault("haplotypes", []); asm.setdefault("calls", {})
-        for caller in ("dipcall", "pav"):
-            p = doc.get(ns + f"{caller}_vcf_stats")
-            if p:
-                sn = (safe(f"{caller}_vcf_stats", lambda q=p: sp.parse_bcftools_stats(sp.read_lines(Path(str(q))))) or {}).get("sn", {})
-                asm["calls"][caller] = {"snps": sn.get("number of SNPs"), "indels": sn.get("number of indels"), "records": sn.get("number of records")}  # type: ignore[index]
-        kj = doc.get(ns + "karyotype_json")
-        kar = safe("karyotype_json", lambda q=kj: sp.load_json(Path(str(q)))) if kj else None
-        asm["karyotype"] = kar if isinstance(kar, dict) else {"karyotype": doc.get(ns + "inferred_karyotype")}
-        for key, out in (("reliable_summary", "reliable"), ("concordance", "concordance")):
-            p = doc.get(ns + key)
-            if p:
-                asm[out] = safe(key, lambda q=p: sp.parse_kv_table(sp.read_lines(Path(str(q))))) or None
-    d["assembly"] = asm
+    d["assembly"] = _assembly_digest(src, safe)
 
     # provenance from the primary run's manifest
     man = safe("run_manifest", src.manifest) or {}
@@ -520,7 +687,7 @@ def build_digest(src: Sources, thr: dict[str, float], y_threshold: float = 0.1) 
         "workflow": ugc_wgw_man.get("upstream", {}) if isinstance(ugc_wgw_man, dict) else {},
         "references": {k: {"version": v.get("version"), "build": v.get("build"), "source": v.get("source"),
                            "files": v.get("files", [])} for k, v in references.items() if isinstance(v, dict)},
-        "containers": sorted({str(c.get("image")) for c in man.get("containers", []) if isinstance(c, dict)}),
+        "containers": safe("containers", src.containers) or sorted({str(c.get("image")) for c in man.get("containers", []) if isinstance(c, dict)}),
     }
     d["qc"] = qc_flags(d, thr)
     return d
@@ -640,6 +807,255 @@ def _software_sections(prov: dict[str, object], tools: list[dict[str, object]], 
             + ("<details><summary>reference files</summary>" + _table(["bundle", "file", "bytes", "checksum"], ref_files, cls="") + "</details>" if ref_files else "")
             + "<h3>Citations</h3><ul class='plain small'>" + "".join(f"<li><b>{_esc(n)}</b>: {_esc(c)}</li>" for n, c in CITATIONS) + "</ul>"
             + "<p class='small muted'>The workflow itself: HiFi-human-WGS-WDL and this composition layer (above). Please cite the tools whose results you use.</p>")
+    return body
+
+
+def _assembly_html(asm: dict[str, object]) -> str:
+    """The sample page's Assembly section: contiguity, Flagger composition, trio QC, the chromosomes, the karyotype's
+    evidence, both callers with their spectra, the reliable region and the concordance with the read-based calls."""
+    haps: list[dict[str, object]] = asm.get("haplotypes", [])  # type: ignore[assignment]
+    parents: dict[str, object] = asm.get("parents") or {}  # type: ignore[assignment]
+    head = (f"<p class='muted'>{'trio-binned' if asm.get('trio') else 'single-sample'} {_esc(str(asm.get('assembler') or 'hifiasm'))}"
+            + (f" {_esc(str(asm.get('assembler_version')))}" if asm.get("assembler_version") else "") + " assembly"
+            + (f"; hap1 follows {_esc(str(parents.get('hap1')))}, hap2 follows {_esc(str(parents.get('mat') or parents.get('hap2')))}" if parents.get("hap1") else "") + "</p>")
+
+    def st(h: dict[str, object]) -> dict[str, object]:
+        return h.get("stats") if isinstance(h.get("stats"), dict) else {}  # type: ignore[return-value]
+
+    hap_rows = [[h["name"], sv.fmt_bp(st(h).get("total_length")), sv.fmt(st(h).get("n_sequences")),
+                 sv.fmt_bp(st(h).get("n50")) if st(h).get("n50") else "–", sv.fmt(st(h).get("l50")) if st(h).get("l50") else "–",
+                 sv.fmt_bp(st(h).get("aun")),
+                 f"{sv.fmt((h.get('lowq') or {}).get('n'))} ({sv.fmt_bp((h.get('lowq') or {}).get('bp'))})" if h.get("lowq") else "–"] for h in haps]  # type: ignore[union-attr]
+    body = head + _table(["haplotype", "total length", "contigs", "NG50", "LG50", "auNG", "low-quality regions (hifiasm)"], hap_rows, cls="")
+    body += "<p class='small muted'>NG50, LG50 and auNG are against a 3.1 Gb genome (calN50 -L3.1g), not the assembly's own length.</p>"
+    xs = sorted({int(row[0]) for h in haps for row in (st(h).get("nl") or []) if len(row) >= 3})  # type: ignore[union-attr]
+    if len(xs) > 1:
+        ng_rows = []
+        for x in xs:
+            cells: list[object] = [f"NG{x}"]
+            for h in haps:
+                row = next((r for r in (st(h).get("nl") or []) if len(r) >= 3 and int(r[0]) == x), None)  # type: ignore[union-attr]
+                cells += [sv.fmt_bp(row[1]) if row else "–", sv.fmt(row[2]) if row else "–"]
+            ng_rows.append(cells)
+        body += ("<details><summary>NGx curve</summary>"
+                 + _table(["x"] + [c for h in haps for c in (f"{h['name']} NGx", f"{h['name']} LGx")], ng_rows, cls="") + "</details>")
+
+    fl: dict[str, object] = asm.get("flagger") or {}  # type: ignore[assignment]
+    if fl:
+        cats = ["err", "dup", "hap", "col", "unk"]
+        bp: dict[str, object] = fl.get("bp") or {}  # type: ignore[assignment]
+        blocks: dict[str, object] = fl.get("blocks") or {}  # type: ignore[assignment]
+        row_vals = {c: sv.finite(bp.get(c)) for c in cats} if bp else {c: sv.finite(fl.get(c + "_pct")) for c in cats}
+        body += ("<h3>Flagger: what the reads say about the assembly</h3>"
+                 + _cards([("Err", sv.fmt(fl.get("err_pct"), 2, "%")), ("Dup", sv.fmt(fl.get("dup_pct"), 2, "%")), ("Hap", sv.fmt(fl.get("hap_pct"), 2, "%")),
+                           ("Col", sv.fmt(fl.get("col_pct"), 2, "%")), ("Unk", sv.fmt(fl.get("unk_pct"), 2, "%")),
+                           ("non-Hap (Err + Dup + Col)", sv.fmt(fl.get("non_hap_pct"), 2, "%")),
+                           ("flagged blocks (Err / Dup / Col)", f"{sv.fmt(blocks.get('err'))} / {sv.fmt(blocks.get('dup'))} / {sv.fmt(blocks.get('col'))}" if blocks else "–")])
+                 + sv.stacked([("bases by label" if bp else "share by label", row_vals)], cats, width=560, percent=True)
+                 + "<p class='small muted'>Err: erroneous, Dup: falsely duplicated, Hap: correctly haploid, Col: collapsed (both haplotypes in one), Unk: unlabelled; "
+                 "shares of the diploid assembly from the reads' coverage and MAPQ (HMM-Flagger, base level).</p>")
+        hap_fl = [(str(h["name"]), {c: sv.finite(((h.get("flagger") or {}).get("bp") or {}).get(c)) for c in cats[:4]}) for h in haps if h.get("flagger")]  # type: ignore[union-attr]
+        if hap_fl:
+            body += "<h4>Per haplotype</h4>" + sv.stacked(hap_fl, cats[:4], width=560, percent=True)
+    seq_rows = [[h["name"], sv.fmt((h.get("seq") or {}).get("gc_pct"), 2, "%"), sv.fmt_bp((h.get("seq") or {}).get("n_bp")), sv.fmt((h.get("seq") or {}).get("gaps")),  # type: ignore[union-attr]
+                 " / ".join(sv.fmt(((h.get("seq") or {}).get("telo_ends") or {}).get(k)) for k in ("0", "1", "2")), sv.fmt_bp((h.get("seq") or {}).get("telo_bp")),  # type: ignore[union-attr]
+                 sv.fmt((h.get("flagger") or {}).get("non_hap_pct"), 2, "%")] for h in haps if h.get("seq")]  # type: ignore[union-attr]
+    if seq_rows:
+        body += ("<h3>Sequence QC per haplotype</h3>"
+                 + _table(["haplotype", "GC", "N bases", "N runs (10 bp+)", "contigs with 0 / 1 / 2 telomeric ends", "telomere bases", "Flagger non-Hap"], seq_rows, cls="")
+                 + "<p class='small muted'>Telomeres by the assembly's motif (seqtk telo); a contig with both ends telomeric spans a chromosome arm to arm.</p>")
+        cq: dict[str, object] = asm.get("contig_qc") or {}  # type: ignore[assignment]
+        topc: list[dict[str, object]] = cq.get("top_contigs") or []  # type: ignore[assignment]
+        if topc:
+            body += ("<details><summary>contigs with the most non-Hap bases</summary>"
+                     + _table(["haplotype", "contig", "length", "GC", "N bases", "telomeric ends", "Err bp", "Dup bp", "Col bp", "Hap bp"],
+                              [[c.get("haplotype"), c.get("contig"), sv.fmt_bp(c.get("length")), sv.fmt(c.get("gc_pct"), 1), sv.fmt(c.get("n_bp")), c.get("telo_ends"),
+                                sv.fmt_bp(c.get("err_bp")), sv.fmt_bp(c.get("dup_bp")), sv.fmt_bp(c.get("col_bp")), sv.fmt_bp(c.get("hap_bp"))] for c in topc], cls="")
+                     + "</details>")
+
+    if asm.get("trio"):
+        trio_rows: list[list[object]] = []
+        contig_rows: list[list[object]] = []
+        for h in haps:
+            te: dict[str, object] = h.get("trio_eval") or {}  # type: ignore[assignment]
+            if not te:
+                continue
+            trio_rows.append([f"trioeval {h.get('name')}: switch / Hamming error rate",
+                              f"{sv.fmt(te.get('switch_rate'), 4)} ({sv.fmt(te.get('switch_errors'))} of {sv.fmt(te.get('switch_sites'))}) / "
+                              f"{sv.fmt(te.get('hamming_rate'), 4)} ({sv.fmt(te.get('hamming_errors'))} of {sv.fmt(te.get('hamming_sites'))})"
+                              + (f"; {sv.fmt(te.get('n_contigs'))} contigs evaluated" if te.get("n_contigs") else "")])
+            for c in te.get("contigs") or []:  # type: ignore[union-attr]
+                contig_rows.append([h.get("name"), c.get("name"), sv.fmt(c.get("pat_blocks")), sv.fmt(c.get("mat_blocks")), sv.fmt(c.get("switches")), sv.fmt(c.get("hamming"))])
+        if trio_rows:
+            body += "<h3>Trio QC (yak trioeval)</h3>" + _kv(trio_rows)
+            if contig_rows:
+                body += ("<details><summary>contigs with the most switches</summary>"
+                         + _table(["haplotype", "contig", "paternal k-mer blocks", "maternal k-mer blocks", "switches", "Hamming errors"], contig_rows, cls="")
+                         + "<p class='small muted'>Blocks of parent-specific k-mers along the contig; a switch is a paternal block followed by a maternal one or the reverse; "
+                         "Hamming errors are the blocks of the minority parent.</p></details>")
+
+    cc: dict[str, object] = asm.get("chrom_coverage") or {}  # type: ignore[assignment]
+    regions: dict[str, dict[str, object]] = asm.get("regions") or {}  # type: ignore[assignment]
+    kar: dict[str, object] = asm.get("karyotype") or {}  # type: ignore[assignment]
+    if cc or regions:
+        rows: list[dict[str, object]] = cc.get("rows", [])  # type: ignore[assignment]
+        order = {c: i for i, c in enumerate(sp.PRIMARY_CONTIGS + ["other"])}
+        panels = ""
+        for hap in cc.get("haplotypes", []):  # type: ignore[union-attr]
+            items = [(str(r["chrom"]), sv.finite(r.get("fraction")), f"{sv.fmt(r.get('contigs'))} contigs")
+                     for r in sorted((r for r in rows if r.get("haplotype") == hap and r.get("chrom") != "other"), key=lambda r: order.get(str(r["chrom"]), 99))]
+            if items:
+                top = max(1.0, max(v for _, v, _ in items))
+                panels += (f"<div><h4>{_esc(str(hap))}: assembled fraction per chromosome</h4>"
+                           + sv.bars_h(items, width=300, label_w=60, digits=3, vmax=top) + "</div>")
+        body += "<h3>Chromosomes</h3>"
+        if kar.get("karyotype"):
+            thr: dict[str, object] = kar.get("thresholds") or {}  # type: ignore[assignment]
+            body += (f"<p class='small muted'>inferred karyotype <b>{_esc(str(kar.get('karyotype')))}</b>: non-PAR chrX {sv.fmt(kar.get('chrx_fraction'), 3)} of its length "
+                     f"(threshold {sv.fmt(thr.get('chrx_min_fraction'), 2)}), non-PAR chrY {sv.fmt(kar.get('chry_fraction'), 3)} (threshold {sv.fmt(thr.get('chry_min_fraction'), 2)})"
+                     + (f"; {_esc(str(kar.get('reason')))}" if kar.get("reason") else "") + "</p>")
+        if panels:
+            body += f'<div class="grid">{panels}</div><p class="small muted">Aligned bases of the haplotype\'s contigs over the chromosome length (MAPQ 5 or more); above 1 where contigs overlap.</p>'
+        dip = regions.get("dip") or {}
+        rel = regions.get("reliable") or {}
+        main_src, main = ("reliable", rel) if rel else ("dip", dip)
+        chroms: dict[str, dict[str, object]] = main.get("chroms", {}) if main else {}  # type: ignore[assignment]
+        if chroms:
+            dip_chroms: dict[str, dict[str, object]] = dip.get("chroms", {}) if dip else {}  # type: ignore[assignment]
+            bin_bp = int(main.get("bin_bp") or 1_000_000)
+            track_rows = []
+            for c in sorted(chroms, key=lambda c: order.get(c, 99)):
+                t = chroms[c]
+                steps = []
+                if rel and c in dip_chroms:
+                    steps = [[i * bin_bp, min((i + 1) * bin_bp, int(dip_chroms[c]["len"])), v] for i, v in enumerate(dip_chroms[c].get("bins") or []) if v is not None]  # type: ignore[union-attr, arg-type]
+                track_rows.append({"chrom": c, "len": t["len"], "bins": t["bins"], "bin_bp": bin_bp, "steps": steps})
+            body += (f"<h4>Where the assembly is reliable along the genome ({sv.fmt_bp(bin_bp)} bins)</h4>"
+                     + sv.legend([(f"{main_src}.bed covered fraction per bin", "m1")] + ([("dip.bed covered fraction per bin", "m4")] if rel else []))
+                     + sv.track(track_rows, vmax=1.0, steps_max=1.0, unit="")
+                     + "<p class='small muted'>dip.bed: the reference covered by exactly one contig of each haplotype (dipcall's confident region); reliable.bed: dip.bed minus "
+                       "the regions Flagger did not label Hap. The gap between the two is what the mask removed.</p>")
+        table_rows: list[list[object]] = []
+        haps_names = list(cc.get("haplotypes", []))
+        for c in sorted({str(r["chrom"]) for r in rows} | set(chroms), key=lambda c: order.get(c, 99)):
+            if c == "other" and not any(r.get("chrom") == "other" for r in rows):
+                continue
+            cells: list[object] = [c]
+            for hap in haps_names:
+                r = next((r for r in rows if r.get("haplotype") == hap and r.get("chrom") == c), None)
+                cells += [sv.fmt_bp(r.get("aligned_bases")) if r else "–", sv.fmt(r.get("fraction"), 3) if r and r.get("fraction") is not None else "–", sv.fmt(r.get("contigs")) if r else "–"]
+            dc = (dip.get("chroms", {}) if dip else {}).get(c, {})
+            rc = (rel.get("chroms", {}) if rel else {}).get(c, {})
+            cells += [sv.fmt_bp(dc.get("bp")) if dc else "–", sv.fmt_bp(rc.get("bp")) if rc else "–"]
+            table_rows.append(cells)
+        if table_rows:
+            body += ("<details><summary>per chromosome</summary>"
+                     + _table(["chromosome"] + [h for hap in haps_names for h in (f"{hap} bp", f"{hap} fraction", f"{hap} contigs")] + ["dip.bed bp", "reliable bp"], table_rows, cls="")
+                     + "</details>")
+    if kar and len(kar) > 1:
+        kv_rows: list[list[object]] = [["inferred karyotype", f"{kar.get('karyotype')}: {kar.get('reason') or ''}"],
+                                       ["non-PAR chrX assembled", f"{sv.fmt_bp(kar.get('chrx_bases_outside_par'))} of {sv.fmt_bp(kar.get('chrx_length'))} ({sv.fmt(kar.get('chrx_fraction'), 3)})"],
+                                       ["non-PAR chrY assembled", f"{sv.fmt_bp(kar.get('chry_bases_outside_par'))} of {sv.fmt_bp(kar.get('chry_length'))} ({sv.fmt(kar.get('chry_fraction'), 3)})"],
+                                       ["dipcall copies regrouped (non-trio XY)", ("yes" if kar.get("regrouped") else "no") + f", {sv.fmt(kar.get('moved_contigs'))} contigs moved"]]
+        body += "<h3>Karyotype evidence</h3>" + _kv(kv_rows)
+        moved: list[dict[str, object]] = kar.get("moved") or []  # type: ignore[assignment]
+        if moved:
+            body += ("<details><summary>contigs moved between dipcall's haplotype copies</summary>"
+                     + _table(["from", "contig", "length", "to", "home chromosome", "chrY bases", "non-PAR chrX bases"],
+                              [[m.get("from_haplotype"), m.get("contig"), sv.fmt_bp(m.get("length")), m.get("to_haplotype"), m.get("home_chrom"), sv.fmt(m.get("chrY_bases")), sv.fmt(m.get("chrX_nonpar_bases"))] for m in moved], cls="")
+                     + "</details>")
+
+    calls: dict[str, dict[str, object]] = asm.get("calls", {})  # type: ignore[assignment]
+    if calls or kar.get("karyotype"):
+        body += "<h3>Calls against the reference (assembly_call)</h3>"
+        if calls:
+            call_rows = []
+            for c, v in sorted(calls.items()):
+                psc: dict[str, object] = v.get("psc") or {}  # type: ignore[assignment]
+                call_rows.append([c, sv.fmt(v.get("records")), sv.fmt(v.get("snps")), sv.fmt(v.get("indels")), sv.fmt(v.get("tstv"), 2),
+                                  sv.fmt(psc.get("n_hets")), sv.fmt(psc.get("n_nonref_hom")), sv.fmt(v.get("hethom"), 2), sv.fmt(psc.get("n_missing"))])
+            body += (_table(["caller", "records", "SNVs", "indels", "Ts/Tv", "het", "hom-alt", "het/hom", "missing GT"], call_rows, cls="")
+                     + "<p class='small muted'>bcftools stats over the whole primary VCF, ASM_UNRELIABLE records included; PAV's Ts/Tv is pulled down by its "
+                       "unfiltered paralogue placements, count by PASS to compare callers.</p>")
+            region_rows: list[list[object]] = []
+            dip_bp = sum(r.get("bp", 0) for r in (regions.get("dip") or {}).get("chroms", {}).values()) if regions.get("dip") else None  # type: ignore[union-attr]
+            if dip_bp:
+                region_rows.append(["dip.bed (both haplotypes, exactly one contig each)", sv.fmt_bp(dip_bp)])
+            for h in haps:
+                if h.get("hap_bed_bp"):
+                    region_rows.append([f"dipcall {h.get('name')} covered", sv.fmt_bp(h.get("hap_bed_bp"))])
+            for h in haps:
+                if h.get("pav_callable_bp"):
+                    region_rows.append([f"PAV callable {h.get('name')}", sv.fmt_bp(h.get("pav_callable_bp"))])
+            if region_rows:
+                body += "<h4>Reference covered by the callers</h4>" + _kv(region_rows)
+            grid = ""
+            for c, v in sorted(calls.items()):
+                if v.get("idd"):
+                    grid += f"<div><h4>{_esc(c)}: indel length (sites)</h4>" + sv.hist([(str(l), sv.finite(n)) for l, n in v.get("idd", [])], width=420) + "</div>"  # type: ignore[union-attr]
+            dip_st: dict[str, object] = (calls.get("dipcall") or {}).get("st") or {}  # type: ignore[assignment]
+            if dip_st:
+                grid += "<div><h4>dipcall: substitution spectrum</h4>" + sv.bars_h([(k, sv.finite(v), "") for k, v in sorted(dip_st.items())], width=300, label_w=60) + "</div>"
+            if grid:
+                body += f'<div class="grid">{grid}</div>'
+            spectra = {c: v.get("spectra") for c, v in sorted(calls.items()) if isinstance(v.get("spectra"), dict)}
+            if spectra:
+                fclasses = ["PASS", "ASM_UNRELIABLE", "BOTH", "OTHER"]
+                body += ("<h4>Calls by FILTER class</h4>"
+                         + sv.stacked([(c, {k: sv.finite((sp_.get("by_filter") or {}).get(k)) for k in fclasses}) for c, sp_ in spectra.items()], fclasses, width=560, percent=True)  # type: ignore[union-attr]
+                         + "<p class='small muted'>PASS: inside the reliable region with the caller's own filters passed; ASM_UNRELIABLE: outside it (Flagger's mask); "
+                           "OTHER: the caller's own filter; BOTH: masked and filtered.</p>")
+                type_order = ["SNV", "MNV", "INDEL", "INS", "DEL", "INV", "OTHER"]
+                type_rows = []
+                for kind in type_order:
+                    cells: list[object] = [kind]
+                    for c, sp_ in spectra.items():
+                        bt: dict[str, dict[str, int]] = sp_.get("by_type") or {}  # type: ignore[union-attr, assignment]
+                        d = bt.get(kind) or {}
+                        cells += [sv.fmt(d.get("PASS")), sv.fmt(sum(v for k, v in d.items() if k != "PASS"))]
+                    if any(x not in ("–", "0") for x in cells[1:]):
+                        type_rows.append(cells)
+                body += ("<h4>Calls by type (PASS / masked or filtered)</h4>"
+                         + _table(["type"] + [h for c in spectra for h in (f"{c} PASS", f"{c} other")], type_rows, cls=""))
+                grid2 = ""
+                for c, sp_ in spectra.items():
+                    sizes: dict[str, dict[str, int]] = sp_.get("sv_sizes") or {}  # type: ignore[union-attr, assignment]
+                    if sizes:
+                        grid2 += (f"<div><h4>{_esc(c)}: PASS structural variants by size</h4>"
+                                  + sv.stacked([(t, {b: sv.finite(v) for b, v in sizes[t].items()}) for t in sorted(sizes)], sp.SV_SIZE_BINS, width=380) + "</div>")
+                if grid2:
+                    body += f'<div class="grid">{grid2}</div>'
+        else:
+            body += "<p class='muted'>No caller statistics.</p>"
+    elif not calls:
+        body += "<p class='muted'>assembly_call has not run.</p>"
+
+    rel_s: dict[str, object] = asm.get("reliable") or {}  # type: ignore[assignment]
+    if rel_s:
+        rel_rows: list[list[object]] = [
+            ["reference", sv.fmt_bp(rel_s.get("reference_bp"))],
+            ["dip.bed", f"{sv.fmt_bp(rel_s.get('dip_bed_bp'))} ({sv.fmt(sv.finite(rel_s.get('dip_bed_bp')) / sv.finite(rel_s.get('reference_bp')) if sv.finite(rel_s.get('reference_bp')) else None, 3)} of the reference)"],
+            ["Flagger's non-Hap regions lifted to the reference", f"{sv.fmt_bp(rel_s.get('unreliable_bp'))}, of which {sv.fmt_bp(rel_s.get('unreliable_in_dip_bed_bp'))} inside dip.bed"],
+            ["reliable.bed (dip.bed minus them)", f"{sv.fmt_bp(rel_s.get('reliable_bp'))}: {sv.fmt(rel_s.get('reliable_fraction_of_reference'), 3)} of the reference, "
+                                                   f"{sv.fmt(rel_s.get('reliable_fraction_of_dip_bed'), 3)} of dip.bed"]]
+        for h in haps:
+            if h.get("unreliable_bp") is not None:
+                rel_rows.append([f"unreliable regions from {h.get('name')} (reference bp)", sv.fmt_bp(h.get("unreliable_bp"))])
+        body += "<h3>Reliable region</h3>" + _kv(rel_rows)
+
+    con: dict[str, object] = asm.get("concordance") or {}  # type: ignore[assignment]
+    if con:
+        con_rows: list[list[object]] = [
+            [f"region compared", str(con.get("region") or "")],
+            ["sites merged / called by both", f"{sv.fmt(con.get('sites_merged'))} / {sv.fmt(con.get('both_called'))}"],
+            ["concordant / discordant genotypes", f"{sv.fmt(con.get('concordant'))} / {sv.fmt(con.get('discordant'))}"],
+            ["genotype concordance", sv.fmt(con.get("genotype_concordance"), 4)],
+            ["read-based hets, het loss (hom or absent in the assembly)", f"{sv.fmt(con.get('read_het'))}, {sv.fmt(con.get('het_loss'))} (rate {sv.fmt(con.get('het_loss_rate'), 4)})"],
+            ["read-only / assembly-only sites", f"{sv.fmt(con.get('read_only'))} / {sv.fmt(con.get('asm_only'))}"],
+            ["assembly-only hets", sv.fmt(con.get("asm_only_het"))]]
+        body += ("<h3>Concordance with the read-based SNVs</h3>" + _kv(con_rows)
+                 + "<p class='small muted'>dipcall's PASS SNVs against the sample's read-based phased VCF inside the region: concordance checks the sample's identity, "
+                   "het loss shows collapsed haplotypes.</p>")
     return body
 
 
@@ -821,38 +1237,7 @@ def render_sample(d: dict[str, object], tools: list[dict[str, object]], *, proje
     # assembly
     asm: dict[str, object] = d.get("assembly", {})  # type: ignore[assignment]
     if asm:
-        hap_rows = [[h["name"], sv.fmt_bp(h["stats"].get("total_length")), sv.fmt(h["stats"].get("n_sequences")), sv.fmt_bp(h["stats"].get("n50")) if h["stats"].get("n50") else "–",
-                     sv.fmt_bp(h["stats"].get("aun"))] for h in asm.get("haplotypes", [])]  # type: ignore[union-attr]
-        calls: dict[str, dict[str, object]] = asm.get("calls", {})  # type: ignore[assignment]
-        call_rows = [[c, sv.fmt(v.get("snps")), sv.fmt(v.get("indels")), sv.fmt(v.get("records"))] for c, v in sorted(calls.items())]
-        kar: dict[str, object] = asm.get("karyotype") or {}  # type: ignore[assignment]
-        kar_text = ""
-        if kar:
-            kar_text = (f"<p class='small muted'>inferred karyotype <b>{_esc(str(kar.get('karyotype')))}</b>"
-                        + (f": {_esc(str(kar.get('reason')))}" if kar.get("reason") else "") + "</p>")
-        qc_rows: list[list[object]] = []
-        fl: dict[str, object] = asm.get("flagger") or {}  # type: ignore[assignment]
-        if fl:
-            qc_rows.append(["Flagger: Err / Dup / Hap / Col (% of the assembly)",
-                            " / ".join(sv.fmt(fl.get(k), 2) for k in ("err_pct", "dup_pct", "hap_pct", "col_pct"))])
-        for h in asm.get("haplotypes", []):  # type: ignore[union-attr]
-            te = h.get("trio_eval") or {}
-            if te:
-                qc_rows.append([f"trioeval {h.get('name')}: switch / Hamming error rate", f"{sv.fmt(te.get('switch_rate'), 4)} / {sv.fmt(te.get('hamming_rate'), 4)}"])
-        rel: dict[str, object] = asm.get("reliable") or {}  # type: ignore[assignment]
-        if rel:
-            qc_rows.append(["reliable region (dip.bed minus Flagger's regions)",
-                            f"{sv.fmt_bp(rel.get('reliable_bp'))}, {sv.fmt(rel.get('reliable_fraction_of_reference'), 3)} of the reference"])
-        con: dict[str, object] = asm.get("concordance") or {}  # type: ignore[assignment]
-        if con:
-            qc_rows.append([f"concordance with the read-based SNVs in {con.get('region')}",
-                            f"genotype concordance {sv.fmt(con.get('genotype_concordance'), 4)} over {sv.fmt(con.get('both_called'))} sites; "
-                            f"het loss {sv.fmt(con.get('het_loss_rate'), 4)} of {sv.fmt(con.get('read_het'))} read hets; {sv.fmt(con.get('asm_only_het'))} assembly-only hets"])
-        add("sec-assembly", "Assembly", f"<p class='muted'>{'trio-binned' if asm.get('trio') else 'single-sample'} {_esc(str(asm.get('assembler') or 'hifiasm'))} assembly</p>"
-            + _table(["haplotype", "total length", "contigs", "N50", "auN"], hap_rows, cls="")
-            + (("<h3>Assembly QC</h3>" + _kv(qc_rows)) if qc_rows else "")
-            + (("<h3>Calls against the reference (assembly_call)</h3>" + kar_text
-                + _table(["caller", "SNVs", "indels", "records"], call_rows, cls="")) if call_rows or kar else "<p class='muted'>assembly_call has not run.</p>"))
+        add("sec-assembly", "Assembly", _assembly_html(asm))
 
     # messages and files
     msgs: list[str] = d.get("messages", [])  # type: ignore[assignment]

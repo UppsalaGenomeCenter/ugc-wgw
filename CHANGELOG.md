@@ -3,18 +3,61 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.12.0
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.5.0,
+unchanged. The release is about the assembly track's reporting.
+
+- **The analysis summaries read every assembly-track output.** The sample
+  page's Assembly section shows contiguity with the NGx curve and hifiasm's
+  low-quality regions, Flagger's composition overall and per haplotype, a
+  sequence QC table (GC, N bases, telomeric contig ends) with the contigs
+  carrying the most non-Hap bases, trio QC with the contigs carrying the
+  most switches, the chromosomes (assembled fraction per haplotype and a
+  track of `reliable.bed` against `dip.bed`), the karyotype's evidence, both
+  callers with Ts/Tv, het/hom, spectra, the PASS-versus-masked split and
+  PAV's structural variants by size, the reliable region and the concordance
+  in full. The cohort page draws the assembly metrics as distributions with
+  outliers and threshold failures, lists one row per member, counts
+  karyotypes, and for the pangenome shows the reference length and
+  haplotype sequence per chromosome, the graph's structure (reference gaps,
+  node degrees, nesting levels, vcfwave types and allele lengths), truvari's
+  genotype concordance and the members' genotypes in the graph. Digest
+  schema 2: every per-sample digest rebuilds once.
+- New QC: `asm_concordance_low` fails a sample whose assembly disagrees with
+  its read-based SNVs (`asm_genotype_concordance_min`, 0.90: a sample swap
+  scores 0.5–0.7), `asm_karyotype_unknown` warns, and
+  `pg_member_call_rate_min` (0.90) lists members with little assembled
+  sequence in the graph on the cohort page.
+- New small tasks on existing outputs, none of the expensive tasks touched:
+  `assembly` writes a per-contig QC table (`contig_qc`: GC, N bases and
+  runs, telomeric bases at each end, Flagger's bases per label; seqtk in the
+  Flagger image), `assembly_call` the callers' spectra (`call_spectra`),
+  `cohort_pangenome` the members' genotype statistics (`member_stats`) and,
+  per chromosome, the join's path statistics and reference gaps, the bases
+  per genome and the node degree histogram; its frequency summary counts
+  records by nesting level, vcfwave type and allele length.
+- The image manifest drops the retired `align_hifiasm` image (32 images in
+  the bundle); the smoke harness drives `assembly_call` and `cohort_pangenome`
+  as single stages; the masking task's pipeline passes shellcheck 0.9.0 (the
+  0.11.0 tag's CI failure).
+
 ## 0.11.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
 data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.5.0,
 unchanged. There was no 0.10.0. This release is the assembly track: the
-`assembly` mode becomes `assembly → assembly_call → cohort_pangenome`.
+`assembly` mode becomes `assembly → assembly_call → cohort_pangenome`. The tree
+at tag v0.11.0 fails its own CI on a shellcheck 0.9.0 finding in a task
+command; public commit 50a73a0 on main carries the one-line fix.
 
 - **Breaking, `assembly`.** The stage ends at an output contract
   (`assembler_used`, `assembler_version`, `haplotype_labels`, `hap_fastas`,
   statistics, graphs); `haplotypes`, `zipped_assembly_fastas`, `asm_bams`,
-  `merged_asm_bam` and the `paftools_*` outputs are gone, and the
-  `align_hifiasm` image with them.
+  `merged_asm_bam` and the `paftools_*` outputs are gone; the paftools call is
+  gone with them, while the `align_hifiasm` image, now unused, still ships in
+  this release's manifest.
 - **Expensive.** hifiasm runs with `--telo-m CCCTAA` (`hifiasm_telomere_motif`,
   empty = off) and writes its version file, so every sample's assembly is
   recomputed once on this version; no later release touches the hifiasm

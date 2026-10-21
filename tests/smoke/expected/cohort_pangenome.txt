@@ -16,3 +16,9 @@ freq_vcf_index/*.pangenome.*.freq.vcf.gz.tbi
 freq_summary/*.pangenome.*.freq.summary.tsv
 freq_samples/*.pangenome.*.freq.samples.tsv
 ugc_wgw_manifest/*.cohort_pangenome.ugc_wgw_manifest.json
+chrom_path_stats/*/*.pangenome.*.chr*.path-stats.tsv.gz
+chrom_refgaps/*/*.pangenome.*.chr*.refgaps.bed.gz
+chrom_genome_bp/*/*.pangenome.*.chr*.genome-bp.tsv
+chrom_degree_stats/*/*.pangenome.*.chr*.degree.tsv
+member_stats_shards/*/*.pangenome.*.wave.chr*.stats.txt
+member_stats/*.pangenome.*.members.tsv

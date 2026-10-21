@@ -171,7 +171,7 @@ Reading the tables:
 
 ## ugc_wgw_assembly
 
-10 tasks, in first-call order.
+11 tasks, in first-call order.
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
@@ -184,11 +184,12 @@ Reading the tables:
 | `ugc_wgw_flagger_align` | 32 | 64G | cpu from workflow input default; cpu input: flagger_align_threads; memory from workflow input default; memory input: flagger_align_mem_gb; command uses threads | `workflows/ugc_wgw/assembly/flagger.wdl:7` |
 | `ugc_wgw_flagger_correct_bam` | 8 | 16G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/assembly/flagger.wdl:110` |
 | `ugc_wgw_flagger_hmm` | 16 | 32G | cpu from workflow input default; cpu input: flagger_threads; memory from workflow input default; memory input: flagger_mem_gb; command uses threads | `workflows/ugc_wgw/assembly/flagger.wdl:202` |
+| `ugc_wgw_assembly_contig_qc` | 2 | 8G | cpu from input default; memory from input default | `workflows/ugc_wgw/assembly/contig_qc.wdl:7` |
 | `ugc_wgw_yak_trioeval` | 8 | 48G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/assembly/yak.wdl:82` |
 
 ## ugc_wgw_assembly_call
 
-9 tasks, in first-call order.
+10 tasks, in first-call order.
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
@@ -200,11 +201,12 @@ Reading the tables:
 | `ugc_wgw_liftover_unreliable` | 2 | 8G | - | `workflows/ugc_wgw/assembly/masking.wdl:7` |
 | `ugc_wgw_reliable_regions` | 1 | 4G | - | `workflows/ugc_wgw/assembly/masking.wdl:93` |
 | `ugc_wgw_vcf_finish` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/assembly/vcf_finish.wdl:7` |
+| `ugc_wgw_asm_call_spectra` | 1 | 4G | - | `workflows/ugc_wgw/assembly/call_spectra.wdl:7` |
 | `ugc_wgw_asm_concordance` | 2 | 8G | - | `workflows/ugc_wgw/assembly/concordance.wdl:7` |
 
 ## ugc_wgw_cohort_pangenome
 
-10 tasks, in first-call order.
+12 tasks, in first-call order.
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
@@ -215,6 +217,8 @@ Reading the tables:
 | `ugc_wgw_cactus_split` | 32 | 128G | cpu from workflow input default; cpu input: split_cpu; memory from workflow input default; memory input: split_mem_gb; command uses threads; command uses mem | `workflows/ugc_wgw/pangenome/cactus_split.wdl:7` |
 | `ugc_wgw_cactus_chrom` | 16 | - | cpu from workflow input default; cpu input: chrom_cpu; memory: "~{mem_gb} GiB" where mem_gb = chrom_mem = if chrom == "chrOther" then chrom_mem_gb_floor else ugc_wgw_pangenome_names.chrom_mem_gb[chrom]; command uses threads; command uses mem | `workflows/ugc_wgw/pangenome/cactus_chrom.wdl:7` |
 | `ugc_wgw_pangenome_vcf_post` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/pangenome/vcf_post.wdl:7` |
+| `ugc_wgw_pangenome_member_stats` | 1 | 4G | - | `workflows/ugc_wgw/pangenome/member_stats.wdl:7` |
+| `ugc_wgw_pangenome_member_stats_gather` | 1 | 2G | - | `workflows/ugc_wgw/pangenome/member_stats.wdl:70` |
 | `ugc_wgw_pangenome_freq_summary` | 1 | 4G | - | `workflows/ugc_wgw/pangenome/vcf_post.wdl:132` |
 | `ugc_wgw_vcf_split_multiallelic` | 2 | 4G | cpu from input default; command uses threads | `workflows/ugc_wgw/pangenome/truvari.wdl:7` |
 | `ugc_wgw_truvari_bench` | 2 | 8G | - | `workflows/ugc_wgw/pangenome/truvari.wdl:77` |

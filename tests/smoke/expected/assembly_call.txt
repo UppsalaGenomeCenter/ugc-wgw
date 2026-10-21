@@ -21,3 +21,4 @@ unreliable_beds/*/*.asm.unreliable.bed
 reliable_bed/*.asm.reliable.bed
 reliable_summary/*.asm.reliable.summary.tsv
 ugc_wgw_manifest/*.assembly_call.ugc_wgw_manifest.json
+call_spectra/*.asm.call_spectra.tsv

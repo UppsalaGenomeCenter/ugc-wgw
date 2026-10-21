@@ -251,7 +251,9 @@ PANGENOME_CHROMS = ["chr1", "chr20", "chrX"]
 GRAPH_STATS = "#ref_chrom\tnodes\tedges\tlength\n{chrom}\t{nodes}\t{edges}\t{length}\n"
 AMBIGUOUS_HEADER = "genome\tassigned\tassigned_bp\tambiguous\tambiguous_bp\n"
 TRUVARI_JSON = {"TP-base": 24000, "TP-comp": 24500, "FP": 2500, "FN": 6000, "precision": 0.9074, "recall": 0.8, "f1": 0.8503,
-                "base cnt": 30000, "comp cnt": 27000, "gt_concordance": 0.95}
+                "base cnt": 30000, "comp cnt": 27000, "gt_concordance": 0.95, "TP-base_TP-gt": 22800, "TP-base_FP-gt": 1200,
+                "TP-comp_TP-gt": 23275, "TP-comp_FP-gt": 1225, "gt_matrix": {"(0, 1)": {"(0, 1)": 20000, "(1, 1)": 800}},
+                "params": {"sizemin": 50, "sizefilt": 50, "sizemax": 50000, "pctseq": 0.0, "pctsize": 0.7, "refdist": 500}}
 PANGENOME_FREQ_SUMMARY = """# ugc-pacbio-wgw cohort_pangenome: AF bins use the largest allele frequency of a record with AC > 0; call rate = NS / n_samples
 resource\tmetric\tkey\tvalue
 samples\tn\ttotal\t{n}
@@ -283,14 +285,50 @@ pangenome\tmean_call_rate\tall\t0.9700
 pangenome\trecords\tcall_rate_below_0.9\t150000
 """
 
+# Tier 2 (0.12.0) files: per-contig QC, the callers' spectra, the graph's per-member statistics, per-chromosome path bp, degrees and gaps
+CONTIG_QC = ("haplotype\tcontig\tlength\tgc_pct\tn_bp\tgaps\ttelo_5p_bp\ttelo_3p_bp\terr_bp\tdup_bp\thap_bp\tcol_bp\n"
+             "{h1}\th1tg000001l\t60000000\t40.9\t0\t0\t3200\t0\t20000\t500000\t59300000\t180000\n"
+             "{h1}\th1tg000002l\t5000000\t41.5\t100\t1\t0\t2800\t0\t0\t4990000\t10000\n"
+             "{h2}\th2tg000001l\t61000000\t40.8\t0\t0\t0\t0\t15000\t300000\t60600000\t85000\n"
+             "{h2}\th2tg000002l\t3000000\t42.0\t0\t0\t3000\t3100\t0\t0\t3000000\t0\n")
+CALL_SPECTRA = ("caller\tfilter_class\ttype\tsize_bin\tcontig_class\tcount\n"
+                "dipcall\tASM_UNRELIABLE\tSNV\t<50\tautosome\t20000\ndipcall\tPASS\tDEL\t100-1k\tautosome\t300\ndipcall\tPASS\tINDEL\t<50\tautosome\t600000\n"
+                "dipcall\tPASS\tINS\t<100\tautosome\t400\ndipcall\tPASS\tSNV\t<50\tautosome\t3700000\ndipcall\tPASS\tSNV\t<50\tchrX\t80000\n"
+                "pav\tASM_UNRELIABLE\tSNV\t<50\tautosome\t194000\npav\tPASS\tDEL\t1k-10k\tautosome\t250\npav\tPASS\tINDEL\t<50\tautosome\t700000\n"
+                "pav\tPASS\tINS\t100-1k\tautosome\t900\npav\tPASS\tINV\t10k-100k\tautosome\t12\npav\tPASS\tSNV\t<50\tautosome\t3600000\n")
+MEMBERS_HEADER = "sample_id\tn_ref_hom\tn_nonref_hom\tn_hets\tn_singletons\tn_missing\tn_sites\tcall_rate\n"
+GENOME_BP_HEADER = "genome\tpaths\tbp\n"
+DEGREE = "Degree\tSides\tNodes(min)\tNodes(max)\tNodes(total)\n0\t2\t2\t0\t0\n1\t736985\t392753\t344232\t2\n2\t376561\t169496\t207065\t344230\n3\t12480\t2094\t10386\t47132\n4\t2878\t91\t2787\t3900\n"
+REFGAPS = "{chrom}\t0\t60000\trefgap\n{chrom}\t26386225\t28557053\trefgap\n"
+
 GFATOOLS = "CC\tGS   genome_size_if_provided\nCC\tSZ   total_sequence_length\nCC\tNN   number_of_sequences\nCC\tNL   x   Nx   Lx\nCC\tAU   auN\nCC\nGS\t3100000000\nSZ\t{sz}\nNN\t{nn}\nNL\t0\t{n0}\t1\nNL\t50\t{n50}\t{l50}\nAU\t{aun}\n"
-CALLER_SN = "# bcftools stats\nSN\t0\tnumber of samples:\t1\nSN\t0\tnumber of records:\t{rec}\nSN\t0\tnumber of SNPs:\t{snps}\nSN\t0\tnumber of indels:\t{indels}\n"
+CALLER_SN = ("# bcftools stats\nSN\t0\tnumber of samples:\t1\nSN\t0\tnumber of records:\t{rec}\nSN\t0\tnumber of SNPs:\t{snps}\nSN\t0\tnumber of indels:\t{indels}\n"
+             "SN\t0\tnumber of MNPs:\t0\nSN\t0\tnumber of others:\t2\nSN\t0\tnumber of multiallelic sites:\t3073\n"
+             "TSTV\t0\t{ts}\t{tv}\t{tstv}\t{ts}\t{tv}\t{tstv}\n"
+             "ST\t0\tA>C\t3450\nST\t0\tA>G\t14328\nST\t0\tC>T\t15000\n"
+             "IDD\t0\t-60\t242\t232\t0.64\nIDD\t0\t-1\t3000\t2900\t0.5\nIDD\t0\t1\t3200\t3100\t0.5\nIDD\t0\t55\t20\t20\t0.9\n"
+             "PSC\t0\t{sid}\t0\t{hom}\t{het}\t{ts}\t{tv}\t{indels}\t0.0\t{singletons}\t0\t0\t{missing}\n")
+# assembly_call BEDs on chr20 (and a chr1 piece): dip.bed, reliable.bed (dip.bed minus two masked intervals), the per-haplotype dipcall
+# BEDs, the lifted unreliable regions, PAV's callable regions, and hifiasm's low-quality regions in contig coordinates
+DIP_BED = "chr20\t63840\t393022\nchr20\t408057\t1877050\nchr20\t2000000\t3500000\nchr1\t1000000\t1200000\n"
+RELIABLE_BED = "chr20\t63840\t393022\nchr20\t408057\t1800000\nchr20\t1850000\t1877050\nchr20\t2000000\t3500000\nchr1\t1000000\t1200000\n"
+HAP_BED = "chr20\t60000\t400000\nchr20\t405000\t1900000\nchr20\t1990000\t3600000\nchr1\t990000\t1210000\n"
+UNRELIABLE_BED = "chr20\t1800000\t1850000\nchr20\t4000000\t4010000\n"
+CALLABLE_BED = "#chrom\tpos\tend\nchr20\t60000\t1900000\nchr20\t1990000\t3600000\nchr1\t990000\t1210000\n"
+LOWQ_BED = "h{hap}tg000001l\t0\t5083\t100\tread1,read2\nh{hap}tg000001l\t3914257\t3915726\t70\tread3\nh{hap}tg000002l\t10\t20\t60\tread4\n"
+REGROUP_LOG = "from_haplotype\tcontig\tlength\tto_haplotype\thome_chrom\tchrY_bases\tchrX_nonpar_bases\n"
+CHROM_COVERAGE = ("haplotype\tchrom\taligned_bases\tcontigs\tchrom_length\tfraction\n"
+                  "{h1}\tchr1\t823\t1\t248956422\t0.0000\n{h1}\tchr20\t60000000\t3\t64444167\t0.9310\n{h1}\tchrX\t556\t1\t156040895\t0.0000\n"
+                  "{h1}\tchrUn_KI270742v1\t50000\t2\t186739\t0.2677\n"
+                  "{h2}\tchr20\t61000000\t2\t64444167\t0.9466\n{h2}\tchrY\t0\t0\t57227415\t0.0000\n{h2}\tchr1_KI270706v1_random\t20000\t1\t175055\t0.1142\n")
 FLAGGER_SUMMARY = ("#metric\tlevel\tunit\tannotation_type\tannotation\tsize_bin\tlabel_filter\tErr\tDup\tHap\tCol\tUnk\n"
+                   "PREDICTION\toverlap_based\tcount\tannotation\twhole_genome\tALL_SIZES\tALL_LABELS\t3.00\t62.00\t104.00\t8.00\t0.00\n"
                    "PREDICTION\tbase_level\tcount\tannotation\twhole_genome\tALL_SIZES\tALL_LABELS\t37000000\t41000000\t2900000000\t42000000\t0\n"
                    "PREDICTION\tbase_level\tpercentage\tannotation\twhole_genome\tALL_SIZES\tALL_LABELS\t1.24\t1.37\t95.99\t1.40\t0.00\n"
                    "PREDICTION\twindow_level\tpercentage\tannotation\twhole_genome\tALL_SIZES\tALL_LABELS\t1.30\t1.40\t95.90\t1.40\t0.00\n")
 KARYOTYPE_JSON = {"karyotype": "unknown", "reason": "non-PAR chrX bases aligned are 0.000 of the chrX length, below 0.5", "trio": False,
-                  "chrx_bases_outside_par": 0, "chry_bases_outside_par": 0, "chrx_fraction": 0.0, "chry_fraction": 0.0,
+                  "chrx_bases_outside_par": 556, "chry_bases_outside_par": 0, "chrx_fraction": 0.0, "chry_fraction": 0.0,
+                  "chrx_length": 156040895, "chry_length": 57227415, "haplotypes": ["hap1", "hap2"],
                   "thresholds": {"min_mapq": 5, "chrx_min_fraction": 0.5, "chry_min_fraction": 0.1}, "regrouped": False, "moved_contigs": 0}
 
 
@@ -377,15 +415,50 @@ def fixture_bytes(name: str, sid: str, stage: str, inferred_sex: str = "", index
         text = "sample_id\tsafe_name\ttrio\n" + "".join(f"{m}\t{m.replace('-', '_').replace('.', '_')}\tfalse\n" for m in ms)
     elif name == "truvari_summary":
         doc = TRUVARI_JSON
+    elif name == "contig_qc":
+        text = CONTIG_QC.format(h1="hap1", h2="hap2")
+    elif name == "call_spectra":
+        text = CALL_SPECTRA
+    elif name == "member_stats":
+        ms = members or []
+        text = MEMBERS_HEADER + "".join(f"{m}\t{1000000 + i}\t{800000 - i * 1000}\t{1500000 + i * 2000}\t{30000 + i * 5000}\t{90000 + i * 20000}\t4100000\t{1 - (90000 + i * 20000) / 4100000:.4f}\n"
+                                        for i, m in enumerate(ms))
+    elif name == "member_stats_shards":
+        text = "# bcftools stats\nSN\t0\tnumber of records:\t1366666\n"
+    elif name == "chrom_genome_bp":
+        ms = members or []
+        chrom = PANGENOME_CHROMS[index] if index < len(PANGENOME_CHROMS) else f"chr{index}"
+        text = GENOME_BP_HEADER + f"GRCh38#0\t1\t{60_000_000 + index * 1_000_000}\n" + "".join(f"{m}#{h}\t{3 + i}\t{61_000_000 + i * 100_000 - h * 50_000}\n" for i, m in enumerate(ms) for h in (1, 2))
+    elif name == "chrom_degree_stats":
+        text = DEGREE
+    elif name == "chrom_refgaps":
+        chrom = PANGENOME_CHROMS[index] if index < len(PANGENOME_CHROMS) else f"chr{index}"
+        text = REFGAPS.format(chrom=chrom)
     elif name == "cohort_trgt_lps":
         ms = members or []
         text = "trid\tmotif\t" + "\t".join(ms) + "\n" + "".join(f"chr1_{i}_{i + 50}_CAG\tCAG\t" + "\t".join(["0,0"] * len(ms)) + "\n" for i in range(1, 6))
     elif name == "assembly_stats":
         text = GFATOOLS.format(sz=3_020_000_000 - index * 5_000_000, nn=400 + index * 20, n0=140_000_000, n50=60_000_000 - index * 3_000_000, l50=15 + index, aun=58_000_000)
     elif name == "dipcall_vcf_stats":
-        text = CALLER_SN.format(rec=4_500_000, snps=3_800_000, indels=700_000)
+        text = CALLER_SN.format(rec=4_500_000, snps=3_800_000, indels=700_000, ts=2_500_000, tv=1_300_000, tstv=1.92, sid=sid, hom=1_500_000, het=2_900_000, singletons=4_300_000, missing=5000)
     elif name == "pav_vcf_stats":
-        text = CALLER_SN.format(rec=4_600_000, snps=3_850_000, indels=750_000)
+        text = CALLER_SN.format(rec=4_600_000, snps=3_850_000, indels=750_000, ts=1_900_000, tv=1_950_000, tstv=0.97, sid=sid, hom=1_400_000, het=3_100_000, singletons=4_400_000, missing=120_000)
+    elif name == "dipcall_bed":
+        text = DIP_BED
+    elif name == "reliable_bed":
+        text = RELIABLE_BED
+    elif name == "dipcall_hap_beds":
+        text = HAP_BED
+    elif name == "unreliable_beds":
+        text = UNRELIABLE_BED if index == 0 else "chr20\t4000000\t4010000\n"
+    elif name == "pav_callable_beds":
+        text = CALLABLE_BED
+    elif name == "assembly_lowQ_beds":
+        text = LOWQ_BED.format(hap=index + 1)
+    elif name == "regroup_log":
+        text = REGROUP_LOG
+    elif name == "assembler_version":
+        text = "0.25.0-r726\n"
     elif name == "karyotype_json":
         doc = KARYOTYPE_JSON
     elif name == "flagger_summary":
@@ -397,7 +470,7 @@ def fixture_bytes(name: str, sid: str, stage: str, inferred_sex: str = "", index
     elif name == "concordance":
         text = "region\treliable.bed\nsites_merged\t3900000\nboth_called\t3700000\nconcordant\t3650000\ndiscordant\t50000\nread_het\t2200000\nhet_loss\t44000\nread_only\t120000\nasm_only\t80000\nasm_only_het\t30000\ngenotype_concordance\t0.9865\nhet_loss_rate\t0.0200\n"
     elif name == "chrom_coverage":
-        text = "haplotype\tchrom\taligned_bases\tcontigs\tchrom_length\tfraction\nhap1\tchr20\t60000000\t3\t64444167\t0.9310\nhap2\tchr20\t61000000\t2\t64444167\t0.9466\n"
+        text = CHROM_COVERAGE.format(h1="hap1", h2="hap2")
     if doc is not None:
         text = json.dumps(doc, indent=2) + "\n"
     return text.encode() if text is not None else None

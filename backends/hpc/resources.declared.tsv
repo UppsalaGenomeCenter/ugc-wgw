@@ -34,7 +34,9 @@ split_vcf_by_sample	2	4G	-	-	-	cohort_call	vendor/hifi-human-wgs-wdl/workflows/w
 subset_bam	4	8G	-	-	-	singleton,upstream	vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/samtools.wdl:255	cpu from input default; memory from input default; command uses threads
 sv_stats	2	4G	-	-	-	singleton,downstream	vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/bcftools.wdl:415	cpu from input default; memory from input default
 trgt_genotype	16	32G	-	-	-	singleton,downstream	vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/trgt.wdl:5	cpu from input default; memory from input default; command uses threads; command uses mem
+ugc_wgw_asm_call_spectra	1	4G	-	-	-	assembly_call	workflows/ugc_wgw/assembly/call_spectra.wdl:7	
 ugc_wgw_asm_concordance	2	8G	-	-	-	assembly_call	workflows/ugc_wgw/assembly/concordance.wdl:7	
+ugc_wgw_assembly_contig_qc	2	8G	-	-	-	assembly	workflows/ugc_wgw/assembly/contig_qc.wdl:7	cpu from input default; memory from input default
 ugc_wgw_bcftools_concat	4	8G	-	-	-	cohort_call,cohort_merge,cohort_freq,cohort_pangenome	workflows/ugc_wgw/cohort/concat.wdl:9	cpu from input default; memory from input default; command uses threads
 ugc_wgw_bcftools_freq	2	4G	-	-	-	cohort_freq,cohort_pangenome	workflows/ugc_wgw/cohort/freq.wdl:9	cpu from workflow input default; cpu input: freq_threads; memory from workflow input default; memory input: freq_mem_gb; command uses threads
 ugc_wgw_bcftools_merge	4	-	-	-	-	cohort_merge	workflows/ugc_wgw/cohort/sv_merge_bcftools.wdl:9	cpu from input default; memory: "~{mem_gb} GiB" where mem_gb = bcftools_merge_mem = select_first([bcftools_merge_mem_gb, 8 + ceil(n_samples * 0.02)]); memory scales with N; command uses threads
@@ -55,6 +57,8 @@ ugc_wgw_liftover_unreliable	2	8G	-	-	-	assembly_call	workflows/ugc_wgw/assembly/
 ugc_wgw_manifest_write	1	1G	-	-	-	singleton,upstream,cohort_call,downstream,cohort_merge,cohort_freq,assembly,assembly_call,cohort_pangenome	workflows/ugc_wgw/provenance.wdl:9	
 ugc_wgw_minimap2_align_asm	16	32G	-	-	-	assembly_call	workflows/ugc_wgw/assembly/align_asm.wdl:7	cpu from workflow input default; cpu input: align_threads; memory from workflow input default; memory input: align_mem_gb; command uses threads
 ugc_wgw_pangenome_freq_summary	1	4G	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/vcf_post.wdl:132	
+ugc_wgw_pangenome_member_stats	1	4G	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/member_stats.wdl:7	
+ugc_wgw_pangenome_member_stats_gather	1	2G	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/member_stats.wdl:70	
 ugc_wgw_pangenome_names	1	2G	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/names.wdl:7	
 ugc_wgw_pangenome_vcf_post	4	8G	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/vcf_post.wdl:7	cpu from input default; memory from input default; command uses threads
 ugc_wgw_pav	8	40G	-	-	-	assembly_call	workflows/ugc_wgw/assembly/pav.wdl:7	cpu from workflow input default; cpu input: pav_threads; memory from workflow input default; memory input: pav_mem_gb; command uses threads

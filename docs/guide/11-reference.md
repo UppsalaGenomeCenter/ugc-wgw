@@ -158,7 +158,7 @@ the workflow log.
 | `--any-version` | current | Runs of every ugc-wgw version. |
 | `--out-dir DIR` | `<results>/reports/summary` | Where `<id>.summary.html` and `<id>.summary.json` go. |
 | `--force` | off | Rebuild the per-sample digests even when their runs are unchanged. |
-| `--threshold KEY=VALUE` | config or defaults | QC threshold override; repeatable. Keys: `depth_mean_min`, `mapped_read_percent_min`, `read_quality_median_min`; assembly: `asm_flagger_err_pct_max` (10), `asm_hap_length_min` (2.5e9), `asm_hap_length_max` (3.5e9), `asm_reliable_fraction_min` (0.5), `asm_het_loss_max` (0.2), `asm_switch_error_max` (0.05), placeholders until the per-sample pilot sets them. |
+| `--threshold KEY=VALUE` | config or defaults | QC threshold override; repeatable. Keys: `depth_mean_min`, `mapped_read_percent_min`, `read_quality_median_min`; assembly: `asm_flagger_err_pct_max` (10), `asm_hap_length_min` (2.5e9), `asm_hap_length_max` (3.5e9), `asm_reliable_fraction_min` (0.5), `asm_het_loss_max` (0.2), `asm_switch_error_max` (0.05), `asm_genotype_concordance_min` (0.90; a sample swap scores 0.5–0.7); pangenome: `pg_member_call_rate_min` (0.90; lists members on the cohort page, no sample flag); placeholders until the per-sample pilot sets them. |
 | `--pass-list FILE` | none | Also write the IDs whose assembly QC has no `fail` flag (the `asm_*` flags), in sample-sheet order: the input of `cohort freeze` for a pangenome cohort (chapter 06). |
 | `--jobs N` | `1` | Build digests in N processes. |
 

@@ -38,7 +38,7 @@ task; miniwdl-slurm turns the result into the `sbatch` arguments. The
 inventory documents the first box; `ugc-wgw resources` prints the last.
 
 1. **Declared.** What the task's `runtime` block says. The generated
-   [inventory](task-resources.md) lists it for every task the six
+   [inventory](task-resources.md) lists it for every task the nine
    entrypoints can call, with the expression when the value depends on the
    inputs (the N-scaled cohort memory) and a note when the task's command
    uses the same declaration.
@@ -111,9 +111,11 @@ the WDL wrote:
   but correct. The inventory marks these tasks `command uses threads`.
   DeepVariant's `call_variants` does not interpolate its thread count, so
   capping it to 48 costs nothing.
-- Lowering `memory` below what a tool budgets for itself
-  (`glnexus --mem-gbytes`, paftools' `sort -S`; marked `command uses mem`)
-  can get the task killed. Raise those through `stage_inputs` instead.
+- Lowering `memory` below what a tool budgets for itself (`glnexus
+  --mem-gbytes`, and the other tasks the inventory marks `command uses mem`:
+  `deepvariant_make_examples`, `pbsamoa_merge`, `trgt_genotype`,
+  `ugc_wgw_cactus_split`, `ugc_wgw_cactus_chrom`) can get the task killed.
+  Raise those through `stage_inputs` instead.
 - Raising `cpu` or `memory` gives the tool room it may not use: a row with
   `cpu` 96 for `ugc_wgw_hifiasm_assemble` allocates 96 cores, and hifiasm
   still runs `-t 48`, because the command was rendered from the WDL's

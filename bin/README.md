@@ -11,7 +11,7 @@ page is the reference.
 ## Layout of a project
 
 ```
-<project>/.ugc-wgw/config.json     paths and defaults (code dir, miniwdl, cfg, ref maps, registry, stage_inputs,
+<project>/.ugc-wgw/config.json     paths and defaults (code dir, miniwdl, cfg, ref map, registry, stage_inputs,
                                auto_retry_max, backoff_seconds, cancel_orphans, lease_seconds, progress_interval)
 <project>/.ugc-wgw/state.sqlite    samples, cohorts, runs, events (never edit by hand; schema migrated on open)
 <project>/.ugc-wgw/lock            flock + lease line: pid= host= since= last_seen= (heartbeat every poll)
@@ -46,7 +46,7 @@ ugc-wgw status [--mode M] [--cohort ID] [--failed] [--json]   # --failed/--json 
 ugc-wgw logs   <subject_id> --stage S [--tail N] [--attempt N] [--follow] [--json]
 ugc-wgw inputs <subject_id> --stage S [--mode M] [--cohort ID]
 ugc-wgw progress [--mode M] [--stage S] [--samples ... | --cohort ID] [--json]  # done/total per stage, ETA
-ugc-wgw report [--mode M] [--cohort ID] [--any-version] [--sizes] [--price K=V ...] [--out FILE]   # self-contained HTML run summary
+ugc-wgw report [--mode M] [--cohort ID] [--any-version] [--sizes] [--price K=V ...] [--basis allocated|requested] [--out FILE]   # self-contained HTML run summary
 ugc-wgw summary [--samples ... | --cohort ID] [--mode M] [--any-version] [--out-dir DIR] [--force] [--pass-list FILE]
             [--threshold KEY=VALUE ...] [--jobs N]  # per-sample and cohort analysis pages (what was found, QC flags)
 ugc-wgw resources [--stage S] [--changed] [--json]     # what each task asks SLURM for: declared → site caps → policy

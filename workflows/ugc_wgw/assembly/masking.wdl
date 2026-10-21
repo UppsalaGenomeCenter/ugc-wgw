@@ -135,7 +135,7 @@ task ugc_wgw_reliable_regions {
   command <<<
     set -euo pipefail
     bedtools --version >&2
-    cat ~{sep=" " unreliable_beds} | sort -k1,1 -k2,2n | bedtools merge -i - > "~{sample_id}.asm.unreliable.bed"
+    sort -k1,1 -k2,2n ~{sep=" " unreliable_beds} | bedtools merge -i - > "~{sample_id}.asm.unreliable.bed"
     sort -k1,1 -k2,2n "~{dip_bed}" > dip.sorted.bed
     bedtools subtract -a dip.sorted.bed -b "~{sample_id}.asm.unreliable.bed" > "~{sample_id}.asm.reliable.bed"
     bedtools intersect -a dip.sorted.bed -b "~{sample_id}.asm.unreliable.bed" > unreliable_in_dip.bed

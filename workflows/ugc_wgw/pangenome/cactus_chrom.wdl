@@ -98,8 +98,12 @@ task ugc_wgw_cactus_chrom {
 
   command <<<
     set -euo pipefail
-    export HOME="$PWD" TMPDIR="$PWD/tmp"
-    mkdir -p tmp work split
+    # Toil's directories as in ugc_wgw_cactus_split: on the node-local scratch the backend names through
+    # TMPDIR (lock files there are what Toil refuses on a network file system), else in the task directory
+    if [ -n "${TMPDIR:-}" ] && [ -d "$TMPDIR" ] && [ -w "$TMPDIR" ]; then toil="$TMPDIR/cactus"; else toil="$PWD/toil"; fi
+    mkdir -p "$toil/work" "$toil/tmp" "$toil/coord" split
+    export HOME="$PWD" TMPDIR="$toil/tmp" TOIL_COORDINATION_DIR="$toil/coord"
+    echo "toil directories under $toil" >&2
     cactus-pangenome --version 2>&1 | tail -1 >&2
     tar_path=""
     for t in ~{sep=" " chrom_tars}; do
@@ -111,12 +115,12 @@ task ugc_wgw_cactus_chrom {
     [ -s chromfile.txt ] || { echo "~{chromosome} is not in the chromfile" >&2; exit 1; }
     sed -i "s#~{split_root}#$PWD/split#g" "split/seqfiles/~{chromosome}.seqfile"
     cat chromfile.txt "split/seqfiles/~{chromosome}.seqfile" >&2
-    common=(--reference ~{reference} --maxCores ~{cpu} --maxMemory ~{mem_gb}G --workDir "$PWD/work")
+    common=(--reference ~{reference} --maxCores ~{cpu} --maxMemory ~{mem_gb}G --workDir "$toil/work")
 
-    cactus-minigraph "$PWD/js4" chromfile.txt construct --batch --mgCores ~{cpu} "${common[@]}" --logFile step4.minigraph.log
-    cactus-graphmap "$PWD/js5" construct/chromfile.mg.txt map --batch --mapCores ~{cpu} "${common[@]}" --logFile step5.graphmap.log
-    cactus-align "$PWD/js6" map/chromfile.gm.txt align --batch --pangenome --outVG --consCores ~{cpu} "${common[@]}" --logFile step6.align.log
-    cactus-graphmap-join "$PWD/js7" --vg align/*.vg --hal align/*.hal --sv-gfa construct/*.gfa.gz \
+    cactus-minigraph "$toil/js4" chromfile.txt construct --batch --mgCores ~{cpu} "${common[@]}" --logFile step4.minigraph.log
+    cactus-graphmap "$toil/js5" construct/chromfile.mg.txt map --batch --mapCores ~{cpu} "${common[@]}" --logFile step5.graphmap.log
+    cactus-align "$toil/js6" map/chromfile.gm.txt align --batch --pangenome --outVG --consCores ~{cpu} "${common[@]}" --logFile step6.align.log
+    cactus-graphmap-join "$toil/js7" --vg align/*.vg --hal align/*.hal --sv-gfa construct/*.gfa.gz \
       --outDir join --outName "~{chromosome}" --vcf --vcfwave --gbz --gfa --indexCores ~{cpu} "${common[@]}" --logFile step7.join.log
 
     mv "join/~{chromosome}.vcf.gz" "~{out_prefix}.vcf.gz"; mv "join/~{chromosome}.vcf.gz.tbi" "~{out_prefix}.vcf.gz.tbi"
@@ -133,7 +137,7 @@ task ugc_wgw_cactus_chrom {
     vg stats -D "~{out_prefix}.gbz" > "~{out_prefix}.degree.tsv"
     tar -czf "~{out_prefix}.cactus-logs.tar.gz" step4.minigraph.log step5.graphmap.log step6.align.log step7.join.log
     cat "~{out_prefix}.graph-stats.tsv" "~{out_prefix}.genome-bp.tsv" >&2
-    rm -rf work tmp split construct map align join js4 js5 js6 js7
+    rm -rf "$toil" split construct map align join
   >>>
 
   output {

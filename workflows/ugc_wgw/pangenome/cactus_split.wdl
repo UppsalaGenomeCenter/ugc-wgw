@@ -6,7 +6,7 @@ import "../../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/structs.wdl"
 
 task ugc_wgw_cactus_split {
   meta {
-    description: "cactus-minigraph --refOnly, cactus-graphmap --mgSplit --outputFasta (on a copy of the seqfile, which it edits) and cactus-graphmap-split --mgSplit --refContigsFile --otherContig, single-machine inside the full image with --maxCores/--maxMemory at the allocation and HOME, TMPDIR and --workDir in the task directory. Every chromosome directory and its seqfile go into one tar; the chromfile, the split log, contig_sizes.tsv and the per-member assigned/ambiguous contig counts come out beside them. Ambiguous contigs (the config's coverage fractions by length, best/second ratio, MAPQ) are left out of every graph."
+    description: "cactus-minigraph --refOnly, cactus-graphmap --mgSplit --outputFasta (on a copy of the seqfile, which it edits) and cactus-graphmap-split --mgSplit --refContigsFile --otherContig, single-machine inside the full image with --maxCores/--maxMemory at the allocation; Toil's work directory, job stores, temporaries and coordination (lock) directory on the node-local scratch the backend names through TMPDIR, else in the task directory. Every chromosome directory and its seqfile go into one tar; the chromfile, the split log, contig_sizes.tsv and the per-member assigned/ambiguous contig counts come out beside them. Ambiguous contigs (the config's coverage fractions by length, best/second ratio, MAPQ) are left out of every graph."
     outputs: {
       chrom_tars: {
         description: "<chromosome>.tar per reference contig with data (and the other contig): split/<chr>/ and split/seqfiles/<chr>.seqfile"
@@ -91,17 +91,25 @@ task ugc_wgw_cactus_split {
 
   command <<<
     set -euo pipefail
-    export HOME="$PWD" TMPDIR="$PWD/tmp"
-    mkdir -p tmp work tars
+    # Toil, Cactus's engine, keeps lock files in a coordination directory and refuses a network file
+    # system for it ("file locks are known to break ceph filesystems", seen on the cluster 2026-10-22);
+    # its job stores and work directory are thousands of small files. When the backend binds node-local
+    # scratch it sets TMPDIR to it (TASK_SCRATCH_ENV, docs/guide/04-install.md): everything of Toil's
+    # goes there and is removed with the job. Without scratch (the dev machine) it stays in the task
+    # directory, which must then be a local file system.
+    if [ -n "${TMPDIR:-}" ] && [ -d "$TMPDIR" ] && [ -w "$TMPDIR" ]; then toil="$TMPDIR/cactus"; else toil="$PWD/toil"; fi
+    mkdir -p "$toil/work" "$toil/tmp" "$toil/coord" tars
+    export HOME="$PWD" TMPDIR="$toil/tmp" TOIL_COORDINATION_DIR="$toil/coord"
+    echo "toil directories under $toil" >&2
     cactus-pangenome --version 2>&1 | tail -1 >&2
     { printf '~{reference}\t%s\n' "~{ref_fasta}"; paste '~{write_lines(genome_names)}' '~{write_lines(hap_fastas)}'; } > seqfile.txt
     cat seqfile.txt >&2
-    common=(--reference ~{reference} --maxCores ~{cpu} --maxMemory ~{mem_gb}G --workDir "$PWD/work")
+    common=(--reference ~{reference} --maxCores ~{cpu} --maxMemory ~{mem_gb}G --workDir "$toil/work")
 
-    cactus-minigraph "$PWD/js1" seqfile.txt ref.sv.gfa.gz --refOnly --mgCores ~{cpu} "${common[@]}" --logFile step1.minigraph.log
+    cactus-minigraph "$toil/js1" seqfile.txt ref.sv.gfa.gz --refOnly --mgCores ~{cpu} "${common[@]}" --logFile step1.minigraph.log
     cp seqfile.txt seqfile.gm.txt
-    cactus-graphmap "$PWD/js2" seqfile.gm.txt ref.sv.gfa.gz all.paf --mgSplit --outputFasta ref.sv.gfa.fa.gz --mapCores ~{cpu} "${common[@]}" --logFile step2.graphmap.log
-    cactus-graphmap-split "$PWD/js3" seqfile.gm.txt ref.sv.gfa.gz all.paf --outDir split --mgSplit \
+    cactus-graphmap "$toil/js2" seqfile.gm.txt ref.sv.gfa.gz all.paf --mgSplit --outputFasta ref.sv.gfa.fa.gz --mapCores ~{cpu} "${common[@]}" --logFile step2.graphmap.log
+    cactus-graphmap-split "$toil/js3" seqfile.gm.txt ref.sv.gfa.gz all.paf --outDir split --mgSplit \
       --refContigsFile "~{ref_contigs}" --otherContig ~{other_contig} "${common[@]}" --logFile step3.split.log
 
     echo "$PWD/split" > split_root.txt
@@ -121,7 +129,7 @@ task ugc_wgw_cactus_split {
     cp split/minigraph.split.log "~{out_prefix}.split.log"
     cp split/contig_sizes.tsv "~{out_prefix}.contig_sizes.tsv"
     cat "~{out_prefix}.ambiguous_contigs.tsv" >&2
-    rm -rf work tmp js1 js2 js3
+    rm -rf "$toil"
   >>>
 
   output {

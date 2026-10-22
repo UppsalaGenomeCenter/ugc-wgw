@@ -286,6 +286,11 @@ two GPU nodes, written after ten 20–25x samples had run with the defaults
   rows override it) gives every small task two hours.
 - **Assembly on standard nodes.** hifiasm asks 48 cores and 288 GB, a whole
   standard node, and peaked at 81 GB; the `fat` partition is for outliers.
+- **Assembly calling and the pangenome.** Time rows only, from the chr20
+  smoke on the cluster (PAV 29 minutes, dipcall 5, the genome-wide split 57
+  and the chr20 graph 58 at eight haplotypes): 6 hours for Flagger's
+  alignment and PAV, 4 for dipcall, a day for the two Cactus tasks. Their
+  memory stays as declared until the pilots ("The pangenome's sizes").
 
 Adjust the limits to your queue and coverage; after the first cohort,
 `sacct` on the manifests' job ids (below) says whether they hold.
@@ -341,10 +346,23 @@ rendered `miniwdl.cfg`.
 cohort genome-wide in one job (`split_cpu`, `split_mem_gb`, `split_disk_gb`
 as workflow inputs), and `ugc_wgw_cactus_chrom` builds one chromosome per
 job (`chrom_cpu`; memory the larger of `chrom_mem_gb_floor` and
-`chrom_mem_gb_per_100mb` per 100 Mb of the chromosome). The table of
-measured sizes per cohort size goes here once the pilot has run; until then
-the defaults are the dev-machine measurements on a two-sample chr20 graph,
-scaled up with margin.
+`chrom_mem_gb_per_100mb` per 100 Mb of the chromosome). The measured sizes
+per cohort size go here as the pilots run; the first row is the cluster
+smoke of 2026-10-22 (four samples, eight chr20-only haplotypes mapped
+against the whole decoy-free GRCh38):
+
+| task | haplotypes | cores | request | peak RSS | wall time |
+|---|---|---|---|---|---|
+| `ugc_wgw_cactus_split` | 8 (chr20 only) | 32 | 128 GB | 82.2 GB (64 %) | 57 min |
+| `ugc_wgw_cactus_chrom` chr20 | 8 (chr20 only) | 16 | 64 GB (the floor) | 4.5 GB (7 %) | 58 min |
+
+Two thirds of the split's request with eight short haplotypes says that
+its memory is not set by the haplotype sequence alone; how it grows with
+the haplotype count is what the chr20 scaling pilot measures. The
+chromosome task's floor is generous for chr20 at eight haplotypes; the
+per-100 Mb term is for the large chromosomes and bigger cohorts. Keep the
+defaults until the pilot, and give both tasks a day of wall time (the rows
+of the worked policy): the catch-all two hours would kill the split.
 
 ## Finding the right numbers
 

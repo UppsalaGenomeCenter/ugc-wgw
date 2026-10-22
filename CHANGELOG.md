@@ -3,6 +3,32 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.12.1
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.5.0 and
+the image manifest unchanged. A fix release for `cohort_pangenome` on
+clusters whose shared file system is Ceph.
+
+- **The Cactus tasks keep Toil's directories on the node-local scratch.**
+  The first cluster run of `cohort_pangenome` failed in the genome-wide
+  split: Toil, the engine inside Cactus, refuses to keep its lock files on
+  Ceph ("file locks are known to break ceph filesystems"), and both Cactus
+  tasks had put every Toil directory in the task directory on the shared
+  file system. They now honour the `TMPDIR` the scratch backend sets
+  (`TASK_SCRATCH_ENV`, chapter 04): with scratch, Toil's work directory, job
+  stores, temporaries and lock files go to the node's disk and vanish with
+  the job; without it they stay in the task directory, which then has to be
+  a local file system. Both tasks' cache keys change; a graph is rebuilt per
+  frozen cohort anyway.
+- Docs: the assembly track's first cluster run is recorded
+  (`tests/smoke/README.md`): `assembly` and `assembly_call` at the first
+  attempt, the chr20 graph after the fix. Chapter 12 holds the first
+  measured sizes of the two Cactus tasks (the split at 82 of 128 GB with
+  eight haplotypes, the chromosome task at 4.5 of 64 GB), and the worked
+  policy gains time rows for the assembly-track tasks: the catch-all's two
+  hours would kill the split.
+
 ## 0.12.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

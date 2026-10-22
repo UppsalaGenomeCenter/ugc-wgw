@@ -30,6 +30,14 @@ paraphase	-	-	2:00:00	-	-
 ugc_wgw_hifiasm_assemble	-	-	12:00:00	-	-
 ugc_wgw_yak_count	-	-	4:00:00	-	-
 ugc_wgw_minimap2_align_asm	-	-	2:00:00	-	-
+# assembly calling and the pangenome: limits from the chr20 smoke on the cluster (PAV 29 min, the
+# genome-wide split 57 min and the chr20 graph 58 min at eight haplotypes); memory as declared until
+# the pilots (chapter 12, "The pangenome's sizes"). The catch-all's two hours would kill the split.
+ugc_wgw_flagger_align	-	-	6:00:00	-	-
+ugc_wgw_dipcall	-	-	4:00:00	-	-
+ugc_wgw_pav	-	-	6:00:00	-	-
+ugc_wgw_cactus_split	-	-	1-00:00:00	-	-
+ugc_wgw_cactus_chrom	-	-	1-00:00:00	-	-
 # GPU: Parabricks with 4 GPUs is one job per GPU node. Its host memory grows with the depth: the
 # declared 192 GB held 126 GB at 19-25x and failed at higher depth (a pinned CUDA allocation that
 # does not fit exits 255, no OOM state), so ask for 256G. Smaller shapes for sharing the 6-GPU node take an

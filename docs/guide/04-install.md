@@ -180,6 +180,13 @@ Nothing else changes: inputs are still read from and outputs still written
 to the shared file system, the task's `stderr.txt`, `stdout.txt` and
 `command` stay where they are, and a job whose variable is unset, or names
 a directory that is not writable or is tmpfs (memory), runs as before.
+
+One stage needs the scratch rather than merely benefiting from it when the
+shared file system is Ceph: `cohort_pangenome`'s Cactus tasks run Toil,
+which refuses to keep its lock files on Ceph and stops with "file locks are
+known to break ceph filesystems". With `TASK_SCRATCH_ENV` set, Toil's work
+directory, job stores and lock files go to the node's disk; without it they
+stay in the task directory, which then has to be a local file system.
 The decision is recorded as one line in the job's `slurm-<jobid>.out` in
 the task directory:
 

@@ -3,6 +3,26 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.12.4
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.5.0 and
+the image manifest unchanged. Two findings of the first whole-genome run of
+the assembly track (five 20x samples, every chromosome).
+
+- `ugc_wgw_chrom_coverage` writes the regrouped haplotype copies of a
+  non-trio XY sample through `bgzip` instead of Python's gzip at level 9:
+  an hour and a half per sample before, minutes now, with byte-identical
+  output; the task gains a `threads` input (default 2).
+- `sex_not_inferred` needs read-based data: every page of an assembly-only
+  cohort carried the warning.
+- Chapter 12 holds the run's sizes: the per-sample tasks on 20x genomes
+  (hifiasm 67 GB on 48 cores, PAV 42 GB at 8 cores, dipcall 41.5 of 48 GB),
+  the genome-wide split at 82 GB and 23 minutes per haplotype, the
+  chromosome task at a quarter of its formula's request. The split's time
+  per haplotype means the mapping has to be sharded before cohorts of
+  hundreds of samples; a long-limit partition carries the smaller ones.
+
 ## 0.12.3
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

@@ -355,14 +355,31 @@ against the whole decoy-free GRCh38):
 |---|---|---|---|---|---|
 | `ugc_wgw_cactus_split` | 8 (chr20 only) | 32 | 128 GB | 82.2 GB (64 %) | 57 min |
 | `ugc_wgw_cactus_chrom` chr20 | 8 (chr20 only) | 16 | 64 GB (the floor) | 4.5 GB (7 %) | 58 min |
+| `ugc_wgw_cactus_split` | 10 (whole genomes, 2026-10-26) | 32 | 128 GB | 81.9 GB (64 %) | 3h49m, 23 min per haplotype |
+| `ugc_wgw_cactus_chrom`, 24 chromosomes | 10 (whole genomes) | 16 | 64–80 GB (the formula) | 19.9 GB (25 % of chr1's) | 56 min median, 5h51m max |
 
-Two thirds of the split's request with eight short haplotypes says that
-its memory is not set by the haplotype sequence alone; how it grows with
-the haplotype count is what the chr20 scaling pilot measures. The
-chromosome task's floor is generous for chr20 at eight haplotypes; the
-per-100 Mb term is for the large chromosomes and bigger cohorts. Keep the
-defaults until the pilot, and give both tasks a day of wall time (the rows
-of the worked policy): the catch-all two hours would kill the split.
+The split's peak is the same with eight chr20 haplotypes and ten whole
+genomes: its memory is minigraph's index of the reference graph plus Toil,
+not the haplotype sequence, and 128 GB holds. Its wall time is the
+haplotype count times 23 minutes at 32 cores. The chromosome task used a
+quarter of the formula's request at ten haplotypes; how both grow with the
+haplotype count is what the chr20 scaling pilot measures. Keep the defaults
+until then, and give both tasks a day of wall time (the rows of the worked
+policy): the catch-all two hours would kill the split.
+
+The per-sample tasks on five 20x genomes (2026-10-26, the `cpu` profile):
+
+| task | cores | request | peak RSS | wall time |
+|---|---|---|---|---|
+| `ugc_wgw_hifiasm_assemble` | 48 | 288 GiB (a whole node) | 67 GB | 1h39m median |
+| `ugc_wgw_flagger_align` | 32 | 64 GiB | 47 GB (73 %) | 1h37m |
+| `ugc_wgw_minimap2_align_asm` | 16 | 32 GiB | 22 GB | 17 min per haplotype |
+| `ugc_wgw_dipcall` | 8 | 48 GiB | 41.5 GB (87 %) | 47 min |
+| `ugc_wgw_pav` | 8 | 40 GiB, then 80 | 41.7 GB | 3h19m; 40 GiB failed |
+| `ugc_wgw_chrom_coverage` | 2 | 8 GiB | 93 MB | 1h31m before 0.12.4 |
+
+The `assembly` profile's PAV (16 cores, 120 GiB) and dipcall (64 GiB)
+requests rest on these peaks.
 
 The `assembly` profile (chapter 05) carries the pilots' requests: PAV on 16
 cores and 120 GiB (its two alignment jobs hold the whole reference's index,
@@ -376,17 +393,17 @@ What grows with the cohort is the split's wall time, not its memory: the
 mappings run one after another, each with every core of the task, and on
 the smoke each chr20-only haplotype took about six minutes at 32 threads,
 most of it indexing the 3.1 Gb reference graph anew. A whole-genome
-haplotype is expected to take a few times that, so a cohort of hundreds of
-samples is days in one job and the full 800 is beyond a day's limit by far.
-Two routes exist, and the first real cohort decides between them. A
+haplotype took 23 minutes on the first whole-genome cohort (five samples,
+2026-10-26), so 200 haplotypes are about three days in one job and 1,600
+about 26 days, beyond even a 14-day limit. Two routes exist. A
 partition with a long limit and large nodes (on the smoke cluster `fat`:
 96 cores, 2 or 4 TB, 14 days) takes the serial job as it is, through a row
 `ugc_wgw_cactus_split` with that partition and limit plus `split_cpu` 96
 in the profile; the whole mapping restarts if the node fails or the limit
-hits, since miniwdl reruns the task. Sharding the mapping into one job per
-haplotype on standard nodes is the design's untested alternative and turns
-weeks of serial work into a day of parallel work; it is a workflow change,
-built if the first scaling point says the serial job exceeds a few days.
+hits, since miniwdl reruns the task; it carries cohorts of up to a few
+hundred samples. Sharding the mapping into one job per haplotype on
+standard nodes turns weeks of serial work into a day of parallel work and
+is what the full cohort needs; it is a workflow change, planned.
 
 The same nodes are the answer for a chromosome whose graph outgrows a
 standard node: with 2 and 4 TB the design's gate (chr1 at 1,600 haplotypes

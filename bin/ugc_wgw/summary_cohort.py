@@ -12,7 +12,7 @@ from .db import Cohort, RunRecord
 from .layout import run_files
 from .outputs import Outputs
 from .report import Raw, _bytes, _esc, _table
-from .summary import DIGEST_SCHEMA, _cards, _kv, _nav, _page, _sec, _software_sections, _status_badge
+from .summary import DIGEST_SCHEMA, _cards, _has_read_data, _kv, _nav, _page, _sec, _software_sections, _status_badge
 from .util import UgcError, read_json, utc_now
 
 # (key, label, digits, unit, path into the sample digest, threshold key or None)
@@ -273,7 +273,7 @@ def build_cohort_digest(cohort: Cohort, members: dict[str, dict[str, object]], c
                                   "qc_status": qc.get("status", "pass"), "flags": sorted({str(f.get("code")) for f in qc.get("flags", [])}),  # type: ignore[union-attr]
                                   "runs": {s: r.get("run_id") for s, r in (m.get("runs") or {}).items() if isinstance(r, dict)},  # type: ignore[union-attr]
                                   "ugc_wgw_version": next((r.get("ugc_wgw_version") for r in (m.get("runs") or {}).values() if isinstance(r, dict)), None),  # type: ignore[union-attr]
-                                  "link": f"{sid}.summary.html"}
+                                  "link": f"{sid}.summary.html", "has_reads": _has_read_data(m)}
         for key, _label, _d, _u, path, _t, _dir in MEMBER_METRICS:
             row[key] = _num(_dig(m, path))
         targeted = m.get("targeted", {}) if isinstance(m.get("targeted"), dict) else {}
@@ -298,7 +298,7 @@ def build_cohort_digest(cohort: Cohort, members: dict[str, dict[str, object]], c
                               "below_threshold": beyond if direction == "min" else []}
     sex = {"sheet": {}, "inferred": {}, "karyotype": {}, "mismatches": [r["id"] for r in present if "sex_mismatch" in r["flags"]],  # type: ignore[operator]
            "karyotype_mismatches": [r["id"] for r in present if "asm_karyotype_mismatch" in r["flags"]],  # type: ignore[operator]
-           "not_inferred": [r["id"] for r in present if not r.get("sex_inferred")]}
+           "not_inferred": [r["id"] for r in present if not r.get("sex_inferred") and r.get("has_reads")]}
     for r in present:
         for kind in ("sex_sheet", "sex_inferred"):
             k = str(r.get(kind) or "unknown").upper()

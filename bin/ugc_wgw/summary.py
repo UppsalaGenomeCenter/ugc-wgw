@@ -296,6 +296,21 @@ def _stat_num(stats: dict[str, object], key: str) -> float | None:
         return None
 
 
+READ_STAGES = ("singleton", "upstream", "downstream")   # the stages that process reads; assembly-only samples have none
+
+
+def _has_read_data(digest: dict[str, object]) -> bool:
+    """Whether the sample has read-based results: a read stage ran, or a depth was measured. The coverage-based
+    checks (sex inference, depth) mean nothing for a sample with only assembly runs (2026-10-26: every page of
+    an assembly-only cohort carried `sex_not_inferred`)."""
+    runs: dict[str, object] = digest.get("runs") or {}  # type: ignore[assignment]
+    if any(st in runs for st in READ_STAGES):
+        return True
+    stats: dict[str, object] = digest.get("stats") or {}  # type: ignore[assignment]
+    cov: dict[str, object] = digest.get("coverage") or {}  # type: ignore[assignment]
+    return bool(stats.get("depth_mean")) or cov.get("mean") is not None
+
+
 def qc_flags(digest: dict[str, object], thr: dict[str, float]) -> dict[str, object]:
     """Advisory flags; status is the worst severity (pass < info < warn < fail)."""
     stats: dict[str, object] = digest.get("stats", {})  # type: ignore[assignment]
@@ -317,7 +332,7 @@ def qc_flags(digest: dict[str, object], thr: dict[str, float]) -> dict[str, obje
     if sheet and inferred and sheet != inferred:
         flag("sex_mismatch", "warn", f"sex in the sheet is {sample.get('sex_sheet')} ({sheet}) but coverage infers "
                                     f"{inferred_raw} ({inferred})", inferred_raw, sample.get("sex_sheet"))
-    elif not inferred_raw and digest.get("coverage"):
+    elif not inferred_raw and _has_read_data(digest):
         flag("sex_not_inferred", "warn", "no sex inferred from coverage (autosome depth is zero or mosdepth did not run)")
     targeted: dict[str, object] = digest.get("targeted", {})  # type: ignore[assignment]
     kivvi: dict[str, object] = targeted.get("kivvi", {})  # type: ignore[assignment]

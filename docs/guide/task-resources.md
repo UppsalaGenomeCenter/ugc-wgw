@@ -195,7 +195,7 @@ Reading the tables:
 |---|---|---|---|---|
 | `ugc_wgw_manifest_write` | 1 | 1G | - | `workflows/ugc_wgw/provenance.wdl:9` |
 | `ugc_wgw_minimap2_align_asm` | 16 | 32G | cpu from workflow input default; cpu input: align_threads; memory from workflow input default; memory input: align_mem_gb; command uses threads | `workflows/ugc_wgw/assembly/align_asm.wdl:7` |
-| `ugc_wgw_chrom_coverage` | 2 | 8G | memory from input default | `workflows/ugc_wgw/assembly/chrom_coverage.wdl:7` |
+| `ugc_wgw_chrom_coverage` | 2 | 8G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/assembly/chrom_coverage.wdl:7` |
 | `ugc_wgw_dipcall` | 16 | 48G | cpu from workflow input default; cpu input: dipcall_threads; memory from workflow input default; memory input: dipcall_mem_gb | `workflows/ugc_wgw/assembly/dipcall.wdl:7` |
 | `ugc_wgw_pav` | 8 | 40G | cpu from workflow input default; cpu input: pav_threads; memory from workflow input default; memory input: pav_mem_gb; command uses threads | `workflows/ugc_wgw/assembly/pav.wdl:7` |
 | `ugc_wgw_liftover_unreliable` | 2 | 8G | - | `workflows/ugc_wgw/assembly/masking.wdl:7` |

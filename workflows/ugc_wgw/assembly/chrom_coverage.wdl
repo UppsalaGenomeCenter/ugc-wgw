@@ -57,6 +57,9 @@ task ugc_wgw_chrom_coverage {
     chry_min_fraction: {
       description: "At or above this fraction of chrY (non-PAR bases aligned over the chrY length) the karyotype is XY, else XX"
     }
+    threads: {
+      description: "Cores (bgzip threads for the regrouped haplotype copies)"
+    }
     mem_gb: {
       description: "Memory (GB)"
     }
@@ -76,6 +79,7 @@ task ugc_wgw_chrom_coverage {
     Int min_mapq = 5
     Float chrx_min_fraction = 0.5
     Float chry_min_fraction = 0.1
+    Int threads = 2
     Int mem_gb = 8
     RuntimeAttributes runtime_attributes
   }
@@ -100,6 +104,8 @@ sample, contigs mostly on chrY go to the hap1 copy and contigs mostly on non-PAR
 import collections
 import gzip
 import json
+import os
+import subprocess
 import sys
 
 
@@ -137,6 +143,7 @@ def read_paf(path, min_mapq):
 
 def main(argv):
     (sample, fai, par_path, trio, min_mapq, x_min, y_min, cov_out, json_out, kar_out, log_out, regroup_dir) = argv[:12]
+    bgzip_threads = os.environ.get("BGZIP_THREADS", "2")
     trio, min_mapq, x_min, y_min = trio == "true", int(min_mapq), float(x_min), float(y_min)
     haps = []
     for spec in argv[12:]:
@@ -199,17 +206,25 @@ def main(argv):
                     dest[i][q] = 1
                 if q in dest[i]:
                     moved.append((haps[i][0], q, ql, haps[dest[i][q]][0], home, yb, xb))
-        outs = [gzip.open(f"{regroup_dir}/{sample}.dipcall.hap{k + 1}.fasta.gz", "wt") for k in range(2)]
+        # the copies go through bgzip (threads, default level): Python's gzip at its default level 9 took an
+        # hour and a half for two 3 Gb haplotypes on the cluster (2026-10-26); the records are bytes, unparsed
+        files = [open(f"{regroup_dir}/{sample}.dipcall.hap{k + 1}.fasta.gz", "wb") for k in range(2)]
+        outs = [subprocess.Popen(["bgzip", "--threads", bgzip_threads, "--stdout"], stdin=subprocess.PIPE, stdout=f)
+                for f in files]
         for i, (_, _, fasta) in enumerate(haps):
-            with opener(fasta) as fh:
-                target = outs[i]
+            with (gzip.open(fasta, "rb") if fasta.endswith(".gz") else open(fasta, "rb")) as fh:
+                target = outs[i].stdin
                 for line in fh:
-                    if line.startswith(">"):
-                        name = line[1:].split()[0]
-                        target = outs[dest[i].get(name, i)]
+                    if line.startswith(b">"):
+                        name = line[1:].split()[0].decode()
+                        target = outs[dest[i].get(name, i)].stdin
                     target.write(line)
-        for o in outs:
-            o.close()
+        for o, f in zip(outs, files):
+            o.stdin.close()
+            rc = o.wait()
+            f.close()
+            if rc != 0:
+                sys.exit("bgzip failed while writing the regrouped haplotypes")
     with open(cov_out, "w") as fh:
         fh.write("haplotype\tchrom\taligned_bases\tcontigs\tchrom_length\tfraction\n")
         for label, chrom, b, n in cov:
@@ -238,7 +253,7 @@ if __name__ == "__main__":
 PY
     paste -d '=' '~{write_lines(haplotype_labels)}' '~{write_lines(pafs)}' '~{write_lines(hap_fastas)}' > specs.txt
     # shellcheck disable=SC2046
-    python3 chrom_coverage.py "~{sample_id}" "~{ref_index}" "~{par_bed}" ~{true="true" false="false" trio} ~{min_mapq} \
+    BGZIP_THREADS=~{threads} python3 chrom_coverage.py "~{sample_id}" "~{ref_index}" "~{par_bed}" ~{true="true" false="false" trio} ~{min_mapq} \
       ~{chrx_min_fraction} ~{chry_min_fraction} "~{sample_id}.asm.chrom_coverage.tsv" "~{sample_id}.asm.karyotype.json" \
       karyotype.txt "~{sample_id}.asm.regroup.tsv" regrouped $(cat specs.txt)
   >>>
@@ -253,7 +268,7 @@ PY
 
   runtime {
     docker: "~{runtime_attributes.container_registry}/pb_wdl_base@sha256:03cb3c01937eccc907f8ad71c87b258581504572205fe3f31a657e318f3564ae"  # pb_wdl_base:build4
-    cpu: 2
+    cpu: threads
     memory: "~{mem_gb} GiB"
     disk: "~{disk_size} GB"
     disks: "local-disk ~{disk_size} HDD"

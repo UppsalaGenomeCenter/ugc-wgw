@@ -519,6 +519,14 @@ class QcTest(unittest.TestCase):
         self.assertEqual(summary.qc_flags(d, dict(summary.DEFAULT_THRESHOLDS)), {"status": "pass", "flags": [], "thresholds": summary.DEFAULT_THRESHOLDS})
         d["stats"]["inferred_sex"] = ""
         self.assertEqual([f["code"] for f in summary.qc_flags(d, dict(summary.DEFAULT_THRESHOLDS))["flags"]], ["sex_not_inferred"])
+        # an assembly-only sample has an empty coverage block and no read stage: no sex to infer, so no warning
+        asm_only = {"stats": {}, "sample": {"sex_sheet": "MALE"}, "coverage": {"mean": None, "inferred_sex": ""},
+                    "runs": {"assembly": {"attempt": 1}, "assembly_call": {"attempt": 1}}, "targeted": {}, "messages": [], "warnings": []}
+        self.assertFalse(summary._has_read_data(asm_only))
+        self.assertEqual(summary.qc_flags(asm_only, dict(summary.DEFAULT_THRESHOLDS))["flags"], [])
+        asm_only["runs"]["singleton"] = {"attempt": 1}
+        self.assertTrue(summary._has_read_data(asm_only))
+        self.assertEqual([f["code"] for f in summary.qc_flags(asm_only, dict(summary.DEFAULT_THRESHOLDS))["flags"]], ["sex_not_inferred"])
 
 
 DIGEST_KEYS = {"schema", "generated_at", "mode", "sample", "runs", "warnings", "stats", "reads", "coverage", "small_variants", "sv",

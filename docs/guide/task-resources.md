@@ -119,7 +119,7 @@ Reading the tables:
 | `ugc_wgw_bcftools_slice` | 2 | 4G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/cohort/gvcf_slice.wdl:9` |
 | `glnexus` | 32 | - | cpu from workflow input default; cpu input: glnexus_threads; memory: "~{mem_gb} GiB" where mem_gb = glnexus_mem_gb = glnexus_mem = select_first([glnexus_mem_gb, 32 + ceil(n_samples * 0.1)]); memory scales with N; command uses threads; command uses mem | `workflows/overrides/glnexus.wdl:9` |
 | `ugc_wgw_bcftools_concat` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/cohort/concat.wdl:9` |
-| `ugc_wgw_bcftools_split` | 4 | - | cpu from input default; memory: "~{mem_gb} GiB" where mem_gb = split_mem = select_first([split_mem_gb, 8 + ceil(n_samples * 0.02)]); memory scales with N | `workflows/ugc_wgw/cohort/split_by_sample.wdl:9` |
+| `ugc_wgw_bcftools_split` | 8 | - | cpu from workflow input default; cpu input: split_threads; memory: "~{mem_gb} GiB" where mem_gb = split_mem = select_first([split_mem_gb, 8 + ceil(n_samples * 0.04)]); memory scales with N; command uses threads | `workflows/ugc_wgw/cohort/split_by_sample.wdl:9` |
 | `split_vcf_by_sample` | 2 | 4G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/bcftools.wdl:224` |
 
 ## ugc_wgw_downstream

@@ -32,6 +32,9 @@ task ugc_wgw_bcftools_concat {
     allow_overlaps: {
       description: "Use bcftools concat --allow-overlaps (index-driven merge of the sorted inputs) when shards can interleave, e.g. a genome-wide BND shard next to per-contig shards"
     }
+    naive: {
+      description: "bcftools concat --naive: join the shards' compressed blocks without parsing or recompressing (header compatibility checked by bcftools: identical sample columns), for shards of one source such as GLnexus, +fill-tags or bcftools merge per region; excludes allow_overlaps"
+    }
     threads: {
       description: "Threads"
     }
@@ -48,6 +51,7 @@ task ugc_wgw_bcftools_concat {
     Array[File] vcf_indices
     String out_prefix
     Boolean allow_overlaps = false
+    Boolean naive = false
     Int threads = 4
     Int mem_gb = 8
     RuntimeAttributes runtime_attributes
@@ -71,12 +75,27 @@ task ugc_wgw_bcftools_concat {
       ln --symbolic "$f" "in/$(basename "$f")"
     done < "~{write_lines(vcf_indices)}"
 
-    bcftools concat \
-      --threads ~{threads} \
-      ~{true="--allow-overlaps" false="" allow_overlaps} \
-      --file-list list.txt \
-      --output-type z \
-      --output "~{out_prefix}.vcf.gz"
+    if [ "~{naive}" = "true" ] && [ "~{allow_overlaps}" = "true" ]; then
+      echo "naive and allow_overlaps exclude each other" >&2
+      exit 1
+    fi
+    if [ "~{naive}" = "true" ]; then
+      # shards of one source with identical sample columns (GLnexus, +fill-tags or bcftools merge per region):
+      # the compressed blocks are joined without parsing or recompression, the first shard's header kept.
+      # bcftools concat without --naive parses every record (about a microsecond per genotype: two hours
+      # for 800 samples genome-wide, 2026-10-26) and only recompresses with --threads
+      bcftools concat \
+        --naive \
+        --file-list list.txt \
+        --output "~{out_prefix}.vcf.gz"
+    else
+      bcftools concat \
+        --threads ~{threads} \
+        ~{true="--allow-overlaps" false="" allow_overlaps} \
+        --file-list list.txt \
+        --output-type z \
+        --output "~{out_prefix}.vcf.gz"
+    fi
     bcftools index \
       --threads ~{threads} \
       --tbi \

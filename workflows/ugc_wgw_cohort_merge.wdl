@@ -353,6 +353,7 @@ workflow ugc_wgw_cohort_merge {
     }
 
     call Concat.ugc_wgw_bcftools_concat as concat_phased_small_variants { input:
+      naive = true,
       vcfs = bcftools_small_variant_shard.vcf,
       vcf_indices = bcftools_small_variant_shard.vcf_index,
       out_prefix = "~{out_prefix}.small_variants.phased",

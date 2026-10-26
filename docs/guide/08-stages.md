@@ -129,7 +129,7 @@ flowchart TD
   sl --> gl
   prep --> gl
   gl --> concat["bcftools concat"] --> cvcf[/"cohort.joint.GRCh38_GIABv3.small_variants.vcf.gz"/]
-  cvcf --> split["bcftools +split, one pass"] --> per[/"per-sample small-variant VCFs, cohort order"/]
+  cvcf --> split["bcftools +split per contig, then one concat per sample"] --> per[/"per-sample small-variant VCFs, cohort order"/]
   subgraph sv["if run_sawfish_joint_call, default false"]
     tars[/"discover tars, aligned BAMs"/] --> sc["sawfish call, multi-sample"] --> ssplit["split by sample"] --> psv[/"per-sample SV VCFs"/]
   end

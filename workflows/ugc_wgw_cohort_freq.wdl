@@ -183,6 +183,7 @@ workflow ugc_wgw_cohort_freq {
     }
 
     call Concat.ugc_wgw_bcftools_concat as concat_small_variants { input:
+      naive = true,
       vcfs = small_variant_shard.shard_vcf,
       vcf_indices = small_variant_shard.shard_vcf_index,
       out_prefix = "~{out_prefix}.small_variants",
@@ -216,6 +217,7 @@ workflow ugc_wgw_cohort_freq {
   }
 
   call Concat.ugc_wgw_bcftools_concat as concat_svs { input:
+    naive = true,
     vcfs = sv_shard.shard_vcf,
     vcf_indices = sv_shard.shard_vcf_index,
     out_prefix = "~{out_prefix}.structural_variants",

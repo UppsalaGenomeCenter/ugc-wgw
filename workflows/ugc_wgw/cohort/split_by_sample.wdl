@@ -8,7 +8,7 @@ import "../../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/structs.wdl"
 
 task ugc_wgw_bcftools_split {
   meta {
-    description: "One-pass bcftools +split of a cohort VCF into single-sample VCFs. keep_homref=true reproduces upstream split_vcf_by_sample (--exclude-uncalled: only sites where the sample's genotype is missing are dropped); keep_homref=false keeps only sites where the sample carries an alt allele"
+    description: "bcftools +split of a cohort VCF into single-sample VCFs, one process per contig that holds records (threads at a time, pieces on the node-local scratch), then one concatenation per sample in contig order. keep_homref=true reproduces upstream split_vcf_by_sample (--exclude-uncalled: only sites where the sample's genotype is missing are dropped); keep_homref=false keeps only sites where the sample carries an alt allele"
     outputs: {
       split_vcfs: {
         description: "Single-sample VCFs, in sample_ids order"
@@ -39,10 +39,10 @@ task ugc_wgw_bcftools_split {
       description: "true: drop only uncalled genotypes (upstream parity); false: keep only GT=\"alt\" sites"
     }
     threads: {
-      description: "Threads"
+      description: "+split processes, then per-sample concatenations, running at once (bcftools +split itself has no threads)"
     }
     mem_gb: {
-      description: "Memory (GB); one bgzip writer per output, scale with sample count"
+      description: "Memory (GB); every +split process holds one output stream per sample, so scale with samples × threads (cohort_call: 8 + 0.04 per sample at 8 threads)"
     }
     runtime_attributes: {
       description: "Runtime attribute structure"
@@ -68,7 +68,7 @@ task ugc_wgw_bcftools_split {
 
     bcftools --version >&2
 
-    # one output stream per sample
+    # one output stream per sample in every +split process
     ulimit -Sn 65536 || true
 
     ln --symbolic --verbose "~{vcf}" .
@@ -79,20 +79,45 @@ task ugc_wgw_bcftools_split {
     | awk -F'\t' -v OFS='\t' '{ sub(/\.vcf\.gz$/, "", $2); print $1, "-", $2 }' \
     > samples.tsv
 
-    if [ "~{keep_homref}" = "true" ]; then
-      filter=(--exclude 'GT="mis"')
-    else
-      filter=(--include 'GT="alt"')
-    fi
-
-    # bcftools +split (1.23) has no --threads option; `threads` only sizes the cpu reservation
-    bcftools +split \
-      --samples-file samples.tsv \
-      "${filter[@]}" \
-      --output-type z \
-      --write-index=tbi \
-      --output . \
-      "~{basename(vcf)}"
+    # bcftools +split (1.23) parses every record and has no --threads: one pass over 800 samples took four
+    # hours (about a microsecond per genotype, then one single-threaded bgzip stream per sample; 2026-10-26).
+    # It runs here once per contig that holds records, `threads` at a time, each writing its per-sample
+    # pieces at compression level 1 to the node-local scratch when the backend bound one (TMPDIR); then every
+    # sample's pieces are concatenated in the header's contig order and recompressed, `threads` samples at a
+    # time. A contig's region is a BED line, not a -r string: GRCh38's HLA contigs carry colons in their names.
+    PIECES=${TMPDIR:-$PWD}/split_pieces
+    VCF=~{basename(vcf)}
+    KEEP_HOMREF=~{keep_homref}
+    export KEEP_HOMREF PIECES VCF
+    mkdir -p "$PIECES" regions
+    bcftools index --stats "$VCF" \
+    | awk -F'\t' -v OFS='\t' '$3 > 0 { print $1, 0, $2 > ("regions/" NR ".bed"); print NR, $1 }' > contigs.txt
+    echo "$(wc -l < contigs.txt) contigs with records, $(wc -l < samples.tsv) samples, ~{threads} at a time" >&2
+    cat > split_region.sh <<'SH'
+#!/usr/bin/env bash
+# <index> <contig>: one contig's per-sample pieces under $PIECES/<index>/
+set -euo pipefail
+mkdir -p "$PIECES/$1"
+# keep_homref: drop only uncalled genotypes (upstream parity); else keep the sites where the sample carries an alt
+if [ "$KEEP_HOMREF" = "true" ]; then set -- "$1" --exclude 'GT="mis"'; else set -- "$1" --include 'GT="alt"'; fi
+bcftools +split --regions-file "regions/$1.bed" --regions-overlap 0 --samples-file samples.tsv \
+  "$2" "$3" --output-type z1 --output "$PIECES/$1" "$VCF"
+SH
+    cat > concat_sample.sh <<'SH'
+#!/usr/bin/env bash
+# <output base name>: the sample's pieces in contig order, recompressed and indexed in the task directory
+set -euo pipefail
+: > "$PIECES/$1.list"
+while read -r i _; do
+  if [ -e "$PIECES/$i/$1.vcf.gz" ]; then echo "$PIECES/$i/$1.vcf.gz" >> "$PIECES/$1.list"; fi
+done < contigs.txt
+bcftools concat --file-list "$PIECES/$1.list" --output-type z --output "$1.vcf.gz" 2> "$PIECES/$1.concat.log"
+bcftools index --tbi "$1.vcf.gz"
+SH
+    chmod +x split_region.sh concat_sample.sh
+    xargs -P ~{threads} -L 1 ./split_region.sh < contigs.txt
+    cut -f3 samples.tsv | xargs -P ~{threads} -I{} ./concat_sample.sh {}
+    rm -rf "$PIECES"
   >>>
 
   output {

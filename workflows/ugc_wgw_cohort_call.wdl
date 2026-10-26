@@ -95,8 +95,11 @@ workflow ugc_wgw_cohort_call {
     split_keep_homref: {
       description: "true: per-sample VCFs keep hom-ref sites and drop only uncalled genotypes (upstream parity); false: keep only sites where the sample carries an alt allele"
     }
+    split_threads: {
+      description: "+split processes (one per contig) and per-sample concatenations running at once in the split task (default 8; +split itself is single-threaded)"
+    }
     split_mem_gb: {
-      description: "Memory (GB) for the split; default 8 + 0.02 per sample"
+      description: "Memory (GB) for the split; default 8 + 0.04 per sample (one output stream per sample in every +split process)"
     }
     run_sawfish_joint_call: {
       description: "Joint-call structural variants across the cohort with sawfish (one job over all BAMs and discover tarballs; small cohorts only); needs discover_tars, aligned_bams, aligned_bam_indices"
@@ -147,6 +150,7 @@ workflow ugc_wgw_cohort_call {
     Int? glnexus_mem_gb
     Int glnexus_threads = 32
     Boolean split_keep_homref = true
+    Int split_threads = 8
     Int? split_mem_gb
 
     Boolean run_sawfish_joint_call = false
@@ -183,7 +187,7 @@ workflow ugc_wgw_cohort_call {
 
   # Memory defaults scale with cohort size; first estimates until the cohort smoke test (DESIGN §7.2)
   Int glnexus_mem = select_first([glnexus_mem_gb, 32 + ceil(n_samples * 0.1)])
-  Int split_mem = select_first([split_mem_gb, 8 + ceil(n_samples * 0.02)])
+  Int split_mem = select_first([split_mem_gb, 8 + ceil(n_samples * 0.04)])
 
   File scatter_regions = select_first([scatter_regions_file, ref_map["scatter_regions"]])  # !FileCoercion
 
@@ -223,6 +227,7 @@ workflow ugc_wgw_cohort_call {
     split_vcf_names = split_glnexus_vcf_name,
     split_vcf_index_names = split_glnexus_vcf_index_name,
     keep_homref = split_keep_homref,
+    threads = split_threads,
     mem_gb = split_mem,
     runtime_attributes = default_runtime_attributes
   }

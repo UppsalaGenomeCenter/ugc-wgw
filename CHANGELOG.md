@@ -3,6 +3,28 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.12.6
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.5.0 and
+the image manifest unchanged.
+
+- **The cohort VCF's concatenation and per-sample split stop parsing every
+  genotype.** On an 800-sample `cohort_call` both took about four hours on
+  four threads, one after the other, between the last GLnexus shard and
+  the first `downstream` run: `bcftools concat` parses every record unless
+  told not to, and `bcftools +split` parses every record in one thread and
+  writes one single-threaded bgzip stream per sample. The concat task gains
+  `naive` (`bcftools concat --naive`: compressed blocks joined, sample
+  columns checked), on for the GLnexus shards, the frequency shards and
+  the phased small-variant shards. The split task runs `+split` once per
+  contig that holds records, `split_threads` (default 8) at a time with
+  its pieces on the node-local scratch, then one concatenation per sample
+  in contig order; `split_mem_gb` defaults to 8 + 0.04 GB per sample.
+  Records byte-identical to the one-pass commands' in both filter modes
+  (chapter 12). Expect minutes and tens of minutes instead of four hours
+  each.
+
 ## 0.12.5
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

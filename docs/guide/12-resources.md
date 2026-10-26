@@ -339,6 +339,27 @@ never starts the plugin, and miniwdl then prints a harmless
 by hand applies the caps and the policy only with `--cfg` pointing at the
 rendered `miniwdl.cfg`.
 
+## The cohort VCF's concatenation and split
+
+On the 800-sample `cohort_call` of 2026-10-26, `ugc_wgw_bcftools_concat`
+(the 134 GLnexus shards into the cohort VCF) and `ugc_wgw_bcftools_split`
+(the cohort VCF into 800 single-sample VCFs) took about four hours each on
+four threads, one after the other, between the last GLnexus shard and the
+first `downstream` run. Neither tool used the threads for the work that
+cost: `bcftools concat` parsed every record, about a microsecond per
+genotype, and only recompressed in parallel; `bcftools +split` parsed every
+record in one thread and wrote one single-threaded bgzip stream per sample,
+having no thread option at all. Since 0.12.6 the concat task joins
+same-source shards with `bcftools concat --naive` (compressed blocks copied,
+sample columns checked), minutes instead of hours, and the split task runs
+`+split` once per contig that holds records, `split_threads` (default 8) at
+a time, with its pieces on the node-local scratch, then one concatenation
+per sample in contig order. Give the split task 8 to 16 cores and
+`split_mem_gb` (default 8 + 0.04 GB per sample: every `+split` process
+holds one output stream per sample) and expect tens of minutes. The
+records are byte-identical to the one-pass commands' (verified on the
+joint smoke's GLnexus VCF in both filter modes).
+
 ## The pangenome's sizes
 
 `cohort_pangenome` has two tasks whose rows the chr20 scaling pilot sets

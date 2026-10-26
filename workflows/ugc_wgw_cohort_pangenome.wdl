@@ -365,6 +365,7 @@ workflow ugc_wgw_cohort_pangenome {
     runtime_attributes = default_runtime_attributes
   }
   call Concat.ugc_wgw_bcftools_concat as concat_freq { input:
+    naive = true,
     vcfs = freq_shard.shard_vcf,
     vcf_indices = freq_shard.shard_vcf_index,
     out_prefix = "~{out_prefix}.freq",

@@ -102,6 +102,7 @@ workflow ugc_wgw_glnexus_scatter {
   }
 
   call Concat.ugc_wgw_bcftools_concat { input:
+    naive = true,
     vcfs = glnexus.vcf,
     vcf_indices = glnexus.vcf_index,
     out_prefix = out_prefix,

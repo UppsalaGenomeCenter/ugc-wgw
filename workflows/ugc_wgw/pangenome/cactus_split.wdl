@@ -23,6 +23,9 @@ task ugc_wgw_cactus_split {
       split_log: {
         description: "minigraph.split.log"
       },
+      cactus_logs: {
+        description: "The three steps' Toil logs (step1.minigraph, step2.graphmap, step3.split), tarred: the per-haplotype mapping times are in step2"
+      },
       contig_sizes: {
         description: "contig_sizes.tsv: bases per genome and chromosome"
       },
@@ -58,7 +61,10 @@ task ugc_wgw_cactus_split {
       description: "The reference genome's name in the graph"
     }
     cpu: {
-      description: "Cores (--maxCores, --mgCores, --mapCores)"
+      description: "Cores (--maxCores, --mgCores)"
+    }
+    map_cores: {
+      description: "Cores per minigraph mapping (--mapCores; default: all of cpu, one haplotype at a time). Toil runs cpu / map_cores mappings at once when mem_gb holds them: each needs about 72 times the gzipped haplotype's size plus the reference graph, 65-80 GB for a human haplotype, and minigraph uses only a few cores of a haplotype's mapping (15-22 % CPU efficiency measured), so 16 of 48 with 360 GB is three at once"
     }
     mem_gb: {
       description: "Memory (GB, --maxMemory)"
@@ -81,12 +87,14 @@ task ugc_wgw_cactus_split {
     String other_contig = "chrOther"
     String reference = "GRCh38"
     Int cpu = 32
+    Int? map_cores
     Int mem_gb = 128
     Int? disk_gb
     RuntimeAttributes runtime_attributes
   }
 
   String out_prefix = "~{cohort_id}.pangenome.~{ref_name}"
+  Int map_cores_used = select_first([map_cores, cpu])
   Int disk_size = select_first([disk_gb, ceil(size(hap_fastas, "GB") * 3 + size(ref_fasta, "GB") * 2 + 50)])
 
   command <<<
@@ -108,7 +116,7 @@ task ugc_wgw_cactus_split {
 
     cactus-minigraph "$toil/js1" seqfile.txt ref.sv.gfa.gz --refOnly --mgCores ~{cpu} "${common[@]}" --logFile step1.minigraph.log
     cp seqfile.txt seqfile.gm.txt
-    cactus-graphmap "$toil/js2" seqfile.gm.txt ref.sv.gfa.gz all.paf --mgSplit --outputFasta ref.sv.gfa.fa.gz --mapCores ~{cpu} "${common[@]}" --logFile step2.graphmap.log
+    cactus-graphmap "$toil/js2" seqfile.gm.txt ref.sv.gfa.gz all.paf --mgSplit --outputFasta ref.sv.gfa.fa.gz --mapCores ~{map_cores_used} "${common[@]}" --logFile step2.graphmap.log
     cactus-graphmap-split "$toil/js3" seqfile.gm.txt ref.sv.gfa.gz all.paf --outDir split --mgSplit \
       --refContigsFile "~{ref_contigs}" --otherContig ~{other_contig} "${common[@]}" --logFile step3.split.log
 
@@ -127,6 +135,7 @@ task ugc_wgw_cactus_split {
         for (g in seen) print g "\t" (as[g]+0) "\t" (asbp[g]+0) "\t" (am[g]+0) "\t" (ambp[g]+0) }' \
       split/minigraph.split.log | { read -r h; echo "$h"; sort; } > "~{out_prefix}.ambiguous_contigs.tsv"
     cp split/minigraph.split.log "~{out_prefix}.split.log"
+    tar -czf "~{out_prefix}.split.cactus-logs.tar.gz" step1.minigraph.log step2.graphmap.log step3.split.log
     cp split/contig_sizes.tsv "~{out_prefix}.contig_sizes.tsv"
     cat "~{out_prefix}.ambiguous_contigs.tsv" >&2
     rm -rf "$toil"
@@ -138,6 +147,7 @@ task ugc_wgw_cactus_split {
     String split_root = read_string("split_root.txt")
     Array[String] chromosomes_found = read_lines("chromosomes_found.txt")
     File split_log = "~{out_prefix}.split.log"
+    File cactus_logs = "~{out_prefix}.split.cactus-logs.tar.gz"
     File contig_sizes = "~{out_prefix}.contig_sizes.tsv"
     File ambiguous_contigs = "~{out_prefix}.ambiguous_contigs.tsv"
   }

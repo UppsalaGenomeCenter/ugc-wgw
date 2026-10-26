@@ -221,6 +221,7 @@ def make_outputs(stage: str, inputs: dict[str, object], run_dir: pathlib.Path,
         files["member_stats"] = f"{pre}.members.tsv"
         files["name_map"] = f"{sid}.pangenome.name_map.tsv"
         files["split_log"] = f"{pre}.split.log"
+        files["split_cactus_logs"] = f"{pre}.split.cactus-logs.tar.gz"
         files["contig_sizes"] = f"{pre}.contig_sizes.tsv"
         files["ambiguous_contigs"] = f"{pre}.ambiguous_contigs.tsv"
         f("freq_vcf", f"{pre}.freq.vcf.gz")

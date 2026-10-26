@@ -3,6 +3,31 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.12.5
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.5.0 and
+the image manifest unchanged.
+
+- **The pangenome's Cactus tasks map several haplotypes at once.** Both
+  tasks passed all their cores to minigraph's mapping, so Toil mapped one
+  haplotype at a time while minigraph used a few cores of it (15 and 22 %
+  CPU efficiency on the first whole-genome run; chr21 spent 4h43m of its
+  5h51m mapping ten haplotypes' satellite-rich contigs one after another).
+  New inputs `split_map_cores` (default: the task's cores, unchanged
+  behaviour) and `chrom_map_cores` (default 4: four at once on 16 cores);
+  the `assembly` profile gives the split a whole standard node with three
+  mappings at once, each holding the reference graph's index (65–80 GB).
+  On the chr20 smoke the split went from 75 to 55 minutes and the
+  chromosome task from 51 to 39, with identical contig assignment; a
+  chromosome graph's node count varies by about 0.1 % between any two
+  builds, concurrency or not (chapter 12). The split keeps its three Toil
+  step logs as a new output.
+- `ugc_wgw_chrom_coverage` writes the regrouped haplotype copies with
+  Python's gzip at level 4: 0.12.4's `bgzip` is not on every machine the
+  tests run on (the public CI of v0.12.4 is red for that), and level 4 is
+  25 times faster than 0.12.3's level 9 for a fifth more bytes.
+
 ## 0.12.4
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

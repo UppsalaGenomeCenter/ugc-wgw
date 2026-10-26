@@ -356,16 +356,35 @@ against the whole decoy-free GRCh38):
 | `ugc_wgw_cactus_split` | 8 (chr20 only) | 32 | 128 GB | 82.2 GB (64 %) | 57 min |
 | `ugc_wgw_cactus_chrom` chr20 | 8 (chr20 only) | 16 | 64 GB (the floor) | 4.5 GB (7 %) | 58 min |
 | `ugc_wgw_cactus_split` | 10 (whole genomes, 2026-10-26) | 32 | 128 GB | 81.9 GB (64 %) | 3h49m, 23 min per haplotype |
-| `ugc_wgw_cactus_chrom`, 24 chromosomes | 10 (whole genomes) | 16 | 64–80 GB (the formula) | 19.9 GB (25 % of chr1's) | 56 min median, 5h51m max |
+| `ugc_wgw_cactus_chrom`, 24 chromosomes | 10 (whole genomes) | 16 | 64–80 GB (the formula) | 19.9 GB (25 % of chr1's) | 56 min median; chr21 5h51m, chr1 1h46m, chr14 33 min |
 
 The split's peak is the same with eight chr20 haplotypes and ten whole
 genomes: its memory is minigraph's index of the reference graph plus Toil,
-not the haplotype sequence, and 128 GB holds. Its wall time is the
-haplotype count times 23 minutes at 32 cores. The chromosome task used a
-quarter of the formula's request at ten haplotypes; how both grow with the
-haplotype count is what the chr20 scaling pilot measures. Keep the defaults
-until then, and give both tasks a day of wall time (the rows of the worked
-policy): the catch-all two hours would kill the split.
+not the haplotype sequence, and 128 GB holds one mapping. Its wall time was
+the haplotype count times 23 minutes at 32 cores, because both Cactus
+tasks mapped one haplotype at a time (`--mapCores` equal to the cores) and
+minigraph uses only a few cores of one haplotype's mapping: the split ran
+at 22 % CPU efficiency, the chromosome task at 15 %. The chromosome task's
+time does not follow the chromosome's length either: chr21, 47 Mb, took
+5h51m where chr1 took 1h46m and chr14 33 minutes, and its logs say why:
+4h43m of it was minigraph mapping the ten haplotypes' chr21 contigs one
+after another, 73 and 58 minutes for the two slowest (satellite and rDNA
+arrays of the acrocentric short arm; the current Minigraph-Cactus
+documentation ignores softmasking and advises against hardmasking, so
+masking is no remedy), half a minute for the reference.
+
+Since 0.12.5 the two tasks take the cores per mapping as inputs
+(`split_map_cores`, default the task's cores; `chrom_map_cores`, default
+4) and Toil runs `cores / map_cores` mappings at once, within the memory:
+a chromosome's mappings are small, so the default already maps four
+haplotypes at once on 16 cores (chr21 of five samples: an expected 2h20m
+instead of 5h51m, the construct step then the larger part); the split's mappings each hold the reference graph's index,
+65–80 GB, so the `assembly` profile gives it a whole standard node (48
+cores, 360 GiB) with `split_map_cores` 16, three at once. The pilot builds
+every chromosome at its first point rather than extrapolating from chr20,
+and measures how both tasks grow with the haplotype count. Give both tasks
+a day of wall time (the rows of the worked policy): the catch-all two hours
+would kill the split.
 
 The per-sample tasks on five 20x genomes (2026-10-26, the `cpu` profile):
 
@@ -394,8 +413,11 @@ mappings run one after another, each with every core of the task, and on
 the smoke each chr20-only haplotype took about six minutes at 32 threads,
 most of it indexing the 3.1 Gb reference graph anew. A whole-genome
 haplotype took 23 minutes on the first whole-genome cohort (five samples,
-2026-10-26), so 200 haplotypes are about three days in one job and 1,600
-about 26 days, beyond even a 14-day limit. Two routes exist. A
+2026-10-26, one mapping at a time): 200 haplotypes were about three days
+in one job and 1,600 about 26 days. Three mappings at once on a whole
+standard node (the `assembly` profile) divide that by about three, and a
+fat node with 2 TB holds twenty mappings at once, which brings 1,600
+haplotypes to about two days. Beyond that, two routes exist. A
 partition with a long limit and large nodes (on the smoke cluster `fat`:
 96 cores, 2 or 4 TB, 14 days) takes the serial job as it is, through a row
 `ugc_wgw_cactus_split` with that partition and limit plus `split_cpu` 96

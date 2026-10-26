@@ -9,6 +9,7 @@ chrom_graph_stats/*/*.pangenome.*.chr*.graph-stats.tsv
 chrom_logs/*/*.pangenome.*.chr*.cactus-logs.tar.gz
 name_map/*.pangenome.name_map.tsv
 split_log/*.pangenome.*.split.log
+split_cactus_logs/*.pangenome.*.split.cactus-logs.tar.gz
 contig_sizes/*.pangenome.*.contig_sizes.tsv
 ambiguous_contigs/*.pangenome.*.ambiguous_contigs.tsv
 freq_vcf/*.pangenome.*.freq.vcf.gz

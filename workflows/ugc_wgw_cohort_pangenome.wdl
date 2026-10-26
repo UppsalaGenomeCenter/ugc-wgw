@@ -62,6 +62,9 @@ workflow ugc_wgw_cohort_pangenome {
       split_log: {
         description: "cactus-graphmap-split's minigraph.split.log"
       },
+      split_cactus_logs: {
+        description: "The split's three Toil step logs, tarred (the per-haplotype mapping times)"
+      },
       contig_sizes: {
         description: "The split step's contig_sizes.tsv"
       },
@@ -141,6 +144,9 @@ workflow ugc_wgw_cohort_pangenome {
     split_cpu: {
       description: "Cores of the genome-wide split step (every haplotype mapped)"
     }
+    split_map_cores: {
+      description: "Cores per minigraph mapping in the split (default: split_cpu, one haplotype at a time); split_cpu / split_map_cores haplotypes map at once when split_mem_gb holds them (65-80 GB each)"
+    }
     split_mem_gb: {
       description: "Memory (GB) of the split step"
     }
@@ -149,6 +155,9 @@ workflow ugc_wgw_cohort_pangenome {
     }
     chrom_cpu: {
       description: "Cores of each chromosome task"
+    }
+    chrom_map_cores: {
+      description: "Cores per minigraph mapping in a chromosome's graph (default 4: chrom_cpu / 4 haplotypes map at once)"
     }
     chrom_mem_gb_floor: {
       description: "Memory (GB) of a chromosome task at least"
@@ -205,9 +214,11 @@ workflow ugc_wgw_cohort_pangenome {
     File? sv_vcf
     File? sv_vcf_index
     Int split_cpu = 32
+    Int? split_map_cores
     Int split_mem_gb = 128
     Int? split_disk_gb
     Int chrom_cpu = 16
+    Int chrom_map_cores = 4
     Int chrom_mem_gb_floor = 64
     Int chrom_mem_gb_per_100mb = 32
     Int freq_threads = 2
@@ -266,6 +277,7 @@ workflow ugc_wgw_cohort_pangenome {
     hap_fastas = hap_fastas,
     ref_contigs = ref_map["asm_graph_chromosomes"],  # !FileCoercion
     cpu = split_cpu,
+    map_cores = split_map_cores,
     mem_gb = split_mem_gb,
     disk_gb = split_disk_gb,
     runtime_attributes = default_runtime_attributes
@@ -281,6 +293,7 @@ workflow ugc_wgw_cohort_pangenome {
       chromfile = ugc_wgw_cactus_split.chromfile,
       split_root = ugc_wgw_cactus_split.split_root,
       cpu = chrom_cpu,
+      map_cores = chrom_map_cores,
       mem_gb = chrom_mem,
       runtime_attributes = default_runtime_attributes
     }
@@ -414,6 +427,7 @@ workflow ugc_wgw_cohort_pangenome {
     File member_stats = ugc_wgw_pangenome_member_stats_gather.members
     File name_map = ugc_wgw_pangenome_names.name_map
     File split_log = ugc_wgw_cactus_split.split_log
+    File split_cactus_logs = ugc_wgw_cactus_split.cactus_logs
     File contig_sizes = ugc_wgw_cactus_split.contig_sizes
     File ambiguous_contigs = ugc_wgw_cactus_split.ambiguous_contigs
     File freq_vcf = concat_freq.vcf

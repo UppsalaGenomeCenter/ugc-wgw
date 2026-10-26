@@ -72,6 +72,9 @@ task ugc_wgw_cactus_chrom {
     cpu: {
       description: "Cores (--maxCores, --mgCores, --mapCores, --consCores, --indexCores)"
     }
+    map_cores: {
+      description: "Cores per minigraph mapping of the chromosome's haplotypes (--mapCores): cpu / map_cores mappings run at once. Default 4: a chromosome's mappings are small, and minigraph uses few cores on one of them (chr21 of five samples: 280 minutes of mapping one after another, 73 for the slowest haplotype, 15 % CPU efficiency)"
+    }
     mem_gb: {
       description: "Memory (GB, --maxMemory)"
     }
@@ -89,6 +92,7 @@ task ugc_wgw_cactus_chrom {
     String split_root
     String reference = "GRCh38"
     Int cpu = 16
+    Int map_cores = 4
     Int mem_gb = 64
     RuntimeAttributes runtime_attributes
   }
@@ -118,7 +122,7 @@ task ugc_wgw_cactus_chrom {
     common=(--reference ~{reference} --maxCores ~{cpu} --maxMemory ~{mem_gb}G --workDir "$toil/work")
 
     cactus-minigraph "$toil/js4" chromfile.txt construct --batch --mgCores ~{cpu} "${common[@]}" --logFile step4.minigraph.log
-    cactus-graphmap "$toil/js5" construct/chromfile.mg.txt map --batch --mapCores ~{cpu} "${common[@]}" --logFile step5.graphmap.log
+    cactus-graphmap "$toil/js5" construct/chromfile.mg.txt map --batch --mapCores ~{map_cores} "${common[@]}" --logFile step5.graphmap.log
     cactus-align "$toil/js6" map/chromfile.gm.txt align --batch --pangenome --outVG --consCores ~{cpu} "${common[@]}" --logFile step6.align.log
     cactus-graphmap-join "$toil/js7" --vg align/*.vg --hal align/*.hal --sv-gfa construct/*.gfa.gz \
       --outDir join --outName "~{chromosome}" --vcf --vcfwave --gbz --gfa --indexCores ~{cpu} "${common[@]}" --logFile step7.join.log

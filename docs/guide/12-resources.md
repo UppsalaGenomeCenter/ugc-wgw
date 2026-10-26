@@ -259,8 +259,8 @@ use, not as a drop-in accelerator.
 ## A worked policy
 
 `examples/resources.tsv` is a policy for one real cluster: 48-core,
-384000 MB nodes on a shared partition, two 96-core large-memory nodes and
-two GPU nodes, written after ten 20–25x samples had run with the defaults
+384000 MB nodes on a shared partition, 96-core large-memory nodes of 2 and
+4 TB on the `fat` partition (14-day limit) and two GPU nodes, written after ten 20–25x samples had run with the defaults
 (`sacct` peaks and elapsed times per task). What it does and why:
 
 - **Cores that tile the node.** Upstream's pbmm2 and pbsamoa tasks ask for
@@ -363,6 +363,41 @@ chromosome task's floor is generous for chr20 at eight haplotypes; the
 per-100 Mb term is for the large chromosomes and bigger cohorts. Keep the
 defaults until the pilot, and give both tasks a day of wall time (the rows
 of the worked policy): the catch-all two hours would kill the split.
+
+The `assembly` profile (chapter 05) carries the pilots' requests: PAV on 16
+cores and 120 GiB (its two alignment jobs hold the whole reference's index,
+about 16 GiB each, whatever the assembly's size, and the calling steps grow
+with the variant count), dipcall 64 GiB, the split 192 GiB. Both the split
+and the chromosome task read their sizes from workflow inputs
+(`split_cpu`, `split_mem_gb`, `chrom_cpu`, `chrom_mem_gb_floor`,
+`chrom_mem_gb_per_100mb`), not from policy rows.
+
+What grows with the cohort is the split's wall time, not its memory: the
+mappings run one after another, each with every core of the task, and on
+the smoke each chr20-only haplotype took about six minutes at 32 threads,
+most of it indexing the 3.1 Gb reference graph anew. A whole-genome
+haplotype is expected to take a few times that, so a cohort of hundreds of
+samples is days in one job and the full 800 is beyond a day's limit by far.
+Two routes exist, and the first real cohort decides between them. A
+partition with a long limit and large nodes (on the smoke cluster `fat`:
+96 cores, 2 or 4 TB, 14 days) takes the serial job as it is, through a row
+`ugc_wgw_cactus_split` with that partition and limit plus `split_cpu` 96
+in the profile; the whole mapping restarts if the node fails or the limit
+hits, since miniwdl reruns the task. Sharding the mapping into one job per
+haplotype on standard nodes is the design's untested alternative and turns
+weeks of serial work into a day of parallel work; it is a workflow change,
+built if the first scaling point says the serial job exceeds a few days.
+
+The same nodes are the answer for a chromosome whose graph outgrows a
+standard node: with 2 and 4 TB the design's gate (chr1 at 1,600 haplotypes
+must fit the largest node) is about time, not memory. Two mechanics
+matter there. `TASK_MEMORY_MAX` rounds a workflow's own request down to
+the standard node, so a `chrom_mem_gb_per_100mb` that asks above it is
+silently capped; a policy row is not capped, so memory above 375 GiB goes
+through a row `ugc_wgw_cactus_chrom` that also names the partition. And a
+row matches the task's name, not the chromosome, so it moves every
+chromosome's job to that partition, whole nodes each; a smaller cohort
+graph stays on standard nodes with the formula.
 
 ## Finding the right numbers
 

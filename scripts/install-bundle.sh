@@ -244,7 +244,11 @@ for key, site_key in (("slurm_partition", "SLURM_PARTITION"), ("slurm_account", 
     if value:
         defaults[key] = value   # the *_gpu keys are what miniwdl-slurm uses for tasks with a gpuCount
 kv["TASK_RUNTIME_DEFAULTS"] = json.dumps(defaults)  # one line: configparser continuation rules
-run_options = ["--containall", "--no-mount", "hostfs"]
+# Apptainer exports APPTAINER_BIND and SINGULARITY_BIND into every container with the whole bind list; miniwdl
+# binds every input file, and past ~500 files that one string exceeds the kernel's 128 KB limit per environment
+# string, so the container's /bin/sh cannot start ("argument list too long"; an 800-sample cohort_call, 2026-10-26).
+# Emptying both lets the cohort tasks run; nothing of ours reads them (docs/guide/04-install.md).
+run_options = ["--containall", "--no-mount", "hostfs", "--env", "APPTAINER_BIND=", "--env", "SINGULARITY_BIND="]
 if kv.pop("SINGULARITY_NV") == "1":
     run_options.append("--nv")   # bind the host's NVIDIA driver into every container; a no-op on nodes without one
 kv["SINGULARITY_RUN_OPTIONS"] = json.dumps(run_options)
@@ -464,5 +468,5 @@ ugc_wgw=$dest/code/bin/ugc-wgw
 resources=$TASK_RESOURCES
 profiles=$prefix/profiles
 plugin=ugc-wgw-miniwdl $plugin
-# next: $dest/code/bin/ugc-wgw init <project_dir> --install $dest --ref-map $ref_map [--profile cpu|parabricks]
+# next: $dest/code/bin/ugc-wgw init <project_dir> --install $dest --ref-map $ref_map [--profile cpu|parabricks|assembly]
 REPORT

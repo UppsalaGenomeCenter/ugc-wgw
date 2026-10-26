@@ -1,0 +1,8 @@
+{
+  "description": "Assembly track (assembly, assembly_call, cohort_pangenome) with the requests for the per-sample and chr20 scaling pilots, from the cluster smoke of 2026-10-22 on chr20-only assemblies. PAV: its two align_map jobs each hold minimap2's index of the whole reference (about 16 GB each, whatever the assembly's size) and peaked at 29 of 40 GB on chr20, so 120 GB and 16 cores (align_map on 8 threads per haplotype): three PAVs share a 48-core node and the pilot cannot be killed for memory. dipcall peaked at 32 of 48 GB on chr20: 64 GB. The genome-wide split maps one haplotype at a time (--mapCores equals --maxCores), so its memory does not grow with the cohort; it peaked at 82 of 128 GB with eight chr20 haplotypes, 192 GB for the first whole-genome cohorts. The chromosome task keeps its declared floor until the pilot. hifiasm keeps its 48 cores and 288 GiB, a whole standard node, which is why max_inflight is 10. Partition and time limits are rows of the site's resources.tsv (the worked policy of chapter 12 has them; a split that does not fit a day belongs on the long-limit partition). For the scaling pilot set stage_inputs.cohort_pangenome.chromosomes to [\"chr20\"] on the project. Replace these values with the pilots' measurements (ugc-wgw usage --by task).",
+  "max_inflight": 10,
+  "stage_inputs": {
+    "assembly_call": {"pav_threads": 16, "pav_align_threads": 8, "pav_mem_gb": 120, "dipcall_mem_gb": 64},
+    "cohort_pangenome": {"split_mem_gb": 192}
+  }
+}

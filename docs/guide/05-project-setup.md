@@ -37,9 +37,13 @@ up as `<prefix>/profiles/NAME.json` (the installer places the examples
 there once and never overwrites them, so a site edits them in place), then
 as `backends/hpc/profiles/NAME.json` in the code; a path to a file works
 too. The bundle ships `cpu` (no alignment chunking, pbmm2 on 24 threads so
-two alignments share a 48-core node, 20 runs in flight) and `parabricks`
+two alignments share a 48-core node, 20 runs in flight), `parabricks`
 (the same with Parabricks on 4 GPUs of any type and 256 GiB of host
-memory). Flags given on the command line win over the profile. The
+memory) and `assembly` (the assembly track's pilot requests: PAV on 16
+cores and 120 GiB, dipcall 64 GiB, the pangenome's genome-wide split 192
+GiB, ten runs in flight because hifiasm holds a whole node; chapter 12,
+"The pangenome's sizes"). Flags given on the command line win over the
+profile. The
 profile's values are copied into `config.json`, and `profile` there
 records its name, path, checksum and the keys it set, so a project stays
 self-contained while the site's profile evolves; `ugc-wgw stage-inputs`

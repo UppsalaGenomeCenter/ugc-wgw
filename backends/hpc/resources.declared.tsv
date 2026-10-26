@@ -56,7 +56,7 @@ ugc_wgw_hifiasm_assemble	48	288G	-	-	-	assembly	workflows/ugc_wgw/assembly/hifia
 ugc_wgw_liftover_unreliable	2	8G	-	-	-	assembly_call	workflows/ugc_wgw/assembly/masking.wdl:7	
 ugc_wgw_manifest_write	1	1G	-	-	-	singleton,upstream,cohort_call,downstream,cohort_merge,cohort_freq,assembly,assembly_call,cohort_pangenome	workflows/ugc_wgw/provenance.wdl:9	
 ugc_wgw_minimap2_align_asm	16	32G	-	-	-	assembly_call	workflows/ugc_wgw/assembly/align_asm.wdl:7	cpu from workflow input default; cpu input: align_threads; memory from workflow input default; memory input: align_mem_gb; command uses threads
-ugc_wgw_pangenome_freq_summary	1	4G	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/vcf_post.wdl:132	
+ugc_wgw_pangenome_freq_summary	1	4G	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/vcf_post.wdl:169	
 ugc_wgw_pangenome_member_stats	1	4G	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/member_stats.wdl:7	
 ugc_wgw_pangenome_member_stats_gather	1	2G	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/member_stats.wdl:70	
 ugc_wgw_pangenome_names	1	2G	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/names.wdl:7	

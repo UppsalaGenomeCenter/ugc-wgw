@@ -546,10 +546,13 @@ then `<name>.1` and `<name>.2` per member in cohort order), runs
 directory with its seqfile; per requested chromosome `ugc_wgw_cactus_chrom`
 untars, rewrites the paths and runs the four construction steps, ending in
 `cactus-graphmap-join` with `--vcf --vcfwave --gbz --gfa`; two
-`ugc_wgw_pangenome_vcf_post` calls concatenate the raw and the vcfwave VCFs,
-restore the sample IDs (`bcftools reheader`), unphase the members that were
-not trio-binned (`+setGT`) and add the header lines (cohort, chromosomes,
-the ambiguity rule, the phase policy); the `cohort_freq` tasks run per
+`ugc_wgw_pangenome_vcf_post` calls bring every chromosome VCF to the
+cohort's sample columns (a member without sequence in a chromosome's
+graph, an XX member on chrY, gets missing genotypes there), concatenate
+the raw and the vcfwave VCFs, restore the sample IDs (`bcftools
+reheader`), unphase the members that were not trio-binned and add the
+header lines (cohort, chromosomes, the ambiguity rule, the phase policy);
+the `cohort_freq` tasks run per
 chromosome on the vcfwave VCF with missing genotypes kept, their shards are
 concatenated and `ugc_wgw_pangenome_freq_summary` writes the summary (since
 0.12.0 also records by nesting level, vcfwave type and allele length);

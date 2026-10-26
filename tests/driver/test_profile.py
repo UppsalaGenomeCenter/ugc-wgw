@@ -30,17 +30,20 @@ class ProfileTest(unittest.TestCase):
         return code, err, config.load(proj) if code == 0 else None
 
     def test_shipped_profiles_apply_and_their_keys_are_real_inputs(self):
-        for name in ("cpu", "parabricks"):
+        shipped = sorted(p.stem for p in (REPO / "backends" / "hpc" / "profiles").glob("*.json"))
+        self.assertEqual(shipped, ["assembly", "cpu", "parabricks"])
+        for name in shipped:
             code, err, cfg = self.init("--profile", name)
             self.assertEqual(code, 0, err)
             doc = json.loads((REPO / "backends" / "hpc" / "profiles" / f"{name}.json").read_text())
             self.assertEqual(cfg.stage_inputs, doc["stage_inputs"])
-            self.assertEqual((cfg.max_inflight, cfg.deepvariant), (20, doc["deepvariant"]))
+            self.assertEqual((cfg.max_inflight, cfg.deepvariant), (doc["max_inflight"], doc.get("deepvariant", "cpu")))
             self.assertEqual(cfg.gpu_type, doc.get("gpu_type", ""))
             self.assertEqual(cfg.profile["name"], name)
             self.assertTrue(cfg.profile["path"].endswith(f"backends/hpc/profiles/{name}.json"))
             self.assertRegex(cfg.profile["sha256"], r"^[0-9a-f]{64}$")
-            self.assertIn("stage_inputs.singleton.use_alignment_chunking", cfg.profile["applied"])
+            stage, inputs = next(iter(doc["stage_inputs"].items()))
+            self.assertIn(f"stage_inputs.{stage}.{next(iter(inputs))}", cfg.profile["applied"])
             self.assertIn("max_inflight", cfg.profile["applied"])
             self.assertNotIn("description", cfg.profile["applied"])
             self.assertIn(f"profile {name} (", err)
@@ -49,10 +52,11 @@ class ProfileTest(unittest.TestCase):
             self.assertEqual(code, 0, err)
             self.assertEqual(err, "", err)
             rows = {(r["stage"], r["input"]): r for r in json.loads(out)}
-            row = rows[("singleton", "use_alignment_chunking")]
-            self.assertEqual((row["override"], row["override_source"]), (False, f"profile {name}"))
-            code, out, _ = run_cli(["--project", str(cfg.project_dir), "stage-inputs", "--stage", "upstream"])
-            self.assertRegex(out, r"use_alignment_chunking +Boolean +true +stage_inputs .*false \(profile\)")
+            first_input = next(iter(inputs))
+            row = rows[(stage, first_input)]
+            self.assertEqual((row["override"], row["override_source"]), (inputs[first_input], f"profile {name}"))
+            code, out, _ = run_cli(["--project", str(cfg.project_dir), "stage-inputs", "--stage", stage])
+            self.assertRegex(out, rf"{first_input} +\S+ +\S+ +stage_inputs .*{json.dumps(inputs[first_input])} \(profile\)")
             # the report's provenance names it
             report = self.tmp / f"report-{name}.html"
             code, _, err = run_cli(["--project", str(cfg.project_dir), "report", "--out", str(report)])

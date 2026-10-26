@@ -219,6 +219,6 @@ Reading the tables:
 | `ugc_wgw_pangenome_vcf_post` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/pangenome/vcf_post.wdl:7` |
 | `ugc_wgw_pangenome_member_stats` | 1 | 4G | - | `workflows/ugc_wgw/pangenome/member_stats.wdl:7` |
 | `ugc_wgw_pangenome_member_stats_gather` | 1 | 2G | - | `workflows/ugc_wgw/pangenome/member_stats.wdl:70` |
-| `ugc_wgw_pangenome_freq_summary` | 1 | 4G | - | `workflows/ugc_wgw/pangenome/vcf_post.wdl:132` |
+| `ugc_wgw_pangenome_freq_summary` | 1 | 4G | - | `workflows/ugc_wgw/pangenome/vcf_post.wdl:169` |
 | `ugc_wgw_vcf_split_multiallelic` | 2 | 4G | cpu from input default; command uses threads | `workflows/ugc_wgw/pangenome/truvari.wdl:7` |
 | `ugc_wgw_truvari_bench` | 2 | 8G | - | `workflows/ugc_wgw/pangenome/truvari.wdl:77` |

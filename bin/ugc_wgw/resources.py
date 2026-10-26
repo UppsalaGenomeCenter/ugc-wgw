@@ -309,6 +309,12 @@ def load(cfg: Config, *, engine_info: dict[str, str] | None = None) -> Resources
     if rules and engine_info is not None and engine_info.get("ugc_wgw_miniwdl", "unknown") == "unknown":
         warnings.append("the engine venv has no ugc_wgw_resources task plugin: the policy rows will not apply "
                         "(install a bundle that ships plugins/ugc_wgw_miniwdl)")
+    if eng.backend in SLURM_BACKENDS and cfg.miniwdl_cfg.exists() \
+            and not all(_env_emptied(eng.run_options, v) for v in BIND_ENV_VARS):
+        warnings.append('[singularity] run_options lacks "--env", "APPTAINER_BIND=", "--env", "SINGULARITY_BIND=": Apptainer '
+                        "exports its bind list into every container, miniwdl binds every input file, and a cohort task with "
+                        'hundreds of inputs cannot start ("argument list too long"); add the four words to run_options of the '
+                        "installed miniwdl.cfg (chapter 04)")
     gpu = GpuChoice(cfg.deepvariant, cfg.gpu_type, cfg.parabricks_gpus)
     task = gpu.selected_task()
     if task is not None and cfg.miniwdl_cfg.exists():
@@ -320,6 +326,22 @@ def load(cfg: Config, *, engine_info: dict[str, str] | None = None) -> Resources
             warnings.append(f"deepvariant={cfg.deepvariant} but no GPU partition: set SLURM_PARTITION_GPU in site.cfg "
                             f"or a policy row with a partition for {task}")
     return Resources(eng, rules, declared, warnings, policy, gpu)
+
+
+SLURM_BACKENDS = ("slurm_singularity", "ugc_slurm_singularity")   # the backends that run on the cluster
+BIND_ENV_VARS = ("APPTAINER_BIND", "SINGULARITY_BIND")           # Apptainer exports its bind list in both
+
+
+def _env_emptied(run_options: list[str], var: str) -> bool:
+    """Whether run_options carries `--env VAR=` (or `--env=VAR=`), the override that keeps Apptainer's exported
+    bind list out of the container (guide chapter 04)."""
+    want = f"{var}="
+    for i, opt in enumerate(run_options):
+        if opt == f"--env={want}":
+            return True
+        if opt == "--env" and i + 1 < len(run_options) and run_options[i + 1] == want:
+            return True
+    return False
 
 
 def policy_ref(cfg: Config) -> dict[str, str] | None:

@@ -153,7 +153,7 @@ Under `cohorts/<cohort_id>/<version>/cohort_pangenome/current/out/`.
 
 | Output | What it is |
 |---|---|
-| `pangenome_vcf`, `pangenome_vcf_index` | `<cohort_id>.pangenome.GRCh38_GIABv3.vcf.gz`: the graph's cohort VCF (`vg deconstruct` through `cactus-graphmap-join`) over the chromosomes built, one column per member under its sample ID; trio-binned members keep `\|` genotypes, the others carry `/`. |
+| `pangenome_vcf`, `pangenome_vcf_index` | `<cohort_id>.pangenome.GRCh38_GIABv3.vcf.gz`: the graph's cohort VCF (`vg deconstruct` through `cactus-graphmap-join`) over the chromosomes built, one column per member under its sample ID; trio-binned members keep `\|` genotypes, the others carry `/`; a member without sequence in a chromosome's graph (an XX member on chrY) has missing genotypes there. |
 | `pangenome_wave_vcf`, `pangenome_wave_vcf_index` | The same after `vcfwave`: alleles realigned to the reference and complex records decomposed; the file the frequencies and truvari read. |
 | `chromosomes_built` | The chromosomes built, the order of every per-chromosome array below. |
 | `chrom_gbzs`, `chrom_gfas` | The graph per chromosome, `<cohort_id>.pangenome.GRCh38_GIABv3.<chr>.gbz` and `.gfa.gz` (`vg` and `minigraph` read them). |

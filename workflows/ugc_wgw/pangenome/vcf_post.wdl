@@ -6,7 +6,7 @@ import "../../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/structs.wdl"
 
 task ugc_wgw_pangenome_vcf_post {
   meta {
-    description: "bcftools concat of the per-chromosome VCFs of one kind (raw or vcfwave), the Cactus-safe sample names changed back to the sample IDs (bcftools reheader), genotypes of the members that are not trio-binned unphased (| to / in those columns only: hifiasm's hap1/hap2 are local phase blocks, so the .1|.2 order means nothing beyond them), header lines about the cohort, the ambiguity rule and the phase policy added, bgzip, tabix."
+    description: "The per-chromosome VCFs of one kind (raw or vcfwave) brought to the cohort's sample columns (a member without sequence in a chromosome's graph, an XX member on chrY, has no column in that VCF: it is added with missing genotypes, every column in cohort order), bcftools concat, the Cactus-safe sample names changed back to the sample IDs (bcftools reheader), genotypes of the members that are not trio-binned unphased (| to / in those columns only: hifiasm's hap1/hap2 are local phase blocks, so the .1|.2 order means nothing beyond them), header lines about the cohort, the ambiguity rule and the phase policy added, bgzip, tabix."
     outputs: {
       vcf: {
         description: "<out_prefix>.vcf.gz"
@@ -70,6 +70,43 @@ task ugc_wgw_pangenome_vcf_post {
     bcftools --version | head -1 >&2
     mkdir -p in
     for f in ~{sep=" " vcfs} ~{sep=" " vcf_indices}; do ln -s "$f" "in/$(basename "$f")"; done
+    # a chromosome's graph holds only the members with contigs assigned to it, and Cactus writes no sample column
+    # for the others (an XX member on chrY; a member whose assembly left a chromosome out); bcftools concat wants
+    # identical sample columns, so such a VCF gets the absent members with missing genotypes, every column in
+    # cohort order (the Cactus-safe names of rename_samples, which is that order)
+    cut -f1 "~{rename_samples}" > samples.txt
+    cat > pad.py <<'PY'
+import sys
+want = [l.strip() for l in open(sys.argv[1]) if l.strip()]
+order = []
+out = sys.stdout
+for line in sys.stdin:
+    if line.startswith("##"):
+        out.write(line)
+        continue
+    if line.startswith("#CHROM"):
+        names = line.rstrip("\n").split("\t")
+        have = {n: i for i, n in enumerate(names[9:], start=9)}
+        unknown = sorted(set(have) - set(want))
+        if unknown:
+            sys.exit("samples in the VCF but not in the cohort: " + ",".join(unknown))
+        order = [have.get(n) for n in want]
+        print(f"{len(have)} of {len(want)} members in this VCF; {len(want) - len(have)} added with missing genotypes", file=sys.stderr)
+        out.write("\t".join(names[:9] + want) + "\n")
+        continue
+    f = line.rstrip("\n").split("\t")
+    empty = ":".join("." for _ in f[8].split(":"))
+    out.write("\t".join(f[:9] + [f[i] if i is not None else empty for i in order]) + "\n")
+PY
+    for f in in/*.vcf.gz; do
+      if ! cmp -s <(bcftools query --list-samples "$f") samples.txt; then
+        echo "$(basename "$f"): sample columns differ from the cohort's, padding" >&2
+        bcftools view --output-type v "$f" | python3 pad.py samples.txt | bgzip --threads ~{threads} > "$f.padded"
+        rm -f "$f" "$f.tbi" "$f.csi"
+        mv "$f.padded" "$f"
+        tabix --preset vcf "$f"
+      fi
+    done
     ls in/*.vcf.gz > list.txt
     cp "~{write_lines(header_lines)}" header.txt
     echo "##ugc_wgw_cohort_pangenome_chromosomes=~{sep=',' chromosomes}" >> header.txt

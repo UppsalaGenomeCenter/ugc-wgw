@@ -24,7 +24,9 @@ dir = {{CALL_CACHE_DIR}}
 [singularity]
 exe = ["apptainer"]
 image_cache = {{SIF_CACHE_DIR}}
-run_options = ["--containall", "--no-mount", "hostfs"]
+# the two --env empty Apptainer's exported bind list, which past ~500 input files exceeds the kernel's limit per
+# environment string and stops the container's /bin/sh (docs/guide/04-install.md); same as the installed config
+run_options = ["--containall", "--no-mount", "hostfs", "--env", "APPTAINER_BIND=", "--env", "SINGULARITY_BIND="]
 
 [task_runtime]
 command_shell = /bin/bash

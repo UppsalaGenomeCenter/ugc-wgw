@@ -238,7 +238,7 @@ ugc_wgw=/proj/ugc/versions/0.11.0/code/bin/ugc-wgw
 resources=/proj/ugc/resources.tsv
 profiles=/proj/ugc/profiles
 plugin=ugc-wgw-miniwdl 0.5.0
-# next: /proj/ugc/versions/0.11.0/code/bin/ugc-wgw init <project_dir> --install /proj/ugc/versions/0.11.0 --ref-map ... [--profile cpu|parabricks]
+# next: /proj/ugc/versions/0.11.0/code/bin/ugc-wgw init <project_dir> --install /proj/ugc/versions/0.11.0 --ref-map ... [--profile cpu|parabricks|assembly]
 ```
 
 The rendered map is checked against the container's `manifest.json`; a
@@ -290,7 +290,7 @@ and the next run picks it up.
 | `[call_cache] dir` | site value | Shared across versions. |
 | `[singularity] exe` | `["apptainer"]` | |
 | `[singularity] image_cache` | `<prefix>/versions/<v>/sif` | Every image must already be here; miniwdl never pulls. |
-| `[singularity] run_options` | `--containall --no-mount hostfs`, plus `--nv` with `SINGULARITY_NV=1` | `--nv` is what lets the GPU DeepVariant and Parabricks tasks see a device (chapter 12). |
+| `[singularity] run_options` | `--containall --no-mount hostfs --env APPTAINER_BIND= --env SINGULARITY_BIND=`, plus `--nv` with `SINGULARITY_NV=1` | `--nv` is what lets the GPU DeepVariant and Parabricks tasks see a device (chapter 12). The two `--env` empty the bind list Apptainer exports into every container: miniwdl binds every input file, and past about 500 files that one string exceeds the kernel's 128 KB limit per environment string, so the container's `/bin/sh` cannot start ("argument list too long"). Nothing of ours reads the variables; `ugc-wgw resources` warns when they are missing. |
 | `[scheduler] container_backend` | `ugc_slurm_singularity` | miniwdl-slurm's `slurm_singularity` plus the node-local scratch below; identical to it when `scratch_env` is empty. |
 | `[ugc_wgw] scratch_env`, `scratch_mount` | `TASK_SCRATCH_ENV`, `/mnt/scratch` | The job variable naming the node's per-job scratch directory and where it is bound inside the containers. |
 | `[ugc_wgw] gpu_type` | empty | The gres type of GPU tasks; the driver overrides it per run with the project's `gpu_type` (chapter 12), so it matters only for runs started by hand. |

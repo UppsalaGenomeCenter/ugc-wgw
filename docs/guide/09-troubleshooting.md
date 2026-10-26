@@ -154,6 +154,20 @@ routes small-variant calling to `deepvariant_call_variants_gpu` or
 submitted when the install is not ready for them; the failures below are
 what the warnings prevent.
 
+- **A cohort task's `slurm-<jobid>.out` ends with `FATAL: exec /bin/sh
+  failed: fork/exec /bin/sh: argument list too long`** right after the
+  scratch line, every shard alike, and the task's `stderr.txt` is empty: the
+  container could not start. Apptainer exports `APPTAINER_BIND` and
+  `SINGULARITY_BIND` into the container with the whole bind list, miniwdl
+  binds every input file (an 800-sample `glnexus` shard has 1,600), and
+  past about 500 files that one string exceeds the kernel's 128 KB limit per
+  environment string. The installed `miniwdl.cfg` empties both through
+  `--env APPTAINER_BIND= --env SINGULARITY_BIND=` in `[singularity]
+  run_options` (chapter 04); on an install from before 0.12.2 add the four
+  words to that line and `ugc-wgw retry` the stage: the per-sample tasks
+  replay from the call cache and only the shards run. `ugc-wgw resources`
+  warns when the override is missing. The next ceiling is the total size of
+  the arguments, 2 MB on Linux: about 4,000 samples at two files each.
 - **`ugc-wgw resources`: `run_options has no --nv`**, or the task fails with
   `could not find a GPU` / `CUDA_ERROR_NO_DEVICE` / TensorFlow listing no
   GPU: the containers do not see the node's driver. Set `SINGULARITY_NV=1`

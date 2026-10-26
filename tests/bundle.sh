@@ -61,7 +61,7 @@ grep -q 'command_shell = /bin/bash' "$install_dir/miniwdl.cfg"
 grep -q '^cpu_max = 48$' "$install_dir/miniwdl.cfg"
 grep -q '^memory_max = 386547056640$' "$install_dir/miniwdl.cfg"   # 360 GiB in bytes
 grep -q '^defaults = {"docker": "ubuntu:20.04", "maxRetries": 1, "time_minutes": 4320, "slurm_partition": "core", "slurm_account": "acc-1", "slurm_partition_gpu": "gpu"}$' "$install_dir/miniwdl.cfg"
-grep -q '^run_options = \["--containall", "--no-mount", "hostfs", "--nv"\]$' "$install_dir/miniwdl.cfg"
+grep -q '^run_options = \["--containall", "--no-mount", "hostfs", "--env", "APPTAINER_BIND=", "--env", "SINGULARITY_BIND=", "--nv"\]$' "$install_dir/miniwdl.cfg"
 grep -q '^extra_args = "--qos short"$' "$install_dir/miniwdl.cfg"
 grep -q "^resources = $scratch/prefix/resources.tsv$" "$install_dir/miniwdl.cfg"
 grep -q '^container_backend = ugc_slurm_singularity$' "$install_dir/miniwdl.cfg"
@@ -117,7 +117,7 @@ assert resources.policy_path(cfg) == sys.argv[2], resources.policy_path(cfg)
 assert cfg["task_runtime"].get_int("cpu_max") == 48
 assert cfg["task_runtime"].get_dict("defaults")["slurm_partition"] == "core"
 assert cfg["task_runtime"].get_dict("defaults")["slurm_partition_gpu"] == "gpu"
-assert cfg["singularity"].get_list("run_options") == ["--containall", "--no-mount", "hostfs", "--nv"]
+assert cfg["singularity"].get_list("run_options") == ["--containall", "--no-mount", "hostfs", "--env", "APPTAINER_BIND=", "--env", "SINGULARITY_BIND=", "--nv"]
 PYEOF
 ref_map=$install_dir/references/ugc_wgw_ref_map.GRCh38_GIABv3.tsv
 grep -q "^name	GRCh38_GIABv3$" "$ref_map"

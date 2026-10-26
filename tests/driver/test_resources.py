@@ -93,6 +93,26 @@ class ResourcesCommandTest(unittest.TestCase):
         rows, _ = self.rows()
         self.assertEqual(rows["deepvariant_call_variants_cpu"]["cpu"], "64")
 
+    def test_bind_list_override_warning(self):
+        # SLURM installs must empty Apptainer's exported bind list; the plain singularity backend (dev machine) is not checked
+        for backend in ("slurm_singularity", "ugc_slurm_singularity"):
+            write_cfg(self.cfg, policy_path=self.policy, backend=backend, run_options=["--containall"],
+                      defaults={**DEFAULTS, "slurm_partition_gpu": "gpu"})
+            rows, err = self.rows()
+            self.assertIn('"--env", "APPTAINER_BIND="', err, backend)
+            self.assertIn("argument list too long", err)
+            write_cfg(self.cfg, policy_path=self.policy, backend=backend, run_options=["--containall", "--env", "APPTAINER_BIND=", "--env", "SINGULARITY_BIND="],
+                      defaults={**DEFAULTS, "slurm_partition_gpu": "gpu"})
+            rows, err = self.rows()
+            self.assertEqual(err, "", backend)
+            write_cfg(self.cfg, policy_path=self.policy, backend=backend,
+                      run_options=["--env=APPTAINER_BIND=", "--env=SINGULARITY_BIND="], defaults={**DEFAULTS, "slurm_partition_gpu": "gpu"})
+            rows, err = self.rows()
+            self.assertEqual(err, "", backend)
+        write_cfg(self.cfg, policy_path=self.policy, backend="singularity", run_options=["--containall"])
+        rows, err = self.rows()
+        self.assertEqual(err, "")
+
     def test_gpu_rows_and_warnings(self):
         rows, err = self.rows()
         self.assertEqual((rows["deepvariant_call_variants_gpu"]["gpus"], rows["run_parabricks_deepvariant"]["gpus"],
@@ -115,14 +135,14 @@ class ResourcesCommandTest(unittest.TestCase):
         self.assertIn("no GPU partition", err)
         self.assertIn("run_parabricks_deepvariant", err)
         self.assertEqual(rows["run_parabricks_deepvariant"]["partition"], "core")
-        write_cfg(self.cfg, policy_path=self.policy, backend="slurm_singularity", run_options=["--nv"],
+        write_cfg(self.cfg, policy_path=self.policy, backend="slurm_singularity", run_options=["--nv", "--env", "APPTAINER_BIND=", "--env", "SINGULARITY_BIND="],
                   defaults={**DEFAULTS, "slurm_partition_gpu": "gpu"})
         rows, err = self.rows()
         self.assertEqual(err, "")
         self.assertEqual((rows["run_parabricks_deepvariant"]["partition"], rows["deepvariant_call_variants_gpu"]["partition"],
                           rows["mosdepth"]["partition"]), ("gpu", "gpu", "core"))
         self.policy.write_text(HEADER + "run_parabricks_deepvariant\t-\t-\t-\tgpuq\t-\n")
-        write_cfg(self.cfg, policy_path=self.policy, backend="slurm_singularity", run_options=["--nv"])
+        write_cfg(self.cfg, policy_path=self.policy, backend="slurm_singularity", run_options=["--nv", "--env", "APPTAINER_BIND=", "--env", "SINGULARITY_BIND="])
         rows, err = self.rows()
         self.assertEqual(err, "")   # the row names the partition
         self.assertEqual(rows["run_parabricks_deepvariant"]["partition"], "gpuq (policy)")

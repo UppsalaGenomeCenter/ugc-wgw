@@ -81,9 +81,9 @@ cd /proj/ugc/projects/cohort2026
 
 The project stays on the version it was created with, even after another
 bundle is activated later (chapter 10). Add `--profile cpu` (or
-`parabricks`) to start from the site's profile under `/proj/ugc/profiles/`:
-the tuned stage inputs, the DeepVariant flavour and the concurrency in one
-go (chapter 05). Two flags worth knowing on their own: `--max-inflight N`
+`parabricks`, `assembly`) to start from the site's profile under
+`/proj/ugc/profiles/`: the tuned stage inputs, the DeepVariant flavour and
+the concurrency in one go (chapter 05). Two flags worth knowing on their own: `--max-inflight N`
 sets how many samples run at once by default, and
 `--deepvariant gpu --gpu-type a100` selects GPU DeepVariant if the install
 was prepared for it (chapter 12). Everything else is a key in

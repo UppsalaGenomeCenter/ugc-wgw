@@ -3,6 +3,43 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.12.3
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.5.0 and
+the image manifest unchanged. A fix release for cohorts of hundreds of
+samples and for the pangenome's sex chromosomes (0.12.2 was cut and
+superseded the same day, unpublished).
+
+- **The pangenome's cohort VCF has every member on every chromosome.**
+  Cactus writes a sample column only for the members with sequence in a
+  chromosome's graph, so the chrY VCF of the first real-sample cohort
+  carried the XY members alone and the gather step's `bcftools concat`
+  refused the mixed sample sets. `ugc_wgw_pangenome_vcf_post` now brings
+  every chromosome VCF to the cohort's columns first: an absent member
+  gets missing genotypes, every column in cohort order. A missing
+  genotype keeps its one meaning, no assembled sequence there; the
+  chromosome graphs replay from the cache on a retry.
+- **Every container runs with Apptainer's exported bind list emptied.** The
+  first 800-sample `cohort_call` failed in every `glnexus` shard before any
+  tool ran, with "exec /bin/sh failed: argument list too long". Apptainer
+  exports `APPTAINER_BIND` and `SINGULARITY_BIND` into the container with
+  the whole bind list, miniwdl binds every input file (1,600 per shard),
+  and past about 500 files that one environment string exceeds the kernel's
+  128 KB limit. The rendered `miniwdl.cfg` now adds `--env APPTAINER_BIND=
+  --env SINGULARITY_BIND=` to `[singularity] run_options`; nothing reads
+  the variables. `ugc-wgw resources` warns when a SLURM install lacks the
+  override, and chapter 09 says how to patch an existing install (four
+  words in the installed `miniwdl.cfg`, then `ugc-wgw retry`). The next
+  ceiling is the total argument size, about 4,000 samples.
+- A third site profile, `assembly`, carries the assembly track's pilot
+  requests from the first cluster run (PAV on 16 cores and 120 GiB, dipcall
+  64 GiB, the pangenome's genome-wide split 192 GiB, ten runs in flight).
+  Chapter 12 explains why the split's wall time, not its memory, grows with
+  the cohort, the two routes for large cohorts (a long-limit partition, or
+  sharding the mapping), and how memory above the standard node reaches a
+  task (a policy row; the site cap rounds the workflow's own request down).
+
 ## 0.12.1
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

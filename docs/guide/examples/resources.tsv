@@ -1,5 +1,6 @@
 # A worked site resource policy for a cluster of 48-core, 384000 MB nodes on a shared
-# partition, with 96-core large-memory nodes and two GPU nodes (4 x A100, 6 x L40S), derived
+# partition, with 96-core large-memory nodes (2 and 4 TB, 14-day limit) and two GPU nodes (4 x A100,
+# 6 x L40S), derived
 # from ten real 20-25x samples (docs/guide/12-resources.md, "A worked policy"). Copy it to
 # <prefix>/resources.tsv and adjust the time limits to your queue. Rows apply in file order and
 # a later row's cells override an earlier row's, so the catch-all comes first.

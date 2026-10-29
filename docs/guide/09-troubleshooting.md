@@ -34,13 +34,14 @@ wins. The kind decides whether the driver re-attempts on its own.
 | `version` | class `version_mismatch` | Blocked until fixed. |
 | `transient` | class `driver_lost`, `Interrupted`, `Terminated`, `launch_error`, `killed`, `NoResult`; or `DUE TO PREEMPTION`, `NODE_FAIL`, `Socket timed out`, `Unable to contact slurm controller` in the task's SLURM log | Re-attempted automatically after the backoff, up to `auto_retry_max` times. |
 | `input` | class `InputError` (also what the driver's own preflight of the raw read files reports: missing, empty, truncated or resized since registration, chapter 05), `DownloadFailed`; or a failed command whose logs say `No such file or directory`, `does not exist`, `Permission denied`, `EOF marker is absent`, `Invalid BGZF header` | Blocked until the file is fixed and `ugc-wgw retry`. |
-| `resource` | exit status 137 or 253; `oom_kill`, `OUT_OF_MEMORY`, `Out of memory`, `DUE TO TIME LIMIT`, `TIMEOUT`, or a CUDA host-memory failure (`cudaErrorMemoryAllocation`, `CUDA_ERROR_OUT_OF_MEMORY`) in the task's SLURM log, stderr or stdout; or `sbatch` refused the request (`Requested node configuration is not available`, `CPU count per node can not be satisfied`) | Blocked; cap or change the request (chapter 12), then `ugc-wgw retry`. |
+| `resource` | exit status 137 or 253; `oom_kill`, `OUT_OF_MEMORY`, `Out of memory`, `DUE TO TIME LIMIT`, `TIMEOUT`, or a CUDA host-memory failure (`cudaErrorMemoryAllocation`, `CUDA_ERROR_OUT_OF_MEMORY`) in the task's SLURM log, stderr or stdout; or `sbatch` refused the request (`Requested node configuration is not available`, `CPU count per node can not be satisfied`) | Time and memory failures are re-attempted at once with the task's limit multiplied (`resource_retry_factor`, 2), up to `resource_retry_max` (2) times, and the working request is learned for the project (chapter 06, "Resource escalation"); a refused request, or a failure at the site's memory cap, is blocked: cap or change the request (chapter 12), then `ugc-wgw retry`. |
 | `tool` | any other `CommandFailed`, `OutputError` or class | Blocked until `ugc-wgw retry`. |
 | `cancelled` | the driver stopped the run | Blocked until `ugc-wgw retry`. |
 | `unknown` | no error class | Blocked until `ugc-wgw retry`. |
 
-A mislabelled kind costs nothing but a label: only `transient` triggers
-compute. `auto_retry_max = 0` in `config.json` disables automatic retries.
+A mislabelled kind costs a little compute at most: `transient` and
+`resource` trigger a re-attempt. `auto_retry_max = 0` in `config.json`
+disables the transient retries, `resource_retry_max = 0` the escalations.
 
 ## Error classes
 
@@ -66,8 +67,8 @@ flowchart TD
   s -->|"transient"| r["nothing to do: the driver re-attempts after the backoff; ugc-wgw retry to skip the wait"]
   s -->|"version"| v["remove the ugc_wgw_version override or re-init the project, retry"]
   s -->|"resource, sbatch refused"| ref["the request exceeds a node: set TASK_CPU_MAX and TASK_MEMORY_MAX in site.cfg (chapter 12), retry"]
-  s -->|"resource, memory"| oom["cohort task: raise its *_mem_gb in stage_inputs; other task (Parabricks at depth: 256G): a policy row, retry"]
-  s -->|"resource, time limit"| t["a policy row's time for that task, or TASK_TIME_MINUTES for all, retry"]
+  s -->|"resource, memory"| oom["the driver re-attempts with the memory doubled (chapter 06); exhausted or at the site cap: a policy row with a larger partition, or the task's *_mem_gb stage input, retry"]
+  s -->|"resource, time limit"| t["the driver re-attempts with the time doubled (chapter 06); exhausted: a policy row's time for that task, retry"]
   s -->|"input"| i["preflight message: re-copy the file, ugc-wgw samples check; else fix the path in the sheet or reference map; visible on compute nodes?; retry"]
   s -->|"cancelled"| cx["you stopped it: ugc-wgw retry when ready"]
   s -->|"tool or unknown"| c{"what does the task's stderr say?"}

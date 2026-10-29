@@ -81,3 +81,7 @@ scratch_mount = /mnt/scratch
 # the project's config.json gpu_type per run as MINIWDL__UGC_WGW__GPU_TYPE, which outranks this line; set it
 # here only for runs started by hand. Not a workflow input, so changing it keeps the call cache.
 gpu_type =
+# Resource escalations and learned requests, set per run by the driver as MINIWDL__UGC_WGW__ESCALATIONS (JSON:
+# task -> time_factor, memory_factor, time_minutes_min, memory_min) after a task ran out of wall time or memory
+# (docs/guide/06-running.md "Resource escalation"). Applied after the policy rows; never a workflow input.
+escalations =

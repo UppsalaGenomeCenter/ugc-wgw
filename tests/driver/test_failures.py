@@ -38,6 +38,7 @@ class ClassifyTest(unittest.TestCase):
             "12345\nslurmstepd: error: *** JOB 12345 ON n1 CANCELLED AT 2026-09-11T10:00:00 DUE TO TIME LIMIT ***\n")
         c = failures.classify(self.result("CommandFailed", exit_status=143), self.attempt)
         self.assertEqual(c.kind, "resource")
+        self.assertEqual((c.resource, c.evidence["resource"]), ("time", "time"))
         self.assertTrue(str(c.evidence["source"]).endswith("slurm_singularity.log.txt"))
         self.assertIn("DUE TO TIME LIMIT", str(c.evidence["line"]))
         self.assertEqual(c.evidence["task_dir"], str(self.task))
@@ -51,6 +52,16 @@ class ClassifyTest(unittest.TestCase):
         c = failures.classify(self.result("CommandFailed", exit_status=1), self.attempt)
         self.assertEqual(c.kind, "resource")
         self.assertIn("CPU count per node", str(c.evidence["line"]))
+        self.assertIsNone(c.resource)   # a refused request is not escalatable
+        self.assertNotIn("resource", c.evidence)
+
+    def test_resource_subkinds(self):
+        self.assertEqual(failures.classify(self.result("CommandFailed", exit_status=137), self.attempt).resource, "memory")
+        self.assertEqual(failures.classify(self.result("CommandFailed", exit_code=253), self.attempt).resource, "memory")
+        (self.task / "slurm_singularity.log.txt").write_text("1\nslurmstepd: error: Detected 1 oom_kill event in StepId=1.batch\n")
+        c = failures.classify(self.result("CommandFailed", exit_status=1), self.attempt)
+        self.assertEqual((c.kind, c.resource), ("resource", "memory"))
+        self.assertEqual(failures.classify(self.result("CommandFailed", exit_status=1, task_dir=False), self.attempt).resource, None)
 
     def test_preemption_text_is_transient(self):
         (self.task / "slurm_singularity.log.txt").write_text("777\n*** JOB 777 CANCELLED DUE TO PREEMPTION ***\n")

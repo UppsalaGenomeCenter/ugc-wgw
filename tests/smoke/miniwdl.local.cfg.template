@@ -39,3 +39,5 @@ defaults = {
 [ugc_wgw]
 # the site resource policy (docs/guide/12-resources.md); the local smoke ships the example (no active rows)
 resources = {{RESOURCES_FILE}}
+# the driver's per-run resource escalations (MINIWDL__UGC_WGW__ESCALATIONS), as on the cluster
+escalations =

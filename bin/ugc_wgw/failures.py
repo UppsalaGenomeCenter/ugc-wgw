@@ -16,6 +16,7 @@ from .engine import RunResult
 from .layout import run_files
 
 KINDS = ("transient", "resource", "input", "tool", "version", "cancelled", "unknown")
+RESOURCES = ("time", "memory")   # the resource a `resource` failure ran out of, when the evidence says (escalate.py)
 BACKOFF_CAP_SECONDS = 3600.0
 TAIL_BYTES = 64 * 1024
 MESSAGE_CHARS = 200
@@ -33,6 +34,9 @@ RESOURCE_TEXT = re.compile(r"oom_kill|OUT_OF_MEMORY|Out of memory|DUE TO TIME LI
                            r"|Requested node configuration is not available|CPU count per node can not be satisfied"
                            r"|Memory specification can not be satisfied|Requested time limit is invalid"
                            r"|exceeds partition limit")
+TIME_TEXT = re.compile(r"DUE TO TIME LIMIT|TIMEOUT")
+MEMORY_TEXT = re.compile(r"oom_kill|OUT_OF_MEMORY|Out of memory|DUE TO MEMORY|cudaErrorMemoryAllocation"
+                         r"|CUDA_ERROR_OUT_OF_MEMORY|cudaErrorHostMemoryAlreadyRegistered")
 TRANSIENT_TEXT = re.compile(r"DUE TO PREEMPTION|PREEMPTED|DUE TO NODE FAILURE|NODE_FAIL|Socket timed out"
                             r"|Unable to contact slurm controller|slurm_load_jobs error")
 INPUT_TEXT = re.compile(r"No such file or directory|does not exist|Permission denied"
@@ -45,6 +49,7 @@ class Classification:
     error_class: str | None
     message: str
     evidence: dict[str, object] = field(default_factory=dict)
+    resource: str | None = None   # "time" | "memory" for a resource failure whose evidence names one (else None)
 
 
 def _tail_lines(path: Path) -> list[str]:
@@ -115,6 +120,16 @@ def classify(result: RunResult, attempt_path: Path) -> Classification:
             kind = "unknown"
     if hit is not None:
         evidence["source"], evidence["line"] = hit
+    resource: str | None = None
+    if kind == "resource":
+        if result.exit_status in RESOURCE_EXIT or result.exit_code in RESOURCE_EXIT:
+            resource = "memory"
+        elif hit is not None and TIME_TEXT.search(hit[1]):
+            resource = "time"
+        elif hit is not None and MEMORY_TEXT.search(hit[1]):
+            resource = "memory"
+        if resource:
+            evidence["resource"] = resource
     parts = [cls or "no class"]
     if result.exit_status is not None:
         parts.append(f"exit_status={result.exit_status}")
@@ -126,7 +141,7 @@ def classify(result: RunResult, attempt_path: Path) -> Classification:
         message += ": " + detail
     if len(message) > MESSAGE_CHARS:
         message = message[:MESSAGE_CHARS - 1] + "…"
-    return Classification(kind, cls, message, evidence)
+    return Classification(kind, cls, message, evidence, resource)
 
 
 def backoff_delay(cfg: Config, attempt: int) -> float:

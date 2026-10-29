@@ -170,7 +170,8 @@ mode), on an unknown sample, cohort or threshold key.
 | Flag | Default | Meaning |
 |---|---|---|
 | `--stage S` | all | Only tasks of this stage. |
-| `--changed` | off | Only tasks a site cap or a policy row changes. |
+| `--changed` | off | Only tasks a site cap, a policy row or a learned request changes. |
+| `--learned` | off | Print the project's learned requests (escalations that worked) as rows of the site policy, for promotion. |
 | `--json` | off | Rows as JSON. |
 
 Prints, per task, the declared request, the effective cores, memory, wall
@@ -240,6 +241,9 @@ SIGINT or SIGTERM.
 | `pangenome_sv_cohort` | `""` | Cohort whose `cohort_merge` SV VCF `cohort_pangenome` compares the graph's variants with (truvari); empty = the pangenome cohort's own merge, when it has one. A profile key. |
 | `auto_retry_max` | `2` | Automatic re-attempts of transient failures while the attempt number is at most this; `0` disables. |
 | `backoff_seconds` | `300` | Wait before the first automatic re-attempt; doubles per attempt, capped at 3600. |
+| `resource_retry_max` | `2` | Automatic re-attempts of a task that ran out of wall time or memory, each with that task's limit multiplied; `0` disables (chapter 06, "Resource escalation"). |
+| `resource_retry_factor` | `2.0` | The multiplier per escalation. |
+| `learn_resources` | `true` | Remember an escalated task's working request in `.ugc-wgw/learned_resources.json` and start it there in the project's later runs. |
 | `cancel_orphans` | `true` | Run `scancel` on the SLURM jobs of runs settled as `driver_lost` or killed after the stop grace. |
 | `lease_seconds` | `900` | A lease older than this is expired; a driver on another host may then take the project. |
 | `progress_interval` | `300` | Seconds between progress summaries in the log while `submit` runs (also logged when the counts change); `0` disables. |
@@ -351,6 +355,9 @@ miniwdl log lines the report reads: `runtime.cpu adjusted to host limit`
 |---|---|
 | ``failed (attempt N, <class>, <kind>); run `ugc-wgw retry --stage S` `` | A terminal failure of a kind the driver does not retry on its own; `, auto-retries exhausted` when it was transient but past `auto_retry_max`. |
 | `backing off until <ts> after transient <class> (attempt N)` | The driver will re-attempt at that time. |
+| `...; next attempt: <task> <time\|memory> ×F (escalation N of M)` (in the failure message) | The task ran out of time or memory; the next attempt is created at once with the limit multiplied (chapter 06). |
+| `...; escalation exhausted: <task> <resource> already ×F (M of M); a policy row or a stage input is needed` | `resource_retry_max` escalations did not suffice (or memory is at the site cap): chapter 12. |
+| `...; not escalated: <reason>` | The resource failure is a refused request, the task could not be named from the log, or `resource_retry_max` is 0. |
 | `failed after N attempts (max M)` | The retry cap was reached. |
 | `waiting for <stage> of <ids> (+N more)` | An earlier sample stage has not succeeded for these samples. |
 | `waiting for <stage> of cohort <id>` | An earlier cohort stage has not succeeded. |

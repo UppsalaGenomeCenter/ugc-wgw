@@ -139,6 +139,17 @@ def compute(db: DB, cfg: Config, sel: Selection, ugc_wgw_version: str, *, any_ve
                         plan.blocked.append(Blocked(cand, f"{latest.status} after {latest.attempt} attempts (max {max_attempts})"))
                         continue
                 else:
+                    esc = latest.meta.get("escalation") if latest.status == "failed" and latest.error_kind == "resource" else None
+                    if isinstance(esc, dict) and esc.get("task"):
+                        # the task ran out of time or memory and failures/escalate planned a bigger request: no backoff
+                        cand.note = (f"escalation: {esc['task']} {esc['resource']} ×{float(esc['factor']):g} "
+                                     f"(escalation {esc['n']} of {esc['max']})")
+                        reason = prerequisites(db, sel.mode, stage, cand.subject_type, cand.subject_id, cohort, lookup_version)
+                        if reason:
+                            plan.blocked.append(Blocked(cand, reason))
+                        else:
+                            plan.runnable.append(cand)
+                        continue
                     auto = (latest.status == "failed" and latest.error_kind == "transient"
                             and latest.attempt <= cfg.auto_retry_max)
                     if not auto:

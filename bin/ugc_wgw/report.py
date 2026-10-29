@@ -367,6 +367,8 @@ def render(cfg: Config, code: CodeInfo, reports: list[RunReport], *, ugc_wgw_ver
     finished_tasks = [t for t in all_tasks if t.duration is not None]
     cached = sum(1 for t in all_tasks if t.cached)
     auto_retries = sum(1 for e in events if e["event"] == "run.auto_retry")
+    escalations = sum(1 for e in events if e["event"] == "run.auto_retry"
+                      and str((e.get("detail") or {}).get("reason", "")).startswith("escalation"))
     durations = [r.duration for r in reports if r.duration is not None]
     starts = [r.started_at for r in runs if r.started_at]
     ends = [r.finished_at for r in runs if r.finished_at]
@@ -447,6 +449,8 @@ def render(cfg: Config, code: CodeInfo, reports: list[RunReport], *, ugc_wgw_ver
     cpu_adj = Counter((t.name, t.cpu_requested, t.cpu_granted) for t in all_tasks if t.cpu_granted is not None)
     adjust_rows = [[n, "cap (cpu_max)", f"{a}→{b}", c] for (n, a, b), c in sorted(cpu_adj.items())]
     adjust_rows += [[n, "policy", summ, c] for (n, summ), c in sorted(Counter((t.name, t.policy) for t in all_tasks if t.policy).items())]
+    adjust_rows += [[n, "escalation", summ, c] for (n, summ), c in
+                    sorted(Counter((t.name, t.escalation) for t in all_tasks if t.escalation).items())]
     ignored: Counter = Counter()
     for r in reports:
         ignored.update(r.ignored_keys)
@@ -458,7 +462,8 @@ def render(cfg: Config, code: CodeInfo, reports: list[RunReport], *, ugc_wgw_ver
             d = e["detail"]
             session_rows.append([e["ts"], e["event"], d.get("mode", ""), d.get("cohort", "") or "", d.get("max_inflight", ""),
                                  d.get("launched", ""), d.get("failures", ""), d.get("interrupted", "")])
-    notable = [e for e in events if e["event"] in ("run.reconciled", "run.scancel", "run.auto_retry", "sample.removed")
+    notable = [e for e in events if e["event"] in ("run.reconciled", "run.scancel", "run.auto_retry", "sample.removed",
+                                                   "resources.learned")
                or e["level"] in ("warning", "error")]
 
     def section(title: str, body: str) -> str:
@@ -467,7 +472,7 @@ def render(cfg: Config, code: CodeInfo, reports: list[RunReport], *, ugc_wgw_ver
     cards = [("samples", n_samples), ("cohorts", n_cohorts), ("runs", len(runs)), ("success", by_status["success"]),
              ("failed", by_status["failed"]), ("cancelled", by_status["cancelled"]),
              ("active", by_status["running"] + by_status["submitted"] + by_status["pending"]),
-             ("automatic retries", auto_retries), ("tasks", len(all_tasks)),
+             ("automatic retries", auto_retries), ("resource escalations", escalations), ("tasks", len(all_tasks)),
              ("cache hits", f"{cached} ({(100 * cached // len(all_tasks)) if all_tasks else 0}%)"),
              ("run time, summed", _dur(sum(durations)) if durations else "–"), ("campaign span", _dur(span))]
     cards_html = '<div class="cards">' + "".join(f'<div class="card"><span class="muted">{_esc(k)}</span><b>{_esc(v)}</b></div>' for k, v in cards) + "</div>"

@@ -19,7 +19,8 @@ DEFAULT_REGISTRY = "ghcr.io/uppsalagenomecenter"
 DEEPVARIANT_MODES = ("cpu", "gpu", "parabricks")   # small-variant caller of singleton/upstream (guide chapter 12)
 # the project keys a site profile may set (`ugc-wgw init --profile`, guide chapter 05); `description` is allowed and ignored
 PROFILE_KEYS = ("max_inflight", "poll_interval", "assembly_use_parents", "pangenome_sv_cohort", "deepvariant", "gpu_type",
-                "parabricks_gpus", "stage_inputs", "prices", "summary_thresholds", "input_thresholds")
+                "parabricks_gpus", "stage_inputs", "prices", "summary_thresholds", "input_thresholds",
+                "resource_retry_max", "resource_retry_factor", "learn_resources")
 
 
 @dataclass
@@ -40,6 +41,9 @@ class Config:
     pangenome_sv_cohort: str = ""   # cohort whose cohort_merge SV VCF cohort_pangenome compares the graph with (empty: the same cohort)
     auto_retry_max: int = 2
     backoff_seconds: float = 300.0
+    resource_retry_max: int = 2        # automatic re-attempts of a task that ran out of time or memory, each with the limit multiplied
+    resource_retry_factor: float = 2.0  # the multiplier per escalation (escalate.py)
+    learn_resources: bool = True       # remember an escalated task's working request for the project's later runs (learned_resources.json)
     cancel_orphans: bool = True
     lease_seconds: float = 900.0
     progress_interval: float = 300.0
@@ -75,6 +79,11 @@ class Config:
     def lock_path(self) -> Path:
         return self.ugc_wgw_dir / "lock"
 
+    @property
+    def learned_path(self) -> Path:
+        """The project's learned resources: task -> {time_minutes, memory} that an escalated attempt needed (escalate.py)."""
+        return self.ugc_wgw_dir / "learned_resources.json"
+
     def stage_overrides(self, stage: str) -> dict[str, object]:
         """Per-stage input overrides from config.json, keyed `ugc_wgw_<stage>` (bare stage name also accepted)."""
         merged: dict[str, object] = {}
@@ -102,6 +111,9 @@ class Config:
             "assembly_use_parents": self.assembly_use_parents,
             "pangenome_sv_cohort": self.pangenome_sv_cohort,
             "auto_retry_max": self.auto_retry_max,
+            "resource_retry_max": self.resource_retry_max,
+            "resource_retry_factor": self.resource_retry_factor,
+            "learn_resources": self.learn_resources,
             "backoff_seconds": self.backoff_seconds,
             "cancel_orphans": self.cancel_orphans,
             "lease_seconds": self.lease_seconds,
@@ -150,6 +162,9 @@ class Config:
             assembly_use_parents=bool(doc.get("assembly_use_parents", True)),
             pangenome_sv_cohort=str(doc.get("pangenome_sv_cohort") or "").strip(),
             auto_retry_max=int(doc.get("auto_retry_max", 2)),
+            resource_retry_max=int(doc.get("resource_retry_max", 2)),
+            resource_retry_factor=float(doc.get("resource_retry_factor", 2.0)),
+            learn_resources=bool(doc.get("learn_resources", True)),
             backoff_seconds=float(doc.get("backoff_seconds", 300.0)),
             cancel_orphans=bool(doc.get("cancel_orphans", True)),
             lease_seconds=float(doc.get("lease_seconds", 900.0)),
@@ -241,6 +256,13 @@ def load_profile(path: Path) -> dict[str, object]:
         raise UgcError(f"profile {path}: poll_interval must be a positive number")
     if "assembly_use_parents" in out and not isinstance(out["assembly_use_parents"], bool):
         raise UgcError(f"profile {path}: assembly_use_parents must be true or false")
+    if "learn_resources" in out and not isinstance(out["learn_resources"], bool):
+        raise UgcError(f"profile {path}: learn_resources must be true or false")
+    if "resource_retry_max" in out and (not isinstance(out["resource_retry_max"], int) or out["resource_retry_max"] < 0):
+        raise UgcError(f"profile {path}: resource_retry_max must be a non-negative integer")
+    if "resource_retry_factor" in out and (not isinstance(out["resource_retry_factor"], (int, float))
+                                          or out["resource_retry_factor"] <= 1):
+        raise UgcError(f"profile {path}: resource_retry_factor must be a number above 1")
     if "pangenome_sv_cohort" in out:
         if not isinstance(out["pangenome_sv_cohort"], str):
             raise UgcError(f"profile {path}: pangenome_sv_cohort must be a cohort ID (string)")
@@ -330,6 +352,9 @@ def init_project(
     poll_interval: float = 30.0,
     assembly_use_parents: bool = True,
     pangenome_sv_cohort: str = "",
+    resource_retry_max: int = 2,
+    resource_retry_factor: float = 2.0,
+    learn_resources: bool = True,
     auto_retry_max: int = 2,
     backoff_seconds: float = 300.0,
     cancel_orphans: bool = True,
@@ -358,6 +383,7 @@ def init_project(
         poll_interval=poll_interval,
         assembly_use_parents=assembly_use_parents,
         pangenome_sv_cohort=pangenome_sv_cohort.strip(),
+        resource_retry_max=resource_retry_max, resource_retry_factor=resource_retry_factor, learn_resources=learn_resources,
         auto_retry_max=auto_retry_max,
         backoff_seconds=backoff_seconds,
         cancel_orphans=cancel_orphans,

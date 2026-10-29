@@ -16,6 +16,11 @@ Environment knobs:
   UGC_WGW_FAKE_FAIL_CLASS=<class>[:<exit_status>]   error class of a failure (default CommandFailed:1); CommandFailed
                           mimics miniwdl 1.15 (no message, exit_status/stderr_file/node/dir, top-level from_dir)
   UGC_WGW_FAKE_FAIL_ATTEMPTS=1,2   fail only when the attempt directory is attempt-<n> for n in the list
+  UGC_WGW_FAKE_FAIL_RESOURCE=memory|time   the failure is a resource one: exit 137 with an oom_kill line (memory) or
+                          143 with DUE TO TIME LIMIT (time) in the task's SLURM log; it is cured by an escalation of
+                          task fake_task for that resource in MINIWDL__UGC_WGW__ESCALATIONS (a factor above 1 or a
+                          minimum), which the fake applies like the plugin: a NOTICE `ugc-wgw resource escalation
+                          applied` in workflow.log.json and success. UGC_WGW_FAKE_FAIL_RESOURCE_INCURABLE=1 fails anyway.
   UGC_WGW_FAKE_SLURM_LOG=TEXT write TEXT (\n decoded) to <attempt>/call-fake/slurm_singularity.log.txt on every run
   UGC_WGW_FAKE_STDERR=TEXT    write TEXT to <attempt>/call-fake/stderr.txt
   UGC_WGW_FAKE_TASK_LOG=1     log one task (`fake_task`, dir call-fake) as `task setup` + `done` in workflow.log.json
@@ -330,8 +335,8 @@ def main(argv: list[str] | None = None) -> int:
     (run_dir / "workflow.log").write_text(f"fake miniwdl run {stage} {sid}\n")
     log_lines = [{"level": "NOTICE", "message": f"fake miniwdl run {stage} {sid}"}]
     task_dir = run_dir / "call-fake"
+    src = f"wdl.w:ugc_wgw_{stage}.t:call-fake"
     if os.environ.get("UGC_WGW_FAKE_TASK_LOG"):   # one task, as miniwdl logs it: setup (with its dir) and done
-        src = f"wdl.w:ugc_wgw_{stage}.t:call-fake"
         now = time.time()
         log_lines += [{"level": "NOTICE", "message": "task setup", "name": "fake_task", "source": src, "dir": str(task_dir),
                        "timestamp": now},
@@ -376,9 +381,38 @@ def main(argv: list[str] | None = None) -> int:
     attempt_no = run_dir.name.split("-")[-1]
     attempts = set(filter(None, os.environ.get("UGC_WGW_FAKE_FAIL_ATTEMPTS", "").split(",")))
     if (sid.endswith("_FAIL") or sid in failing) and (not attempts or attempt_no in attempts):
-        spec = os.environ.get("UGC_WGW_FAKE_FAIL_CLASS", "CommandFailed:1")
-        cls, _, code = spec.partition(":")
-        return fail(cls, f"fake task failed for {sid}", int(code) if code else 1)
+        resource = os.environ.get("UGC_WGW_FAKE_FAIL_RESOURCE", "")
+        if resource in ("memory", "time"):
+            esc = json.loads(os.environ.get("MINIWDL__UGC_WGW__ESCALATIONS") or "{}").get("fake_task", {})
+            cured = (float(esc.get(f"{resource}_factor", 1)) > 1 or float(esc.get(f"{resource}_min", 0)) > 0) \
+                and os.environ.get("UGC_WGW_FAKE_FAIL_RESOURCE_INCURABLE") != "1"
+            # the task as miniwdl logs it, so the driver can name it from the log (escalate.task_name_for)
+            now = time.time()
+            if not os.environ.get("UGC_WGW_FAKE_TASK_LOG"):
+                log_lines.append({"level": "NOTICE", "message": "task setup", "name": "fake_task", "source": src,
+                                  "dir": str(task_dir), "timestamp": now})
+            if cured:
+                base = {"memory": ("memory_reservation", 8 * 1024 ** 3), "time": ("time_minutes", 120)}[resource]
+                factor = float(esc.get(f"{resource}_factor", 1))
+                new = max(int(base[1] * factor), int(esc.get(f"{resource}_min", 0)))
+                log_lines.append({"level": "NOTICE", "message": "ugc-wgw resource escalation applied", "task": "fake_task",
+                                  "summary": f"{resource} {base[1]}\u2192{new}", "changes": {base[0]: [base[1], new]},
+                                  "spec": esc, "source": src, "timestamp": now + 0.5})
+                if not os.environ.get("UGC_WGW_FAKE_TASK_LOG"):
+                    log_lines.append({"level": "NOTICE", "message": "done", "source": src, "timestamp": now + 1.0})
+                (run_dir / "workflow.log.json").write_text("".join(json.dumps(line) + "\n" for line in log_lines))
+            else:
+                log_lines.append({"level": "ERROR", "message": "task fake_task failed", "source": src, "timestamp": now + 1.0})
+                (run_dir / "workflow.log.json").write_text("".join(json.dumps(line) + "\n" for line in log_lines))
+                task_dir.mkdir(exist_ok=True)
+                text = ("slurmstepd: error: Detected 1 oom_kill event in StepId=1.batch\n" if resource == "memory"
+                        else "slurmstepd: error: *** JOB 1 ON n1 CANCELLED AT 2026-10-29T10:00:00 DUE TO TIME LIMIT ***\n")
+                (task_dir / "slurm_singularity.log.txt").write_text("1\n" + text)
+                return fail("CommandFailed", f"fake task ran out of {resource} for {sid}", 137 if resource == "memory" else 143)
+        else:
+            spec = os.environ.get("UGC_WGW_FAKE_FAIL_CLASS", "CommandFailed:1")
+            cls, _, code = spec.partition(":")
+            return fail(cls, f"fake task failed for {sid}", int(code) if code else 1)
 
     outputs = make_outputs(stage, inputs, run_dir, ugc_wgw_version)
     _write_json(run_dir / "outputs.json", outputs)

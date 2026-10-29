@@ -31,7 +31,8 @@ ugc-wgw init /proj/ugc/projects/cohort2026 --install /proj/ugc/current \
 A profile is a JSON file with the project keys that depend on the cluster
 and the sample set: `stage_inputs`, `deepvariant`, `gpu_type`,
 `parabricks_gpus`, `max_inflight`, `poll_interval`, `assembly_use_parents`,
-`pangenome_sv_cohort`, `prices`, `summary_thresholds` and
+`pangenome_sv_cohort`, `resource_retry_max`, `resource_retry_factor`,
+`learn_resources`, `prices`, `summary_thresholds` and
 `input_thresholds`, plus a `description`. `NAME` is looked
 up as `<prefix>/profiles/NAME.json` (the installer places the examples
 there once and never overwrites them, so a site edits them in place), then

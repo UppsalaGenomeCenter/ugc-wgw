@@ -459,6 +459,26 @@ row matches the task's name, not the chromosome, so it moves every
 chromosome's job to that partition, whole nodes each; a smaller cohort
 graph stays on standard nodes with the formula.
 
+## Learned requests
+
+A task that ran out of wall time or memory is re-attempted with its limit
+multiplied (chapter 06, "Resource escalation"), and what it finished with
+is remembered in the project's `.ugc-wgw/learned_resources.json`: every
+later run of the project starts that task at the learned value, applied by
+the plugin after the policy rows (never below them), so a request found on
+the first sample is not found again on the other 799. `ugc-wgw resources`
+marks such values `(learned)` and
+
+```bash
+ugc-wgw resources --learned
+```
+
+prints them as rows for `<prefix>/resources.tsv`, where they apply to
+every project of the install; paste the rows you want to keep. The learned
+store is per project and never lowers a request; memory learned at the site
+cap says that a row with a larger partition is needed, which no escalation
+can supply.
+
 ## Finding the right numbers
 
 The inventory gives the declared values; the cluster gives the truth.

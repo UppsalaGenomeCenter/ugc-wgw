@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ugc-wgw-miniwdl"
-version = "0.5.0"
+version = "0.6.0"
 description = "miniwdl plugins: per-task resources from a site policy file; a SLURM backend with node-local scratch"
 requires-python = ">=3.9"
 dependencies = []

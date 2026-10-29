@@ -214,3 +214,30 @@ class EngineCfgTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LearnedResourcesTest(unittest.TestCase):
+    def test_learned_requests_show_and_promote(self):
+        import json
+        tmp = Path(tempfile.mkdtemp())
+        cfg = make_project(tmp)
+        write_cfg(cfg, policy_path=str(tmp / "resources.tsv"))
+        (tmp / "resources.tsv").write_text(HEADER)
+        G = 1024 ** 3
+        code, out, _ = run_cli(["--project", str(cfg.project_dir), "resources", "--learned"])
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), "")
+        cfg.learned_path.write_text(json.dumps({"schema": 1, "tasks": {"ugc_wgw_pav": {"memory": 80 * G, "run_id": "r"},
+                                                                      "ugc_wgw_dipcall": {"time_minutes": 6000}}}))   # above the 3-day default
+        code, out, _ = run_cli(["--project", str(cfg.project_dir), "resources", "--json", "--changed"])
+        self.assertEqual(code, 0)
+        rows = {r["task"]: r for r in json.loads(out)}
+        self.assertEqual(rows["ugc_wgw_pav"]["memory"], "80G (learned)")
+        self.assertEqual(rows["ugc_wgw_dipcall"]["time"], "4-04:00:00 (learned)")
+        code, out, _ = run_cli(["--project", str(cfg.project_dir), "resources"])
+        self.assertIn("learned=2 task(s)", out.splitlines()[0])
+        code, out, _ = run_cli(["--project", str(cfg.project_dir), "resources", "--learned"])
+        self.assertEqual(code, 0)
+        self.assertIn("ugc_wgw_pav\t-\t80G\t-\t-\t-", out)
+        self.assertIn("ugc_wgw_dipcall\t-\t-\t4-04:00:00\t-\t-", out)
+

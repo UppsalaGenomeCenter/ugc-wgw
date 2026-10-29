@@ -1,6 +1,7 @@
 """Tests for ugc_wgw_miniwdl.resources: the miniwdl task-plugin coroutine driven by hand, no container backend."""
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -245,3 +246,61 @@ class RealLoaderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EscalationTests(PluginTests):
+    """[ugc_wgw] escalations (MINIWDL__UGC_WGW__ESCALATIONS): factors and minimums after the policy rows."""
+
+    def test_factor_multiplies_the_current_request_and_logs(self):
+        esc = json.dumps({"ugc_wgw_pav": {"memory_factor": 2.0}})
+        cfg = FakeCfg(ugc_wgw={"resources": self.path, "escalations": esc})
+        c = FakeContainer(cpu=8, memory_reservation=40 * G, memory_limit=40 * G, time_minutes=360)
+        drive(cfg, "ugc_wgw_pav", c, self.logger)
+        self.assertEqual((c.runtime_values["memory_reservation"], c.runtime_values["memory_limit"], c.runtime_values["time_minutes"]),
+                         (80 * G, 80 * G, 360))
+        notices = [m for m in self.messages(resources.NOTICE_LEVEL) if m.message == resources.ESCALATION_MESSAGE]
+        self.assertEqual(len(notices), 1)
+        self.assertEqual(notices[0].kwargs["changes"], {"memory_reservation": [40 * G, 80 * G]})
+        self.assertEqual(notices[0].kwargs["summary"], "memory 40G→80G")
+
+    def test_minimum_lifts_and_never_lowers(self):
+        esc = json.dumps({"ugc_wgw_pav": {"memory_min": 120 * G, "time_minutes_min": 60}})
+        cfg = FakeCfg(ugc_wgw={"resources": self.path, "escalations": esc})
+        c = FakeContainer(cpu=8, memory_reservation=40 * G, time_minutes=360)
+        drive(cfg, "ugc_wgw_pav", c, self.logger)
+        self.assertEqual((c.runtime_values["memory_reservation"], c.runtime_values["time_minutes"]), (120 * G, 360))
+
+    def test_time_factor_after_the_policy_row(self):
+        esc = json.dumps({"ugc_wgw_hifiasm_assemble": {"time_factor": 2.0}})
+        cfg = FakeCfg(ugc_wgw={"resources": self.path, "escalations": esc})
+        c = FakeContainer(cpu=48, memory_reservation=288 * G, time_minutes=4320)
+        drive(cfg, "ugc_wgw_hifiasm_assemble", c, self.logger)
+        self.assertEqual(c.runtime_values["time_minutes"], 2 * 2880)   # the row's two days, doubled
+        self.assertEqual(c.runtime_values["slurm_partition"], "fat")
+
+    def test_memory_is_capped_at_the_backend_limit_with_a_warning(self):
+        esc = json.dumps({"ugc_wgw_pav": {"memory_factor": 4.0}})
+        cfg = FakeCfg(ugc_wgw={"resources": self.path, "escalations": esc})
+
+        class Node(FakeContainer):
+            limits = {"cpu": 48, "mem_bytes": 375 * G}
+        c = Node(cpu=8, memory_reservation=200 * G)
+        drive(cfg, "ugc_wgw_pav", c, self.logger)
+        self.assertEqual(c.runtime_values["memory_reservation"], 375 * G)
+        c2 = Node(cpu=8, memory_reservation=375 * G)
+        drive(cfg, "ugc_wgw_pav", c2, self.logger)
+        self.assertEqual(c2.runtime_values["memory_reservation"], 375 * G)
+        warnings = [m for m in self.messages(logging.WARNING) if "capped" in m.message]
+        self.assertEqual(len(warnings), 1)
+
+    def test_other_tasks_and_bad_json_are_untouched(self):
+        cfg = FakeCfg(ugc_wgw={"resources": self.path, "escalations": json.dumps({"ugc_wgw_pav": {"memory_factor": 2.0}})})
+        c = FakeContainer(cpu=8, memory_reservation=40 * G)
+        drive(cfg, "ugc_wgw_dipcall", c, self.logger)
+        self.assertEqual(c.runtime_values, {"cpu": 8, "memory_reservation": 40 * G})
+        cfg = FakeCfg(ugc_wgw={"resources": self.path, "escalations": "{not json"})
+        c = FakeContainer(cpu=8, memory_reservation=40 * G)
+        drive(cfg, "ugc_wgw_pav", c, self.logger)
+        self.assertEqual(c.runtime_values["memory_reservation"], 40 * G)
+        self.assertTrue(any("unreadable" in m.message for m in self.messages(logging.WARNING)))
+

@@ -8,7 +8,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import cohorts, config, engine, manifest, progress, report, resources, samples, stage_inputs, summary, usage
+from . import cohorts, config, engine, escalate, manifest, progress, report, resources, samples, stage_inputs, summary, usage
 from .log import LOGGER
 from .db import DB
 from .log import Events, setup_logging
@@ -163,6 +163,8 @@ def build_parser() -> argparse.ArgumentParser:
                                          "(cpu_max, memory_max), overridden by the resource policy")
     s.add_argument("--stage", choices=sorted(STAGES), help="only tasks of this stage")
     s.add_argument("--changed", action="store_true", help="only tasks a cap or a policy row changes")
+    s.add_argument("--learned", action="store_true", help="print the project's learned requests (escalations that worked) "
+                                                           "as rows of the site policy, for promotion")
     s.add_argument("--json", action="store_true")
 
     s = sub.add_parser("inputs", help="print the generated inputs JSON for a subject and stage")
@@ -262,6 +264,9 @@ def cmd_init(a: argparse.Namespace) -> int:
         poll_interval=float(pick(a.poll_interval, "poll_interval", 30.0)),  # type: ignore[arg-type]
         assembly_use_parents=False if a.no_assembly_parents else bool(profile.get("assembly_use_parents", True)),
         pangenome_sv_cohort=str(profile.get("pangenome_sv_cohort") or ""),
+        resource_retry_max=int(profile.get("resource_retry_max", 2)),  # type: ignore[arg-type]
+        resource_retry_factor=float(profile.get("resource_retry_factor", 2.0)),  # type: ignore[arg-type]
+        learn_resources=bool(profile.get("learn_resources", True)),
         deepvariant=str(pick(a.deepvariant, "deepvariant", "cpu")), gpu_type=str(pick(a.gpu_type, "gpu_type", "")),
         parabricks_gpus=int(pick(a.parabricks_gpus, "parabricks_gpus", 4)),  # type: ignore[arg-type]
         stage_inputs=profile.get("stage_inputs"), prices=profile.get("prices"),  # type: ignore[arg-type]
@@ -542,11 +547,21 @@ def cmd_resources(a: argparse.Namespace) -> int:
     res = resources.load(cfg)
     for w in res.warnings:
         diag(f"warning: {w}")
+    if a.learned:
+        rows = escalate.policy_rows(cfg, res.policy)
+        if not rows:
+            diag(f"no learned requests yet ({cfg.learned_path})")
+            return 0
+        print(f"# learned by escalation in {cfg.project_dir} ({cfg.learned_path}); rows for {res.engine.policy_path or 'the site policy'}")
+        print("task\tcpu\tmemory\ttime\tpartition\tconstraint")
+        print("\n".join(rows))
+        return 0
     effs = res.rows(stage=a.stage, changed=a.changed)
     if not a.json:
         print(f"# {res.summary()}")
         print("# columns: declared = cpu / memory in the WDL; cpu, memory, time, partition, constraint = what sbatch is asked "
-              "for, with (clamp) for the site caps and (policy) for a policy row; gpus = --gres gpu:[type:]N of the GPU "
+              "for, with (clamp) for the site caps, (policy) for a policy row and (learned) for a request an escalation "
+              "found (--learned prints those as rows); gpus = --gres gpu:[type:]N of the GPU "
               "tasks (config.json deepvariant, gpu_type, parabricks_gpus); rules = the rows that applied")
     _print_rows(resources.as_rows(res, effs), a.json)
     return 0

@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from . import escalate
 from .config import Config
 from .util import UgcError, sha256_file
 
@@ -186,16 +187,19 @@ class Effective:
     partition: str | None
     constraint: str | None
     gpus: str | None             # `[type:]N` for the GPU tasks, None otherwise
-    sources: dict[str, str]      # cpu/memory/time/partition/constraint -> declared | clamp | default | policy <file:line>
+    sources: dict[str, str]      # cpu/memory/time/partition/constraint -> declared | clamp | default | policy <file:line> | learned
     notes: str
     source: str
 
     @property
     def changed(self) -> bool:
-        return any(v.startswith(("clamp", "policy")) for v in self.sources.values())
+        return any(v.startswith(("clamp", "policy", "learned")) for v in self.sources.values())
 
 
-def effective(dec: Declared, rules: list[Any], eng: EngineCfg, policy: Any, gpu: GpuChoice | None = None) -> Effective:
+def effective(dec: Declared, rules: list[Any], eng: EngineCfg, policy: Any, gpu: GpuChoice | None = None,
+              learned: dict[str, object] | None = None) -> Effective:
+    """`learned`: the project's learned request for this task ({time_minutes, memory}, escalate.py); the plugin lifts
+    the task to at least those values after the rows, so they show here when they are the larger."""
     gpu = gpu or GpuChoice()
     sources: dict[str, str] = {}
     cpu, memory = dec.cpu, dec.memory
@@ -227,6 +231,12 @@ def effective(dec: Declared, rules: list[Any], eng: EngineCfg, policy: Any, gpu:
         elif col == "constraint":
             constraint = str(value)
         sources[col] = src
+    if learned:
+        lm, lt = learned.get("memory"), learned.get("time_minutes")
+        if isinstance(lm, int) and (memory is None or lm > memory):
+            memory, sources["memory"] = (min(lm, eng.memory_max) if eng.memory_max > 0 else lm), "learned"
+        if isinstance(lt, int) and (time is None or lt > time):
+            time, sources["time"] = lt, "learned"
     return Effective(dec.task, dec.stages, dec.cpu, dec.memory, cpu, memory, time, partition, constraint, gpus, sources,
                      dec.notes, dec.source)
 
@@ -241,6 +251,7 @@ class Resources:
     warnings: list[str]
     policy: Any
     gpu: GpuChoice = field(default_factory=GpuChoice)
+    learned: dict[str, dict[str, object]] = field(default_factory=dict)   # task -> learned request (escalate.load_learned)
 
     def summary(self) -> str:
         pol = f"{self.engine.policy_path} ({len(self.rules)} row{'s' if len(self.rules) != 1 else ''})" if self.engine.policy_path else "none"
@@ -252,14 +263,15 @@ class Resources:
         scratch = ""
         if self.engine.path.exists():
             scratch = f" scratch={self.engine.scratch_env or 'off'}"
-        return f"resources: cpu_max={cpu} memory_max={mem} policy={pol}{gpu}{scratch}"
+        learned = f" learned={len(self.learned)} task(s)" if self.learned else ""
+        return f"resources: cpu_max={cpu} memory_max={mem} policy={pol}{gpu}{scratch}{learned}"
 
     def rows(self, *, stage: str | None = None, changed: bool = False) -> list[Effective]:
         out = []
         for dec in self.declared:
             if stage and stage not in dec.stages:
                 continue
-            eff = effective(dec, self.rules, self.engine, self.policy, self.gpu)
+            eff = effective(dec, self.rules, self.engine, self.policy, self.gpu, self.learned.get(dec.task))
             if changed and not eff.changed:
                 continue
             out.append(eff)
@@ -325,7 +337,7 @@ def load(cfg: Config, *, engine_info: dict[str, str] | None = None) -> Resources
                 and policy.resolve(rules, task).get("partition") is None:
             warnings.append(f"deepvariant={cfg.deepvariant} but no GPU partition: set SLURM_PARTITION_GPU in site.cfg "
                             f"or a policy row with a partition for {task}")
-    return Resources(eng, rules, declared, warnings, policy, gpu)
+    return Resources(eng, rules, declared, warnings, policy, gpu, escalate.load_learned(cfg))
 
 
 SLURM_BACKENDS = ("slurm_singularity", "ugc_slurm_singularity")   # the backends that run on the cluster

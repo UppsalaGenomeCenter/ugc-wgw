@@ -24,6 +24,8 @@ class WorkflowLogParseTest(unittest.TestCase):
              "changes": {"cpu": [24, 16], "slurm_partition": [None, "fat"]}, "source": src, "timestamp": 102.5, "level": "NOTICE"},
             {"message": "ugc-wgw gpu request", "task": "pbmm2_align_wgs", "gres": "gpu:a100:1", "partition": "gpu", "source": src,
              "timestamp": 102.6, "level": "NOTICE"},
+            {"message": "ugc-wgw resource escalation applied", "task": "pbmm2_align_wgs", "summary": "memory 32G→64G",
+             "changes": {"memory_reservation": [32 * 1024 ** 3, 64 * 1024 ** 3]}, "source": src, "timestamp": 102.7, "level": "NOTICE"},
             {"message": "failed task will be retried", "source": src, "timestamp": 150.0, "level": "ERROR"},
             {"message": "done", "source": src, "timestamp": 161.0, "level": "NOTICE"},
             {"message": "task setup", "name": "mosdepth", "source": src2, "dir": "/x/attempt-1/call-mosdepth", "timestamp": 162.0, "level": "NOTICE"},
@@ -39,6 +41,8 @@ class WorkflowLogParseTest(unittest.TestCase):
         self.assertEqual((tasks[0].policy, tasks[1].policy), ("cpu 24→16, partition -→fat", ""))
         self.assertEqual((tasks[0].call_path, tasks[1].call_path), ("call-sub/call-pbmm2-0", "call-mosdepth"))
         self.assertEqual((tasks[0].cpu_policy, tasks[0].cpu_launched, tasks[0].gres), (16, 16, "gpu:a100:1"))
+        self.assertEqual((tasks[0].escalation, tasks[0].escalation_changes, tasks[1].escalation),
+                         ("memory 32G→64G", {"memory_reservation": [32 * 1024 ** 3, 64 * 1024 ** 3]}, ""))
         self.assertEqual((tasks[1].dir, tasks[1].cpu_launched, tasks[1].gres), ("/x/attempt-1/call-mosdepth", None, None))
         self.assertEqual(ignored, {"disk": 1, "zones": 1})
         self.assertEqual(report.parse_workflow_log(tmp / "missing.json"), ([], {}))

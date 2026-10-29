@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -29,6 +29,8 @@ class TaskStat:
     dir: str = ""                 # the task directory miniwdl logged, when it did
     gres: Optional[str] = None    # the plugin's `ugc-wgw gpu request`, e.g. `gpu:a100:4`
     cpu_policy: Optional[int] = None   # cpu after the policy row (`changes.cpu[1]`)
+    escalation: str = ""          # the plugin's `ugc-wgw resource escalation applied` summary, e.g. "memory 40G→80G"
+    escalation_changes: dict = field(default_factory=dict)   # its changes: {time_minutes: [old, new], memory_reservation: [old, new]}
 
     @property
     def duration(self) -> Optional[float]:
@@ -92,6 +94,11 @@ def parse_workflow_log(path: Path) -> tuple[list[TaskStat], Counter]:
                     changes = d.get("changes")
                     if isinstance(changes, dict) and isinstance(changes.get("cpu"), list) and len(changes["cpu"]) == 2:
                         t.cpu_policy = _int(changes["cpu"][1])
+                elif msg == "ugc-wgw resource escalation applied":
+                    t.escalation = str(d.get("summary") or "")
+                    changes = d.get("changes")
+                    if isinstance(changes, dict):
+                        t.escalation_changes = {str(k): list(v) for k, v in changes.items() if isinstance(v, list) and len(v) == 2}
                 elif msg == "ugc-wgw gpu request":
                     t.gres = str(d.get("gres") or "") or None
                 elif msg == "failed task will be retried":

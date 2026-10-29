@@ -21,6 +21,7 @@ moves a GPU task to a partition also sets `slurm_partition_gpu`, the key miniwdl
 from __future__ import annotations
 
 import json
+import math
 import logging
 import os
 import re
@@ -34,6 +35,8 @@ GPU_TYPE_KEY = "gpu_type"
 NOTICE_LEVEL = 25
 VERBOSE_LEVEL = 15
 MESSAGE = "ugc-wgw resource policy applied"
+ESCALATION_MESSAGE = "ugc-wgw resource escalation applied"
+ESCALATIONS_KEY = "escalations"   # [ugc_wgw] escalations, set per run by the driver as MINIWDL__UGC_WGW__ESCALATIONS
 _PARTITION_ARG = re.compile(r"(^|\s)(-p|--partition)(\s|=|$)")
 _CONSTRAINT_ARG = re.compile(r"(^|\s)(-C|--constraint)(\s|=|$)")
 
@@ -108,6 +111,7 @@ def apply_policy(cfg: Any, logger: logging.Logger, task_name: str, container: An
     applied = apply_gpu_type(cfg, container.runtime_values)
     gres = gpu_request(container.runtime_values)
     changes = _apply_rows(cfg, logger, task_name, container, gres)
+    changes.update(apply_escalations(cfg, logger, task_name, container))
     if gres is not None:
         logger.log(NOTICE_LEVEL, _structured("ugc-wgw gpu request", task=task_name, gres=gres,
                                              gpu_type_from="config" if applied else "workflow",
@@ -127,14 +131,7 @@ def _apply_rows(cfg: Any, logger: logging.Logger, task_name: str, container: Any
     if not rules:
         logger.log(VERBOSE_LEVEL, _structured("ugc-wgw resource policy empty", policy=path))
         return {}
-    limits = None
-    detect = getattr(container, "detect_resource_limits", None)
-    if callable(detect):
-        try:
-            limits = detect(cfg, logger)
-        except Exception:  # pragma: no cover - a backend without limits
-            limits = None
-    changes, sources = policy.apply(rules, task_name, container.runtime_values, limits)
+    changes, sources = policy.apply(rules, task_name, container.runtime_values, _limits(cfg, logger, container))
     if not changes:
         return {}
     if gres is not None and "slurm_partition" in changes:
@@ -151,6 +148,68 @@ def _apply_rows(cfg: Any, logger: logging.Logger, task_name: str, container: Any
     logger.log(NOTICE_LEVEL, _structured(MESSAGE, task=task_name, summary=policy.describe(changes),
                                          changes={k: list(v) for k, v in changes.items()},
                                          rules=sources, policy=path))
+    return changes
+
+
+def _limits(cfg: Any, logger: logging.Logger, container: Any) -> Optional[Dict[str, int]]:
+    """The backend's detect_resource_limits() answer ({cpu, mem_bytes}), None without one."""
+    detect = getattr(container, "detect_resource_limits", None)
+    if not callable(detect):
+        return None
+    try:
+        return detect(cfg, logger)
+    except Exception:  # pragma: no cover - a backend without limits
+        return None
+
+
+def apply_escalations(cfg: Any, logger: logging.Logger, task_name: str, container: Any) -> Dict[str, Any]:
+    """The driver's escalations for this task (bin/ugc_wgw/escalate.py), after the policy rows: `{task:
+    {time_factor, memory_factor, time_minutes_min, memory_min}}` as JSON in [ugc_wgw] escalations (the environment
+    override MINIWDL__UGC_WGW__ESCALATIONS). A factor multiplies the task's current wall time or memory, a minimum
+    lifts it to at least that value (a learned request); memory never exceeds the backend's limit, and a request
+    already at that limit is logged as capped. Returns the changes."""
+    raw = cfg_get(cfg, CFG_SECTION, ESCALATIONS_KEY, "").strip()
+    if not raw:
+        return {}
+    try:
+        doc = json.loads(raw)
+    except ValueError as exc:
+        logger.warning(_structured("ugc-wgw resource escalations unreadable", error=str(exc)))
+        return {}
+    spec = doc.get(task_name) if isinstance(doc, dict) else None
+    if not isinstance(spec, dict) or not spec:
+        return {}
+    limits = _limits(cfg, logger, container)
+    values = container.runtime_values
+    changes: Dict[str, Any] = {}
+    capped: List[str] = []
+    for resource, key in (("time", "time_minutes"), ("memory", "memory_reservation")):
+        old = values.get(key)
+        if not isinstance(old, int) or old <= 0:
+            continue
+        new = old
+        factor = spec.get(f"{resource}_factor")
+        if isinstance(factor, (int, float)) and factor > 1:
+            new = int(math.ceil(old * float(factor)))
+        minimum = spec.get(f"{resource}_min")
+        if isinstance(minimum, (int, float)) and int(minimum) > new:
+            new = int(minimum)
+        if resource == "memory" and limits and limits.get("mem_bytes", 0) > 0 and new > int(limits["mem_bytes"]):
+            new = int(limits["mem_bytes"])
+            if new <= old:
+                capped.append(policy.format_memory(old))
+        if new == old:
+            continue
+        if resource == "memory" and isinstance(values.get("memory_limit"), int):
+            values["memory_limit"] = int(values["memory_limit"] * new / old)
+        values[key] = new
+        changes[key] = (old, new)
+    if capped:
+        logger.warning(_structured("ugc-wgw resource escalation capped at the node's memory", task=task_name,
+                                   memory=capped[0], hint="a policy row with a larger partition (docs/guide/12-resources.md)"))
+    if changes:
+        logger.log(NOTICE_LEVEL, _structured(ESCALATION_MESSAGE, task=task_name, summary=policy.describe(changes),
+                                             changes={k: list(v) for k, v in changes.items()}, spec=spec))
     return changes
 
 

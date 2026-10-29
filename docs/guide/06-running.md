@@ -204,6 +204,7 @@ stateDiagram-v2
   running --> cancelled: SIGTERM from the driver
   running --> failed: driver_lost, found by reconcile
   failed --> pending: kind transient, backoff elapsed, attempt at most auto_retry_max (new row)
+  failed --> pending: kind resource (time or memory), at once, the task's limit doubled, at most resource_retry_max times
   success --> [*]
   failed --> [*]
   cancelled --> [*]
@@ -218,6 +219,8 @@ pending ──► submitted ──► running ──► success     (exit 0, out
    │            └────────────┴──────► cancelled   (SIGTERM from the driver: Ctrl-C, scancel)
    └──────────────────────────────► failed        (launch_error)
 failed (kind transient, attempt ≤ auto_retry_max) ──backoff──► pending   (new row, attempt N+1)
+failed (kind resource: time or memory, escalations < resource_retry_max) ──at once──► pending
+                                                   (new row, that task's limit × resource_retry_factor)
 Terminal rows never change. `ugc-wgw retry` inserts a new row: attempt N+1.
 ```
 
@@ -227,10 +230,42 @@ failure or preemption), `resource` (exit status 137 or 253, or `oom_kill`,
 (input errors, missing files), `tool` (any other command failure),
 `version`, `cancelled`, `unknown`. The kind, a short message and the log
 line that decided it are stored with the run, written into the manifest and
-shown by `ugc-wgw status --failed`. Only `transient` failures are re-attempted
-by the driver itself: after `backoff_seconds` (300) doubling with every
-attempt, while the attempt number is at most `auto_retry_max` (2). Chapter
-09 has the full rule table.
+shown by `ugc-wgw status --failed`. Two kinds are re-attempted by the driver
+itself: `transient`, after `backoff_seconds` (300) doubling with every
+attempt while the attempt number is at most `auto_retry_max` (2); and
+`resource` when the evidence names what ran out, with the task's limit
+raised (below). Chapter 09 has the full rule table.
+
+## Resource escalation
+
+A task killed for wall time (`DUE TO TIME LIMIT`) or memory (exit 137 or
+253, `oom_kill`) is re-attempted at once with that task's limit multiplied
+by `resource_retry_factor` (2), up to `resource_retry_max` (2) escalations
+per task and resource: 40 GiB, 80, 160, then blocked. The driver names the
+task from the run's `workflow.log.json` and hands the multiplier to the
+`ugc_wgw_resources` plugin through the environment
+(`MINIWDL__UGC_WGW__ESCALATIONS`), which applies it after the policy rows at
+launch; it is not a workflow input, so the task's call-cache key is
+unchanged and every other task of the run replays from the cache. Memory
+stops at the site cap (`TASK_MEMORY_MAX`): a task that fails at the cap is
+blocked with "escalation exhausted" and needs a policy row with a larger
+partition (chapter 12). A request that `sbatch` refused is never escalated.
+The failed run's message ends with what the next attempt carries (`next
+attempt: ugc_wgw_pav memory ×2 (escalation 1 of 2)`), `status --failed`
+shows it, the manifest records `escalation_next` and, on the attempt that
+carries it, `escalations`; the run report counts resource escalations and
+lists the applied changes under "Resource adjustments" with `by:
+escalation`. `ugc-wgw retry` keeps the escalations of the last attempt
+without doubling them again.
+
+What an escalated task needed is remembered: when a task that ran with an
+escalation finished, the request it finished with goes into the project's
+`.ugc-wgw/learned_resources.json`, and every later run of the project
+starts that task at the learned value, so the second sample does not fail
+where the first did (`learn_resources`, on by default). `ugc-wgw resources`
+shows learned values as `(learned)` and prints them as rows of the site
+policy with `--learned`, for promotion to every project (chapter 12). The
+learned store is per project; a new project starts without it.
 
 How the driver reads a finished miniwdl process, in order: `run.json` with
 `outputs` and an existing `outputs.json` and exit 0 is success; `run.json` with

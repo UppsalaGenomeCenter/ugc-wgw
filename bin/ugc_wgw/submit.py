@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass
 from typing import IO
 
-from . import accounting, engine, failures, inputs, layout, manifest, preflight, progress, resources, slurm
+from . import accounting, engine, escalate, failures, inputs, layout, manifest, preflight, progress, resources, slurm
 from . import lease as lease_mod
 from .config import Config
 from .db import DB, RunRecord
@@ -106,6 +106,7 @@ def finalize_run(cfg: Config, db: DB, events: Events, code: manifest.CodeInfo, e
     run.finished_at = finished_at or utc_now()
     run.error_class, run.error_kind, run.error_message, run.not_before = error_class, None, None, None
     run.meta.pop("error_evidence", None)
+    run.meta.pop("escalation", None)
     if status != "success":
         cls = failures.classify(result, run.run_path)
         run.error_kind = "cancelled" if status == "cancelled" else cls.kind
@@ -113,6 +114,13 @@ def finalize_run(cfg: Config, db: DB, events: Events, code: manifest.CodeInfo, e
         run.meta["error_evidence"] = {k: v for k, v in cls.evidence.items() if v is not None}
         if status == "failed" and run.error_kind == "transient":
             run.not_before = utc_plus(failures.backoff_delay(cfg, run.attempt), run.finished_at)
+        if status == "failed" and run.error_kind == "resource":
+            esc, why = escalate.plan(cfg, run, cls)
+            if esc:
+                run.meta["escalation"] = esc   # the next attempt carries it (escalate.carry); the planner re-attempts
+                run.error_message = f"{run.error_message}; next attempt: {escalate.describe(esc)}"
+            elif why:
+                run.error_message = f"{run.error_message}; {why}"
     run.meta["slurm_job_ids"] = slurm.job_ids(run.run_path)
     members = list(run.meta.get("members", []))  # type: ignore[arg-type]
     doc = manifest.build(run, result, code, engine_info, members, status)
@@ -137,6 +145,9 @@ def finalize_run(cfg: Config, db: DB, events: Events, code: manifest.CodeInfo, e
     # cancelled runs are left to `ugc-wgw usage --collect`
     if cfg.accounting and status != "cancelled" and error_class != "driver_lost":
         accounting.capture(cfg, events, run)
+    # what the run's escalated tasks finished with becomes the project's learned request for them
+    for lesson in escalate.learn(cfg, events, run):
+        LOGGER.info("learned resources: %s", lesson)
     return status
 
 
@@ -184,13 +195,16 @@ class Submitter:
         attempt_path = layout.make_attempt_dir(stage_path / f"attempt-{attempt}")
         files = layout.run_files(attempt_path)
         sha = inputs.write_inputs(files.inputs, doc)
+        # the escalations the previous attempt ran with, plus the one its resource failure asked for
+        escalations = escalate.carry(self.db.latest_run(cand.subject_type, cand.subject_id, cand.stage, self.ugc_wgw_version))
         run = RunRecord(
             run_id=f"{cand.subject_id}-{cand.stage}-a{attempt}-{utc_stamp()}",
             subject_type=cand.subject_type, subject_id=cand.subject_id, stage=cand.stage, mode=self.sel.mode,
             ugc_wgw_version=self.ugc_wgw_version, run_dir=str(attempt_path), status="pending", attempt=attempt,
             cohort_id=cand.cohort_id, inputs_path=str(files.inputs), inputs_sha256=sha, host=hostname(),
             meta={"members": members, "resource_policy": resources.policy_ref(self.cfg),
-                  **({"gpu_type": self.cfg.gpu_type} if self.cfg.deepvariant != "cpu" else {})},
+                  **({"gpu_type": self.cfg.gpu_type} if self.cfg.deepvariant != "cpu" else {}),
+                  **({"escalations": escalations} if escalations else {})},
         )
         self.db.insert_run(run)
         self.events.emit("run.created", run_id=run.run_id, subject=run.subject_id, stage=run.stage, attempt=attempt,
@@ -215,7 +229,7 @@ class Submitter:
 
     def start(self, run: RunRecord) -> Child:
         cmd = engine.miniwdl_cmd(self.cfg, run.stage, run.run_path)
-        extra_env = engine.run_env(self.cfg)
+        extra_env = {**engine.run_env(self.cfg), **escalate.env_for(self.cfg, run)}
         try:
             proc = engine.launch(cmd, run.run_path, extra_env)
         except OSError as exc:
@@ -419,6 +433,10 @@ def dry_run(cfg: Config, db: DB, ugc_wgw_version: str, sel: Selection, *, any_ve
             print(f"# inputs: {n_files} read file(s), {total / 1e9:.1f} GB, present and complete", file=out)
         for k, v in engine.run_env(cfg).items():
             print(f"# env: {k}={v!r}  (the plugin's gres type; not an input, so not part of the call cache)", file=out)
+        learned = escalate.load_learned(cfg)
+        if learned:
+            print(f"# env: {escalate.ESCALATION_ENV}: learned requests for {', '.join(sorted(learned))} "
+                  f"({cfg.learned_path}; not an input, so not part of the call cache)", file=out)
         print(" ".join(engine.miniwdl_cmd(cfg, cand.stage, attempt_path)), file=out)
     for b in plan.blocked:
         print(f"\n# blocked: {b.candidate.label()}: {b.reason}", file=out)

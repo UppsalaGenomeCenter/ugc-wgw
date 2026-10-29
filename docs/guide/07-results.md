@@ -230,8 +230,9 @@ fetched from the network, so it opens anywhere) summarising the project's
 runs. It is a technical summary of how the campaign ran, not of what it
 found. Sections:
 
-- Cards: samples, cohorts, runs by status, automatic retries, tasks and
-  call-cache hits, summed run time and campaign span.
+- Cards: samples, cohorts, runs by status, automatic retries, resource
+  escalations, tasks and call-cache hits, summed run time and campaign
+  span.
 - Provenance: ugc-pacbio-wgw version and commit, upstream tags, reference
   bundles, engine versions, the container backend, the node-local scratch
   (`TMPDIR (bound at /mnt/scratch, ...)` or `off`) and the resource policy
@@ -254,9 +255,10 @@ found. Sections:
   results tree) and a link to its manifest.
 - Failures: kind, class, node, exit status, the evidence line and the task
   directory, and when the driver will re-attempt.
-- resource adjustments (site caps and policy rows per task, chapter 12),
-  driver sessions, and the notable events
-  (reconciliations, cancellations, automatic retries, warnings, errors).
+- resource adjustments (site caps, policy rows and escalations per task,
+  chapters 06 and 12), driver sessions, and the notable events
+  (reconciliations, cancellations, automatic retries, learned requests,
+  warnings, errors).
 
 Task timings come from `workflow.log.json`, which miniwdl writes for the
 whole run, so they survive `delete_work`. The default output is

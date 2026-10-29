@@ -3,6 +3,31 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.13.0
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.6.0 and
+the image manifest unchanged.
+
+- **A task that ran out of wall time or memory is re-attempted with its
+  limit raised, and the working request is learned.** The failure
+  classifier now says which resource ran out; the driver re-attempts the
+  run at once with that task's limit multiplied by `resource_retry_factor`
+  (2), up to `resource_retry_max` (2) escalations per task and resource.
+  The multiplier reaches the `ugc_wgw_resources` plugin through the
+  environment and is applied after the policy rows, so the task's
+  call-cache key is unchanged and every other task of the run replays from
+  the cache; memory stops at the site cap, and a refused `sbatch` request is
+  never escalated. What an escalated task finished with goes into the
+  project's `.ugc-wgw/learned_resources.json` and every later run starts
+  the task there, so one sample's lesson covers the rest of the cohort;
+  `ugc-wgw resources` marks learned values and `--learned` prints them as
+  rows of the site policy for promotion (chapters 06, 09, 11 and 12). The
+  manifest records the escalations, the run report counts them and lists
+  the applied changes, and `ugc-wgw retry` carries the last escalation on.
+- Plugin ugc-wgw-miniwdl 0.6.0: `[ugc_wgw] escalations`, the driver's
+  per-run factors and minimums, applied after the policy rows.
+
 ## 0.12.6
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

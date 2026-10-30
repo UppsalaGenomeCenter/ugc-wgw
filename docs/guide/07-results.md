@@ -233,6 +233,12 @@ found. Sections:
 - Cards: samples, cohorts, runs by status, automatic retries, resource
   escalations, tasks and call-cache hits, summed run time and campaign
   span.
+- At scale (the 864-sample run, 2026-10-30): the timeline becomes one lane
+  per stage above 200 runs (runs in flight over time as an area, failures
+  and cancellations as ticks, hover for the run); the concurrency lines keep
+  at most four points per pixel column; the Runs and Per subject tables
+  fold into a collapsed block from 100 rows, failures first, with a box that
+  keeps the rows mentioning the typed text (an id, a stage, `failed`).
 - Provenance: ugc-pacbio-wgw version and commit, upstream tags, reference
   bundles, engine versions, the container backend, the node-local scratch
   (`TMPDIR (bound at /mnt/scratch, ...)` or `off`) and the resource policy

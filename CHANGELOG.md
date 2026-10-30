@@ -3,6 +3,42 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.13.1
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin (0.6.0) and
+the image manifest unchanged. The lessons of the first full-size joint run
+(864 samples, 1,772 runs).
+
+- **Time-limit kills are now classified as resource failures.** SLURM
+  writes its "DUE TO TIME LIMIT" and "oom_kill" lines to the job's own
+  `slurm-<jobid>.out` in the task directory, which the failure classifier
+  did not read; a task killed at its wall time (exit 143) was reported as a
+  tool failure and the 0.13.0 escalation did not fire. The classifier reads
+  that file first (newest job first), then the sbatch log and every try's
+  stderr and stdout. The accounting also takes job ids from those files, so
+  a retried task's earlier jobs are counted.
+- **trgt-lps runs per TRGT merge shard.** One trgt-lps over the 864-sample
+  cohort VCF took 13h52m; `ugc_wgw_cohort_merge` now runs it on every
+  shard's VCF (`trgt_lps_threads`, default 4) and a gather task joins the
+  tables. Each table is put into its VCF's record order first, so the result
+  equals the one-task table byte for byte.
+- **The per-sample split uses 16 threads** by default (`split_threads`; 2h14m
+  at 8 threads for 864 samples) and `split_mem_gb` scales with them.
+- **The reports scale to hundreds of members and thousands of runs.** The
+  SUPP histogram bins by share of the cohort with a cumulative line and
+  cards for singletons and variants in every member; the distribution and
+  sex strips become bands (whisker, interquartile box, median, density, and
+  only outliers as points) from 150 members; tables of 100 rows or more fold
+  into a collapsed block with a type-to-filter box, failures first; the run
+  report's timeline above 200 runs is one lane per stage, with runs in
+  flight as an area and failures as ticks. The 864-member cohort page went
+  from 2.1 to 0.7 MB; the pages stay self-contained HTML without a charting
+  library.
+- Docs: the 864-sample run's task sizes and durations in chapter 12; chapter
+  09 names `slurm-<jobid>.out` among the evidence and miniwdl's side-by-side
+  retry layout (`stderr2.txt`, `work2/`).
+
 ## 0.13.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

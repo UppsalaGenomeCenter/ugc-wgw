@@ -99,7 +99,7 @@ workflow ugc_wgw_cohort_merge {
       description: "Memory (GB) per trgt merge shard; default 8 + 0.02 per sample"
     }
     trgt_lps_threads: {
-      description: "trgt-lps --threads"
+      description: "Threads per trgt-lps shard (one shard per scatter region; default 4)"
     }
     run_glnexus: {
       description: "Joint-call small variants with GLnexus (standalone mode); needs gvcfs and gvcf_indices"
@@ -176,7 +176,7 @@ workflow ugc_wgw_cohort_merge {
     Array[File] trgt_vcf_indices
     Int trgt_merge_threads = 2
     Int? trgt_merge_mem_gb
-    Int trgt_lps_threads = 8
+    Int trgt_lps_threads = 4
 
     Boolean run_glnexus = true
     Array[File]? gvcfs
@@ -329,12 +329,22 @@ workflow ugc_wgw_cohort_merge {
     runtime_attributes = default_runtime_attributes
   }
 
-  call Trgt.ugc_wgw_trgt_lps { input:
-    vcf = concat_trgt.vcf,
-    vcf_index = concat_trgt.vcf_index,
+  # trgt-lps per merge shard (one trgt-lps over the whole cohort VCF took 13h52m for 864 samples), gathered in
+  # shard order, which is the cohort VCF's contig order
+  scatter (shard_index in range(n_shards)) {
+    call Trgt.ugc_wgw_trgt_lps { input:
+      vcf = ugc_wgw_trgt_merge.vcf[shard_index],
+      vcf_index = ugc_wgw_trgt_merge.vcf_index[shard_index],
+      out_prefix = "~{out_prefix}.trgt.~{ugc_wgw_regions_prepare.shard_names[shard_index]}",
+      threads = trgt_lps_threads,
+      ugc_wgw_container_registry = ugc_wgw_container_registry,
+      runtime_attributes = default_runtime_attributes
+    }
+  }
+
+  call Trgt.ugc_wgw_trgt_lps_gather { input:
+    shards = ugc_wgw_trgt_lps.lps,
     out_prefix = "~{out_prefix}.trgt",
-    threads = trgt_lps_threads,
-    ugc_wgw_container_registry = ugc_wgw_container_registry,
     runtime_attributes = default_runtime_attributes
   }
 
@@ -402,7 +412,7 @@ workflow ugc_wgw_cohort_merge {
 
     File cohort_trgt_vcf = concat_trgt.vcf
     File cohort_trgt_vcf_index = concat_trgt.vcf_index
-    File cohort_trgt_lps = ugc_wgw_trgt_lps.lps
+    File cohort_trgt_lps = ugc_wgw_trgt_lps_gather.lps
 
     File? cohort_phased_small_variant_vcf = concat_phased_small_variants.vcf
     File? cohort_phased_small_variant_vcf_index = concat_phased_small_variants.vcf_index

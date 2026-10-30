@@ -11,7 +11,7 @@ from . import summary_svg as sv
 from .db import Cohort, RunRecord
 from .layout import run_files
 from .outputs import Outputs
-from .report import Raw, _bytes, _esc, _table
+from .report import Raw, _bytes, _esc, _table, big_table
 from .summary import DIGEST_SCHEMA, _cards, _has_read_data, _kv, _nav, _page, _sec, _software_sections, _status_badge
 from .util import UgcError, read_json, utc_now
 
@@ -75,6 +75,34 @@ def _num(v: object) -> float | None:
     except (TypeError, ValueError):
         return None
     return x if x == x else None
+
+
+def supp_bins(supp: dict[str, object], n_samples: int) -> list[tuple[str, float]]:
+    """The svx SUPP counts (samples carrying a merged SV -> records) in bins that read at any cohort size:
+    1, 2, 3-5, 6-10, then shares of the cohort up to 1 %, 5 %, 10 %, 50 %, below all, and all members.
+    Degenerate bins (equal edges at small cohorts) are dropped."""
+    counts = {int(k): float(v) for k, v in supp.items() if str(k).isdigit()}
+    if not counts:
+        return []
+    n = max(n_samples, max(counts))
+    edges = [1, 2, 5, 10]
+    for frac in (0.01, 0.05, 0.10, 0.50):
+        edges.append(int(n * frac))
+    edges.append(n - 1)
+    uniq: list[int] = []
+    for e in edges:
+        if e >= 1 and (not uniq or e > uniq[-1]) and e < n:
+            uniq.append(e)
+    out: list[tuple[str, float]] = []
+    lo = 1
+    for hi in uniq:
+        label = str(lo) if lo == hi else f"{lo}-{hi}"
+        if hi > 10 and lo > 10:
+            label += f" (≤{100 * hi / n:.0f}%)" if hi < n - 1 else " (<all)"
+        out.append((label, sum(v for k, v in counts.items() if lo <= k <= hi)))
+        lo = hi + 1
+    out.append((f"all {n}", sum(v for k, v in counts.items() if k >= max(lo, n))))
+    return [b for b in out if b[1] > 0 or b[0].startswith("1") or b[0].startswith("all")]
 
 
 def _outliers(values: dict[str, float]) -> tuple[float | None, float | None, list[str]]:
@@ -405,10 +433,13 @@ def render_cohort(d: dict[str, object], tools: list[dict[str, object]], *, proje
                     sv.fmt(r.get("tstv"), 2), sv.fmt(r.get("sv_total")), sv.fmt_bp(r.get("block_ng50")), sv.fmt(r.get("trgt_genotyped")), sv.fmt_bp(r.get("roh_total")),
                     sv.fmt(r.get("kivvi_kiv2_cn"), 1), sv.fmt(r.get("kivvi_d4z4_cn"), 1)]
                    for r in present] + [[link(r["id"]), "–", "–", "–", "no summarised run"] + [""] * 12 for r in rows if not r.get("present")]
+    n_flagged = sum(1 for r in present if r.get("qc_status") in ("warn", "fail"))
     add("sec-members", "Members",
-        '<div class="wrap">' + _table(["sample", "sex (sheet)", "sex (inferred)", "QC", "flags", "depth", "mapped %", "read N50", "SNVs", "indels",
-                                       "Ts/Tv", "SVs", "block NG50", "TRGT genotyped", "ROH total", "KIV-2 CN", "D4Z4 CN"], member_rows) + "</div>"
-        + "<p class='small muted'>Click a header to sort; each sample links to its own page.</p>")
+        big_table(["sample", "sex (sheet)", "sex (inferred)", "QC", "flags", "depth", "mapped %", "read N50", "SNVs", "indels",
+                   "Ts/Tv", "SVs", "block NG50", "TRGT genotyped", "ROH total", "KIV-2 CN", "D4Z4 CN"], member_rows,
+                  what=f"{len(member_rows)} members ({n_flagged} with a QC warning or failure)")
+        + "<p class='small muted'>Click a header to sort; type in the box to keep the rows that mention the text (an id, a flag, 'fail'); "
+        "each sample links to its own page.</p>")
 
     groups = []
     outlier_rows = []
@@ -417,18 +448,26 @@ def render_cohort(d: dict[str, object], tools: list[dict[str, object]], *, proje
         if not g:
             continue
         groups.append({"label": label, "points": sorted(g["values"].items()), "outliers": g.get("outliers", []), "threshold": g.get("threshold"),  # type: ignore[union-attr]
-                       "digits": digits, "unit": unit})
+                       "beyond": g.get("beyond_threshold", []), "digits": digits, "unit": unit})
         for sid in g.get("outliers", []):  # type: ignore[union-attr]
             outlier_rows.append([link(sid), label, sv.fmt(g["values"].get(sid), digits, unit), sv.fmt(g.get("median"), digits, unit)])  # type: ignore[union-attr]
         for sid in g.get("beyond_threshold", g.get("below_threshold", [])):  # type: ignore[union-attr]
             side = "above" if g.get("direction", direction) == "max" else "below"
             outlier_rows.append([link(sid), label, sv.fmt(g["values"].get(sid), digits, unit), f"{side} threshold {sv.fmt(g.get('threshold'), digits, unit)}"])  # type: ignore[union-attr]
+    n_members = max((len(g["points"]) for g in groups), default=0)
+    legend = ("One row per metric on its own scale: points are samples (hover for the id), the box is the interquartile range, "
+              "the line the median; red points lie beyond median ± 3 MAD (from four members up), a dashed line marks a QC threshold."
+              if n_members < sv.BAND_FROM else
+              f"One row per metric on its own scale, drawn for {n_members} members: the thick line spans the 5th to 95th percentile, "
+              "the box the interquartile range, the orange line the median, the small bars under the axis the members per bin; "
+              "only the outliers (beyond median ± 3 MAD) and the threshold failures are drawn as red points (hover for the id); "
+              "a dashed line marks a QC threshold. Every member's value is in the digest JSON.")
     add("sec-distributions", "Distributions across members",
-        "<p class='small muted'>One row per metric on its own scale: points are samples (hover for the id), the box is the interquartile range, "
-        "the line the median; red points lie beyond median ± 3 MAD (from four members up), a dashed line marks a QC threshold.</p>"
-        + sv.strip(groups, width=700)
+        f"<p class='small muted'>{legend}</p>"
+        + sv.strip_or_band(groups, width=700)
         + "<h3>Outliers and threshold failures</h3>"
-        + (_table(["sample", "metric", "value", "reference"], outlier_rows, cls="") if outlier_rows else "<p class='muted'>None.</p>"))
+        + (big_table(["sample", "metric", "value", "reference"], outlier_rows, what=f"{len(outlier_rows)} outliers and threshold failures", open_below=60)
+           if outlier_rows else "<p class='muted'>None.</p>"))
 
     sheet_counts: dict[str, int] = sex.get("sheet", {})  # type: ignore[assignment]
     inf_counts: dict[str, int] = sex.get("inferred", {})  # type: ignore[assignment]
@@ -442,7 +481,7 @@ def render_cohort(d: dict[str, object], tools: list[dict[str, object]], *, proje
                                           + ([["unknown karyotype", "", "", kar_counts.get("unknown", 0)]] if kar_counts.get("unknown") else []), cls="")
         + f"<p>mismatches: {', '.join(_esc(x) for x in sex.get('mismatches', [])) or 'none'}; not inferred: {', '.join(_esc(x) for x in sex.get('not_inferred', [])) or 'none'}"  # type: ignore[union-attr]
         + (f"; karyotype mismatches: {', '.join(_esc(x) for x in sex.get('karyotype_mismatches', []))}" if sex.get("karyotype_mismatches") else "") + "</p>"  # type: ignore[union-attr]
-        + "</div><div>" + sv.strip(ratio_groups, width=420, label_w=170) + "</div></div>")
+        + "</div><div>" + sv.strip_or_band(ratio_groups, width=420, label_w=170) + "</div></div>")
 
     cc = callsets.get("cohort_call", {})
     cm = callsets.get("cohort_merge", {})
@@ -455,11 +494,19 @@ def render_cohort(d: dict[str, object], tools: list[dict[str, object]], *, proje
         svm: dict[str, object] = cm.get("sv", {})  # type: ignore[assignment]
         lps: dict[str, object] = cm.get("trgt_lps", {})  # type: ignore[assignment]
         supp: dict[str, object] = svm.get("supp", {})  # type: ignore[assignment]
+        n_sv_samples = len(svm.get("samples", []))  # type: ignore[arg-type]
+        n_records = sv.finite(svm.get("n")) or 1.0
+        singletons = sv.finite(supp.get("1"))
+        in_all = sv.finite(supp.get(str(n_sv_samples))) if n_sv_samples else 0.0
         body += ("<h3>Merged structural variants (cohort_merge, svx)</h3>"
-                 + _cards([("records", sv.fmt(svm.get("n"))), ("samples", sv.fmt(len(svm.get("samples", [])))), ("size", _bytes(svm.get("bytes")))])  # type: ignore[arg-type]
+                 + _cards([("records", sv.fmt(svm.get("n"))), ("samples", sv.fmt(n_sv_samples)), ("size", _bytes(svm.get("bytes"))),  # type: ignore[arg-type]
+                           ("singletons", f"{sv.fmt(singletons)} ({100 * singletons / n_records:.1f} %)"),
+                           ("in every member", f"{sv.fmt(in_all)} ({100 * in_all / n_records:.1f} %)")])
                  + '<div class="grid"><div><h4>By type</h4>' + sv.bars_h([(t, sv.finite(v), "") for t, v in sorted(svm.get("counts", {}).items())], width=300, label_w=60)  # type: ignore[union-attr]
                  + "</div><div><h4>Samples supporting a merged variant (SUPP)</h4>"
-                 + sv.hist([(k, sv.finite(v)) for k, v in sorted(supp.items(), key=lambda kv: int(kv[0]))], width=420, y_label="records") + "</div></div>"
+                 + sv.hist(supp_bins(supp, n_sv_samples), width=420, y_label="records", cumulative=True)
+                 + "<p class='small muted'>Bars: records by the number of members carrying the variant, in bins that scale with the cohort; "
+                 "line: the cumulative share (right axis).</p></div></div>"
                  + "<h3>Merged tandem repeats (trgt merge, trgt-lps)</h3>"
                  + _kv([["loci in the trgt-lps table", sv.fmt(lps.get("loci"))], ["samples", sv.fmt(len(lps.get("samples", [])))], ["size", _bytes(lps.get("bytes"))]]))  # type: ignore[arg-type]
         if cm.get("small_variant_vcf"):

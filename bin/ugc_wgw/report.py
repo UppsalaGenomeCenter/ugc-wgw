@@ -133,6 +133,21 @@ class Raw(str):
     """A cell whose HTML is already escaped/built."""
 
 
+BIG_TABLE_FROM = 100   # rows from which big_table() collapses a table and adds a filter box
+
+
+def big_table(headers: list[str], rows: list[list[object]], *, what: str, open_below: int = BIG_TABLE_FROM) -> str:
+    """A sortable table that stays inline below `open_below` rows and otherwise folds into <details> with a
+    type-to-filter box (JS: rows whose text does not contain the typed text are hidden). `what` names the rows
+    in the summary line ("864 members (462 with a QC warning)")."""
+    table = _table(headers, rows)
+    if len(rows) < open_below:
+        return '<div class="wrap">' + table + "</div>"
+    return (f"<details><summary>{_esc(what)}: click to open; sortable, type to filter</summary>"
+            f'<input class="filter" type="search" placeholder="filter rows (id, stage, status, flag...)" aria-label="filter rows">'
+            f'<div class="wrap">{table}</div></details>')
+
+
 def _nice_tick(span: float) -> float:
     for step in (60, 300, 900, 1800, 3600, 7200, 21600, 43200, 86400, 172800, 604800):
         if span / step <= 12:
@@ -156,11 +171,94 @@ def _time_axis(t0: float, t1: float, x0: float, width: float, y: float) -> str:
 
 # ---- charts --------------------------------------------------------------------------
 
+TIMELINE_ROWS = 200   # one row per run up to here; lanes per stage above
+
+
+def _step_series(iv: list[tuple[float, float]], t0: float, t1: float) -> tuple[list[tuple[float, int]], int]:
+    """Count in flight over time from (start, end) intervals: a step series and its peak."""
+    events: list[tuple[float, int]] = []
+    for s, e in iv:
+        events.append((s, 1))
+        events.append((e, -1))
+    events.sort(key=lambda e: (e[0], -e[1]))
+    pts, level, peak = [(t0, 0)], 0, 0
+    for t, d in events:
+        pts.append((t, level))
+        level += d
+        peak = max(peak, level)
+        pts.append((t, level))
+    pts.append((t1, level))
+    return pts, peak
+
+
+def _per_pixel(pts: list[tuple[float, int]], t0: float, span: float, width: float) -> list[tuple[float, int]]:
+    """Keep at most the first, lowest, highest and last point of every pixel column: the drawn shape is the same
+    and 160,000 points (the 864-sample run's tasks) become about 3,000."""
+    out: list[tuple[float, int]] = []
+    col: list[tuple[float, int]] = []
+    cur = None
+    for t, v in pts:
+        c = int((t - t0) / span * width)
+        if c != cur and col:
+            lo, hi = min(col, key=lambda p: p[1]), max(col, key=lambda p: p[1])
+            keep = [col[0]] + sorted({lo, hi}, key=lambda p: p[0]) + [col[-1]]
+            out.extend(k for i, k in enumerate(keep) if i == 0 or k != keep[i - 1])
+            col = []
+        cur = c
+        col.append((t, v))
+    if col:
+        lo, hi = min(col, key=lambda p: p[1]), max(col, key=lambda p: p[1])
+        keep = [col[0]] + sorted({lo, hi}, key=lambda p: p[0]) + [col[-1]]
+        out.extend(k for i, k in enumerate(keep) if i == 0 or k != keep[i - 1])
+    return out
+
+
+def lanes_svg(rows: list[RunReport], now: str) -> str:
+    """The timeline above TIMELINE_ROWS runs: one lane per stage with the runs in flight over time as a filled
+    step area (peak labelled), failures and cancellations as red and grey ticks at their start."""
+    t0 = min(_epoch(r.run.started_at) or 0 for r in rows)
+    t1 = max((_epoch(r.run.finished_at or now) or 0) for r in rows)
+    span = max(1.0, t1 - t0)
+    label_w, width, lane_h, gap = 260, 700, 56, 10
+    stages: dict[str, list[RunReport]] = {}
+    for r in rows:
+        stages.setdefault(r.run.stage, []).append(r)
+    order = sorted(stages, key=lambda s: min(_epoch(r.run.started_at) or 0 for r in stages[s]))
+    height = len(order) * (lane_h + gap) + 24
+    parts = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{label_w + width + 10}" height="{height}" font-family="sans-serif">',
+             _time_axis(t0, t1, label_w, width, len(order) * (lane_h + gap))]
+    for i, stage in enumerate(order):
+        y0 = i * (lane_h + gap)
+        rs = stages[stage]
+        iv = [(_epoch(r.run.started_at) or t0, _epoch(r.run.finished_at or now) or t0) for r in rs]
+        pts, peak = _step_series(iv, t0, t1)
+        pts = _per_pixel(pts, t0, span, width)
+        base = y0 + lane_h - 2
+        coords = [f"{label_w:.1f},{base:.1f}"] + [f"{label_w + (t - t0) / span * width:.1f},{base - v / max(peak, 1) * (lane_h - 14):.1f}" for t, v in pts] + [f"{label_w + width:.1f},{base:.1f}"]
+        n_ok = sum(1 for r in rs if r.run.status == "success")
+        n_bad = sum(1 for r in rs if r.run.status in ("failed", "cancelled"))
+        first, last = min(s for s, _ in iv), max(e for _, e in iv)
+        parts.append(f'<text x="{label_w - 6}" y="{y0 + 12}" font-size="10" text-anchor="end">{_esc(stage)}</text>'
+                     f'<text x="{label_w - 6}" y="{y0 + 25}" font-size="9" text-anchor="end" fill="#888">{len(rs)} runs, {n_ok} ok, {n_bad} failed/cancelled</text>'
+                     f'<text x="{label_w - 6}" y="{y0 + 38}" font-size="9" text-anchor="end" fill="#888">peak {peak} in flight, {_dur(last - first)}</text>'
+                     f'<polygon points="{" ".join(coords)}" fill="{STATUS_COLOR["running"]}" fill-opacity="0.35" stroke="{STATUS_COLOR["running"]}" stroke-width="1">'
+                     f'<title>{_esc(stage)}: runs in flight over time (peak {peak})</title></polygon>')
+        for r in rs:
+            if r.run.status in ("failed", "cancelled"):
+                x = label_w + ((_epoch(r.run.started_at) or t0) - t0) / span * width
+                parts.append(f'<line x1="{x:.1f}" y1="{y0 + 2}" x2="{x:.1f}" y2="{y0 + 12}" stroke="{STATUS_COLOR.get(r.run.status, "#999")}" stroke-width="1.5">'
+                             f'<title>{_esc(r.run.subject_id)} / {_esc(stage)} #{r.run.attempt}: {_esc(r.run.status)}, {_dur(r.duration)}, {_esc(r.run.started_at)}</title></line>')
+    parts.append("</svg>")
+    return "".join(parts)
+
+
 def timeline_svg(reports: list[RunReport]) -> str:
     rows = [r for r in reports if r.run.started_at]
     if not rows:
         return "<p>No started runs.</p>"
     now = utc_now()
+    if len(rows) > TIMELINE_ROWS:
+        return lanes_svg(rows, now)
     rows.sort(key=lambda r: (r.run.started_at or ""))
     t0 = min(_epoch(r.run.started_at) or 0 for r in rows)
     t1 = max((_epoch(r.run.finished_at or now) or 0) for r in rows)
@@ -197,21 +295,8 @@ def concurrency_svg(reports: list[RunReport]) -> str:
     label_w, width, height = 40, 920, 120
 
     def series(iv: list[tuple[float | None, float | None]], color: str) -> tuple[str, int]:
-        events: list[tuple[float, int]] = []
-        for s, e in iv:
-            if s is None or e is None:
-                continue
-            events.append((s, 1))
-            events.append((e, -1))
-        events.sort(key=lambda e: (e[0], -e[1]))  # at equal times, starts before ends
-        pts, level, peak = [(t0, 0)], 0, 0
-        for t, d in events:
-            pts.append((t, level))
-            level += d
-            peak = max(peak, level)
-            pts.append((t, level))
-        pts.append((t1, level))
-        return (pts, color), peak  # type: ignore[return-value]
+        pts, peak = _step_series([(s, e) for s, e in iv if s is not None and e is not None], t0, t1)
+        return (_per_pixel(pts, t0, span, width), color), peak  # type: ignore[return-value]
 
     (run_pts, _), run_peak = series(run_iv, STATUS_COLOR["running"])
     (task_pts, _), task_peak = series(task_iv, "#8e24aa")
@@ -284,6 +369,7 @@ th{background:var(--head);cursor:pointer;user-select:none;font-weight:600}tr:nth
 .card b{display:block;font-size:20px}.muted{color:var(--muted)}code{font-size:11px}.wrap{overflow-x:auto}
 .kind-transient{color:#1565c0}.kind-resource{color:#ef6c00}.kind-input{color:#8e24aa}.kind-tool{color:#c62828}
 details summary{cursor:pointer}a{color:var(--accent)}
+input.filter{margin:8px 0 4px;padding:4px 8px;width:320px;max-width:100%;font-size:12px;border:1px solid var(--line);border-radius:3px;background:var(--panel);color:var(--fg)}
 svg text{fill:var(--muted)}svg line{stroke:var(--grid)}
 """
 
@@ -294,6 +380,9 @@ var asc=!(th.dataset.asc==='1');th.dataset.asc=asc?'1':'0';
 rows.sort(function(a,b){var x=a.cells[i].textContent,y=b.cells[i].textContent,nx=parseFloat(x),ny=parseFloat(y);
 var c=(!isNaN(nx)&&!isNaN(ny))?nx-ny:x.localeCompare(y);return asc?c:-c;});
 rows.forEach(function(r){t.tBodies[0].appendChild(r);});});});
+document.querySelectorAll('input.filter').forEach(function(inp){var t=inp.parentNode.querySelector('table');if(!t)return;
+inp.addEventListener('input',function(){var q=inp.value.toLowerCase();Array.from(t.tBodies[0].rows).forEach(function(r){
+r.hidden=q!==''&&r.textContent.toLowerCase().indexOf(q)<0;});});});
 """
 
 
@@ -306,6 +395,23 @@ def _dict_table(rows: list[dict[str, object]]) -> str:
             if c not in cols:
                 cols.append(c)
     return _table(cols, [[r.get(c, "") for c in cols] for r in rows])
+
+
+def _dict_big_table(rows: list[dict[str, object]], *, what: str) -> str:
+    """_dict_table with big_table's folding; the trailing summary rows ("mean per sample, ...") stay visible."""
+    if not rows:
+        return "<p>None.</p>"
+    cols: list[str] = []
+    for r in rows:
+        for c in r:
+            if c not in cols:
+                cols.append(c)
+    body = [r for r in rows if not str(r.get(cols[0], "")).startswith("mean ")]
+    tail = [r for r in rows if str(r.get(cols[0], "")).startswith("mean ")]
+    if len(body) < BIG_TABLE_FROM:
+        return '<div class="wrap">' + _dict_table(rows) + "</div>"
+    return (big_table(cols, [[r.get(c, "") for c in cols] for r in body], what=f"{len(body)} {what}")
+            + ('<div class="wrap">' + _table(cols, [[r.get(c, "") for c in cols] for r in tail], cls="") + "</div>" if tail else ""))
 
 
 def usage_section(summary: usage_mod.Summary, prices: Prices, basis: str, *, mode: str | None, sizes: bool) -> str:
@@ -350,7 +456,7 @@ def usage_section(summary: usage_mod.Summary, prices: Prices, basis: str, *, mod
             f"<h3>Core-hours per task</h3><div class='wrap'>{bars_svg(bars, fmt=lambda v: f'{fmt_h(v)} core-h')}</div>"
             f"<h3>Per stage</h3><div class='wrap'>{_dict_table(usage_mod.rows_stage(summary, prices, basis, mode=mode, sizes=sizes))}</div>"
             f"<h3>Per task</h3><div class='wrap'>{_dict_table(usage_mod.rows_task(summary, prices, basis, top=20))}</div>"
-            f"<h3>Per subject</h3><div class='wrap'>{_dict_table(usage_mod.rows_subject(summary, prices, basis, sizes=sizes))}</div>")
+            f"<h3>Per subject</h3>{_dict_big_table(usage_mod.rows_subject(summary, prices, basis, sizes=sizes), what='per-subject rows')}")
 
 
 def render(cfg: Config, code: CodeInfo, reports: list[RunReport], *, ugc_wgw_version: str, mode: str | None,
@@ -418,7 +524,7 @@ def render(cfg: Config, code: CodeInfo, reports: list[RunReport], *, ugc_wgw_ver
 
     # runs table
     run_rows = []
-    for r in sorted(reports, key=lambda r: (r.run.subject_id, r.run.stage, r.run.attempt)):
+    for r in sorted(reports, key=lambda r: (r.run.status not in ("failed", "cancelled"), r.run.subject_id, r.run.stage, r.run.attempt)):
         manifest_link = ""
         files = run_files(r.run.run_path)
         if files.manifest.exists():
@@ -517,8 +623,9 @@ def render(cfg: Config, code: CodeInfo, reports: list[RunReport], *, ugc_wgw_ver
         section("Slowest tasks (median wall time, cache hits excluded)", '<div class="wrap">' + bars_svg(slowest[:20]) + "</div>"),
         section("Tasks", '<div class="wrap">' + _table(["task", "calls", "cached", "miniwdl retries", "failed", "median", "mean",
                                                          "max", "total", "cpu requested→granted (n)", "policy (n)"], task_rows) + "</div>"),
-        section("Runs", '<div class="wrap">' + _table(["subject", "type", "stage", "mode", "attempt", "status", "kind", "started",
-                                                        "duration", "exit", "tasks", "slurm jobs", "accounting", "out size", "manifest", "message"], run_rows) + "</div>"),
+        section("Runs", big_table(["subject", "type", "stage", "mode", "attempt", "status", "kind", "started",
+                                   "duration", "exit", "tasks", "slurm jobs", "accounting", "out size", "manifest", "message"], run_rows,
+                                  what=f"{len(run_rows)} runs ({sum(1 for r in reports if r.run.status in ('failed', 'cancelled'))} failed or cancelled)")),
         section("Failures", '<div class="wrap">' + (_table(["subject", "stage", "attempt", "status", "kind", "class", "node",
                                                              "exit status", "evidence", "task dir", "not before"], fail_rows) if fail_rows else "<p>None.</p>") + "</div>"),
         section("Resource adjustments",

@@ -65,16 +65,22 @@ def _tail_lines(path: Path) -> list[str]:
 
 
 def evidence_lines(task_dir: str | None, attempt_path: Path) -> list[tuple[str, str]]:
-    """(source file, line) pairs to scan: the failed task's SLURM log, stderr and stdout (some tools, Parabricks
-    among them, log to stdout and leave stderr empty), else miniwdl's stderr."""
+    """(source file, line) pairs to scan, in order: the job's own output files `slurm-<jobid>.out` (newest first:
+    slurmstepd writes "CANCELLED ... DUE TO TIME LIMIT" and "oom_kill event" there, since sbatch runs in the task
+    directory with no --output; found on the 864-sample run, 2026-10-30), the sbatch log (job id, sbatch's
+    refusals), the task's stderr and stdout of every try (`stderr.txt`, `stderr2.txt`, ...; some tools,
+    Parabricks among them, log to stdout and leave stderr empty), else miniwdl's stderr."""
     out: list[tuple[str, str]] = []
     if task_dir:
         d = Path(task_dir)
         if not d.is_absolute():
             d = attempt_path / d
-        for name in (slurm.LOG_NAME, "stderr.txt", "stdout.txt"):
-            p = d / name
-            if p.exists():
+        files: list[Path] = sorted(d.glob("slurm-*.out"), key=lambda p: p.stat().st_mtime, reverse=True)
+        files.append(d / slurm.LOG_NAME)
+        for stem in ("stderr", "stdout"):
+            files += sorted(d.glob(f"{stem}*.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
+        for p in files:
+            if p.exists() and p.is_file():
                 out.extend((str(p), line) for line in _tail_lines(p))
     if not out:
         p = run_files(attempt_path).stderr

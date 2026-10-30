@@ -324,7 +324,7 @@ flowchart TD
 
 ## ugc_wgw_cohort_merge
 
-Source `workflows/ugc_wgw_cohort_merge.wdl`, depth 1, Mermaid source 1449 characters.
+Source `workflows/ugc_wgw_cohort_merge.wdl`, depth 1, Mermaid source 1587 characters.
 
 Inlined workflows:
 
@@ -353,45 +353,51 @@ flowchart TD
     n8["ugc_wgw_trgt_merge"]
   end
   n9["concat_trgt"]
-  n10["ugc_wgw_trgt_lps"]
-  subgraph s6["if merge_phased_small_variants"]
-    subgraph s7["scatter shard_index in range(n_shards)"]
-      n11["bcftools_small_variant_shard"]
-    end
-    n12["concat_phased_small_variants"]
+  subgraph s6["scatter shard_index in range(n_shards)"]
+    n10["ugc_wgw_trgt_lps"]
   end
-  subgraph s8["if run_glnexus"]
-    subgraph s9["ugc_wgw_glnexus_scatter (glnexus_scatter.wdl)"]
-      subgraph s10["scatter sample_index in range(length(gvcfs))"]
-        n13["ugc_wgw_bcftools_slice"]
+  n11["ugc_wgw_trgt_lps_gather"]
+  subgraph s7["if merge_phased_small_variants"]
+    subgraph s8["scatter shard_index in range(n_shards)"]
+      n12["bcftools_small_variant_shard"]
+    end
+    n13["concat_phased_small_variants"]
+  end
+  subgraph s9["if run_glnexus"]
+    subgraph s10["ugc_wgw_glnexus_scatter (glnexus_scatter.wdl)"]
+      subgraph s11["scatter sample_index in range(length(gvcfs))"]
+        n14["ugc_wgw_bcftools_slice"]
       end
-      subgraph s11["scatter shard_index in range(length(shard_names))"]
-        n14["glnexus"]
+      subgraph s12["scatter shard_index in range(length(shard_names))"]
+        n15["glnexus"]
       end
-      n15["ugc_wgw_bcftools_concat"]
+      n16["ugc_wgw_bcftools_concat"]
     end
   end
-  n16["ugc_wgw_manifest_write"]
+  n17["ugc_wgw_manifest_write"]
   n1 --> n3
   n1 --> n6
   n1 --> n8
-  n1 --> n11
-  n1 --> n13
+  n1 --> n10
+  n1 --> n12
   n1 --> n14
+  n1 --> n15
   n1 -.-> s2
   n1 -.-> s4
   n1 -.-> s5
-  n1 -.-> s7
-  n1 -.-> s11
+  n1 -.-> s6
+  n1 -.-> s8
+  n1 -.-> s12
   n2 --> n3
   n3 --> n5
   n4 --> n5
   n6 --> n7
   n8 --> n9
-  n9 --> n10
-  n11 --> n12
-  n13 --> n14
+  n8 --> n10
+  n10 --> n11
+  n12 --> n13
   n14 --> n15
+  n15 --> n16
 ```
 
 ## ugc_wgw_cohort_freq

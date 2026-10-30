@@ -121,7 +121,7 @@ task ugc_wgw_trgt_merge {
 
 task ugc_wgw_trgt_lps {
   meta {
-    description: "Longest pure segment table (trgt-lps) from a multi-sample TRGT VCF"
+    description: "Longest pure segment table (trgt-lps) from a multi-sample TRGT VCF (one merge shard), rows in the VCF's record order"
     outputs: {
       lps: {
         description: "TSV: trid, motif, one column per sample with per-allele LPS values ('.' when missing)"
@@ -157,7 +157,7 @@ task ugc_wgw_trgt_lps {
     File vcf
     File vcf_index
     String out_prefix
-    Int threads = 8
+    Int threads = 4
     Int mem_gb = 16
     String ugc_wgw_container_registry
     RuntimeAttributes runtime_attributes
@@ -176,7 +176,23 @@ task ugc_wgw_trgt_lps {
     trgt-lps \
       --vcf "~{basename(vcf)}" \
       --threads ~{threads} \
-    > "~{out_prefix}.lps.tsv"
+    > unordered.tsv
+
+    # trgt-lps emits its rows in a thread-dependent order. Put them into the
+    # VCF's record order (by TRID) so the table is reproducible and the
+    # per-shard tables gather into the whole-cohort table byte for byte.
+    zcat "~{basename(vcf)}" | { grep -v '^#' || true; } \
+      | awk -F'\t' '{ if (match($8, /(^|;)TRID=[^;]*/)) { k = substr($8, RSTART, RLENGTH); sub(/^;?TRID=/, "", k); print k } else print $3 }' \
+      > order.txt
+    head -1 unordered.tsv > "~{out_prefix}.lps.tsv"
+    awk -F'\t' -v OFS='\t' '
+      FILENAME == ARGV[1] { ord[$1] = FNR; next }
+      FNR == 1 { next }
+      { if (!($1 in ord)) { print "trgt-lps row for a TRID not in the VCF: " $1 > "/dev/stderr"; exit 1 } print ord[$1], $0 }
+    ' order.txt unordered.tsv \
+      | sort -t "$(printf '\t')" -k1,1n | cut -f2- >> "~{out_prefix}.lps.tsv"
+    echo "$(($(wc -l < "~{out_prefix}.lps.tsv") - 1)) loci with an LPS row of $(wc -l < order.txt) in the VCF" >&2
+    rm -f unordered.tsv order.txt
   >>>
 
   output {
@@ -196,3 +212,72 @@ task ugc_wgw_trgt_lps {
     cpuPlatform: runtime_attributes.cpuPlatform
   }
 }
+
+
+task ugc_wgw_trgt_lps_gather {
+  meta {
+    description: "The per-shard trgt-lps tables as one: the first shard's header, then every shard's rows in shard order (one locus per row; trgt-lps computes per locus, so sharding by contig is exact). Replaces one trgt-lps over the whole cohort VCF, which took 13h52m for 864 samples (2026-10-30)"
+    outputs: {
+      lps: {
+        description: "<out_prefix>.lps.tsv"
+      }
+    }
+  }
+
+  parameter_meta {
+    shards: {
+      description: "Per-shard trgt-lps TSVs, in shard order (the cohort VCF's contig order)"
+    }
+    out_prefix: {
+      description: "Output prefix"
+    }
+    runtime_attributes: {
+      description: "Runtime attribute structure"
+    }
+  }
+
+  input {
+    Array[File] shards
+    String out_prefix
+    RuntimeAttributes runtime_attributes
+  }
+
+  Int disk_size = ceil(size(shards, "GB") * 2 + 10)
+
+  command <<<
+    set -euo pipefail
+    first=1
+    while read -r f; do
+      if [ "$first" = 1 ]; then
+        head -1 "$f"
+        first=0
+      else
+        # the headers must agree (same samples, same order): the merge used one sample list for every shard
+        if ! cmp -s <(head -1 "$f") <(head -1 "$(head -1 '~{write_lines(shards)}')"); then
+          echo "trgt-lps header of $f differs from the first shard's" >&2
+          exit 1
+        fi
+      fi
+      tail -n +2 "$f"
+    done < '~{write_lines(shards)}' > "~{out_prefix}.lps.tsv"
+    echo "$(($(wc -l < "~{out_prefix}.lps.tsv") - 1)) loci from $(wc -l < '~{write_lines(shards)}') shards" >&2
+  >>>
+
+  output {
+    File lps = "~{out_prefix}.lps.tsv"
+  }
+
+  runtime {
+    docker: "~{runtime_attributes.container_registry}/pb_wdl_base@sha256:03cb3c01937eccc907f8ad71c87b258581504572205fe3f31a657e318f3564ae"  # pb_wdl_base:build4
+    cpu: 1
+    memory: "2 GiB"
+    disk: "~{disk_size} GB"
+    disks: "local-disk ~{disk_size} HDD"
+    preemptible: runtime_attributes.preemptible_tries
+    maxRetries: runtime_attributes.max_retries
+    awsBatchRetryAttempts: runtime_attributes.max_retries  # !UnknownRuntimeKey
+    zones: runtime_attributes.zones
+    cpuPlatform: runtime_attributes.cpuPlatform
+  }
+}
+

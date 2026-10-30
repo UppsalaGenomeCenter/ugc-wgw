@@ -121,3 +121,47 @@ class ReportTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ScaleTest(unittest.TestCase):
+    """The report at hundreds of runs: lanes instead of rows, per-pixel downsampling, folded tables."""
+
+    def test_per_pixel_keeps_the_shape(self):
+        pts = [(float(t), (t * 7919) % 13) for t in range(0, 20000)]
+        out = report._per_pixel(pts, 0.0, 20000.0, 500.0)
+        self.assertLess(len(out), 4 * 500 + 10)
+        self.assertEqual(out[0], pts[0]); self.assertEqual(out[-1], pts[-1])
+        self.assertEqual(max(v for _, v in out), 12); self.assertEqual(min(v for _, v in out), 0)
+        self.assertEqual(report._per_pixel([], 0.0, 1.0, 10.0), [])
+
+    def test_lanes_above_the_row_limit(self):
+        from types import SimpleNamespace
+        now = 1_700_000_000
+        runs = []
+        for i in range(report.TIMELINE_ROWS + 50):
+            stage = "upstream" if i % 3 else "downstream"
+            status = "failed" if i % 97 == 0 else "success"
+            s = now + i * 60; e = s + 3600
+            run = SimpleNamespace(subject_id=f"S{i:04d}", stage=stage, attempt=1, status=status,
+                                  started_at=report._iso(s) if hasattr(report, "_iso") else __import__("datetime").datetime.fromtimestamp(s, __import__("datetime").timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                  finished_at=__import__("datetime").datetime.fromtimestamp(e, __import__("datetime").timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+            runs.append(SimpleNamespace(run=run, duration=3600.0, tasks=[]))
+        svg = report.timeline_svg(runs)
+        self.assertIn("<polygon", svg)
+        self.assertEqual(svg.count("<polygon"), 2)                 # one lane per stage
+        self.assertEqual(svg.count("<line") - svg.count("stroke=\"#ddd\""), 3)   # the three failures as ticks (axis lines excluded)
+        self.assertLess(len(svg), 60_000)
+        height = int(__import__("re").search(r'height="(\d+)"', svg).group(1))
+        self.assertLess(height, 400)
+        small = report.timeline_svg(runs[:10])
+        self.assertNotIn("<polygon", small); self.assertEqual(small.count("<rect"), 10)
+
+    def test_big_table_folds_and_filters(self):
+        rows = [[f"S{i}", "x"] for i in range(5)]
+        self.assertNotIn("<details", report.big_table(["a", "b"], rows, what="rows"))
+        rows = [[f"S{i}", "x"] for i in range(report.BIG_TABLE_FROM)]
+        html = report.big_table(["a", "b"], rows, what="100 rows (3 bad)")
+        self.assertIn("<details><summary>100 rows (3 bad): click to open", html)
+        self.assertIn('class="filter"', html)
+        self.assertIn("input.filter", report.JS)
+

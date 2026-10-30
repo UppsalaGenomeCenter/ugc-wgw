@@ -18,6 +18,20 @@ from .helpers import REPO, VERSION, make_project, run_cli, scancel_env, write_ts
 
 
 class JobIdsTest(unittest.TestCase):
+    def test_job_ids_from_the_job_output_files(self):
+        # miniwdl 1.15 truncates the sbatch log per try, so a retried task's earlier jobs are only in slurm-<id>.out
+        tmp = Path(tempfile.mkdtemp()); d = tmp / "call-glnexus-13"; d.mkdir(parents=True)
+        (d / "slurm_singularity.log.txt").write_text("14581245\n")
+        for jid in ("14581229", "14581237", "14581245"):
+            (d / f"slurm-{jid}.out").write_text("x\n")
+        refs = slurm.job_refs(tmp)
+        self.assertEqual([(r.job_id, r.retry) for r in refs], [("14581229", 2), ("14581237", 1), ("14581245", 0)])
+        self.assertEqual(slurm.job_ids(tmp), ["14581229", "14581237", "14581245"])
+        self.assertTrue(all(r.call_id == "call-glnexus-13" for r in refs))
+        # a directory with job output files but no sbatch log (the log of a killed try) still yields its ids
+        d2 = tmp / "call-x"; d2.mkdir(); (d2 / "slurm-99.out").write_text("")
+        self.assertIn("99", slurm.job_ids(tmp))
+
     def test_job_ids_pruned_walk(self):
         tmp = Path(tempfile.mkdtemp())
         for rel, text in (("call-a", "123;cluster\n"), ("call-sub/call-b", "456\n"), ("call-a/failed1", "789\n"),

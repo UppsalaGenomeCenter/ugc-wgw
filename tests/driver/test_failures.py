@@ -45,6 +45,27 @@ class ClassifyTest(unittest.TestCase):
         self.assertIn("exit_status=143", c.message)
         self.assertIn("node=call-x", c.message)
 
+    def test_time_limit_in_the_jobs_own_output_file(self):
+        # where SLURM really writes it: sbatch runs in the task directory with no --output (864-sample run, 2026-10-30)
+        (self.task / "slurm_singularity.log.txt").write_text("14581229\n")
+        (self.task / "slurm-14581229.out").write_text(
+            "[ugc-wgw] scratch: /scratch/14581229 -> /mnt/scratch (TMPDIR)\n"
+            "slurmstepd: error: *** JOB 14581229 ON m45 CANCELLED AT 2026-10-29T00:24:53 DUE TO TIME LIMIT ***\n")
+        c = failures.classify(self.result("CommandFailed", exit_status=143), self.attempt)
+        self.assertEqual((c.kind, c.resource), ("resource", "time"))
+        self.assertTrue(str(c.evidence["source"]).endswith("slurm-14581229.out"))
+        # the newest job output wins over an older try's; a second try's stderr is read too
+        import os, time
+        (self.task / "slurm-14581300.out").write_text("slurmstepd: error: Detected 1 oom_kill event in StepId=14581300.batch\n")
+        os.utime(self.task / "slurm-14581300.out", (time.time() + 5, time.time() + 5))
+        c = failures.classify(self.result("CommandFailed", exit_status=1), self.attempt)
+        self.assertEqual((c.kind, c.resource), ("resource", "memory"))
+        for f in self.task.glob("slurm-*.out"):
+            f.unlink()
+        (self.task / "stderr2.txt").write_text("Permission denied\n")
+        c = failures.classify(self.result("CommandFailed", exit_status=1), self.attempt)
+        self.assertEqual(c.kind, "input")
+
     def test_sbatch_refusal_is_a_resource_failure(self):
         (self.task / "slurm_singularity.log.txt").write_text(
             "sbatch: error: CPU count per node can not be satisfied\n"

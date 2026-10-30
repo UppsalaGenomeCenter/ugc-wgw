@@ -104,12 +104,14 @@ def bars_h(items: list[tuple[str, float, str]], *, width: int = 560, label_w: in
 
 
 def hist(bins: list[tuple[str, float]], *, width: int = 560, height: int = 170, cls: str = "m1",
-         y_label: str = "", digits: int = 0) -> str:
-    """A vertical histogram of pre-binned counts: (label, value)."""
+         y_label: str = "", digits: int = 0, cumulative: bool = False) -> str:
+    """A vertical histogram of pre-binned counts: (label, value). `cumulative` adds the running share of the
+    total as a line on a right-hand 0-100 % axis."""
     if not bins or all(finite(v) <= 0 for _, v in bins):
         return "<p class='muted'>No data.</p>"
     left, bottom, top_pad = 52, 44, (18 if y_label else 8)
-    plot_w, plot_h = width - left - 8, height - bottom - top_pad
+    right = 40 if cumulative else 8
+    plot_w, plot_h = width - left - right, height - bottom - top_pad
     vmax = max(finite(v) for _, v in bins) or 1.0
     ticks = nice_ticks(0, vmax, 4)
     vmax = max(vmax, ticks[-1])
@@ -133,9 +135,97 @@ def hist(bins: list[tuple[str, float]], *, width: int = 560, height: int = 170, 
             parts.append(f'<text x="{lx:.1f}" y="{ly}" text-anchor="end" transform="rotate(-35 {lx:.1f} {ly})">{esc(label)}</text>')
         else:
             parts.append(f'<text x="{lx:.1f}" y="{ly}" text-anchor="middle">{esc(label)}</text>')
+    if cumulative:
+        total = sum(finite(v) for _, v in bins) or 1.0
+        run = 0.0
+        pts = []
+        for i, (_, value) in enumerate(bins):
+            run += finite(value)
+            pts.append(f"{left + i * slot + slot / 2:.1f},{top_pad + plot_h - run / total * plot_h:.1f}")
+        parts.append(f'<polyline class="ln2" points="{" ".join(pts)}"><title>cumulative share</title></polyline>')
+        for pct in (0, 50, 100):
+            y = top_pad + plot_h - pct / 100 * plot_h
+            parts.append(f'<text x="{left + plot_w + 4}" y="{y + 3:.1f}" font-size="9">{pct}%</text>')
     if y_label:
         parts.append(f'<text x="{left}" y="10" font-size="9">{esc(y_label)}</text>')
     return _svg(width, height, "".join(parts))
+
+
+BAND_FROM = 150   # strip() draws every member below this many points; band() above
+
+
+def band(groups: list[dict[str, object]], *, width: int = 560, label_w: int = 170, row_h: int = 38, nbins: int = 60) -> str:
+    """strip() for large cohorts: one row per metric with the 5-95 % whisker, the interquartile box, the median
+    line, a density of all members in `nbins` bins under the axis, and only the outliers and threshold failures
+    as points (hover for the id). Same `groups` as strip(); the full values stay in the digest."""
+    groups = [g for g in groups if g.get("points")]
+    if not groups:
+        return "<p class='muted'>No data.</p>"
+    plot_w = width - 8
+    parts = []
+    for i, g in enumerate(groups):
+        y0 = i * row_h
+        yc = y0 + 13
+        pts = [(str(k), finite(v)) for k, v in g["points"] if v is not None]  # type: ignore[union-attr]
+        if not pts:
+            continue
+        vals = sorted(v for _, v in pts)
+        thr = g.get("threshold")
+        lo = min(vals + ([finite(thr)] if thr is not None else []))
+        hi = max(vals + ([finite(thr)] if thr is not None else []))
+        if hi <= lo:
+            lo, hi = lo - 1.0, hi + 1.0
+        pad = (hi - lo) * 0.06
+        lo, hi = lo - pad, hi + pad
+
+        def sx(v: float) -> float:
+            return label_w + (v - lo) / (hi - lo) * plot_w
+
+        digits = int(finite(g.get("digits")))
+        unit = str(g.get("unit") or "")
+        n = len(vals)
+        q = lambda f: vals[min(n - 1, int(f * n))]  # noqa: E731
+        p5, q1, med, q3, p95 = q(0.05), q(0.25), q(0.5), q(0.75), q(0.95)
+        parts.append(f'<text x="{label_w - 6}" y="{yc + 4:.1f}" text-anchor="end">{esc(g["label"])}</text>'
+                     f'<line class="axis" x1="{label_w}" y1="{yc:.1f}" x2="{label_w + plot_w}" y2="{yc:.1f}"/>'
+                     f'<line class="axis" x1="{sx(p5):.1f}" y1="{yc:.1f}" x2="{sx(p95):.1f}" y2="{yc:.1f}" stroke-width="2">'
+                     f'<title>5-95 % {esc(fmt(p5, digits, unit))} – {esc(fmt(p95, digits, unit))}</title></line>'
+                     f'<rect class="iqr" x="{sx(q1):.1f}" y="{yc - 7:.1f}" width="{max(sx(q3) - sx(q1), 1):.1f}" height="14">'
+                     f'<title>IQR {esc(fmt(q1, digits, unit))} – {esc(fmt(q3, digits, unit))} (n={n})</title></rect>'
+                     f'<line class="ln2" x1="{sx(med):.1f}" y1="{yc - 9:.1f}" x2="{sx(med):.1f}" y2="{yc + 9:.1f}">'
+                     f'<title>median {esc(fmt(med, digits, unit))}</title></line>'
+                     f'<text x="{label_w}" y="{y0 + 8}" font-size="8">{esc(fmt(vals[0], digits, unit))}</text>'
+                     f'<text x="{label_w + plot_w}" y="{y0 + 8}" font-size="8" text-anchor="end">{esc(fmt(vals[-1], digits, unit))}</text>')
+        # density: members per bin as bars under the axis, 12 px tall at the fullest bin
+        counts = [0] * nbins
+        for v in vals:
+            counts[min(nbins - 1, int((v - lo) / (hi - lo) * nbins))] += 1
+        cmax = max(counts) or 1
+        bw = plot_w / nbins
+        for b, c in enumerate(counts):
+            if c:
+                h = max(1.0, c / cmax * 12)
+                parts.append(f'<rect class="pt" x="{label_w + b * bw:.1f}" y="{yc + 9:.1f}" width="{max(bw - 0.5, 0.5):.1f}" height="{h:.1f}">'
+                             f'<title>{c} member{"s" if c != 1 else ""} in {esc(fmt(lo + b * (hi - lo) / nbins, digits, unit))} – '
+                             f'{esc(fmt(lo + (b + 1) * (hi - lo) / nbins, digits, unit))}</title></rect>')
+        if thr is not None:
+            parts.append(f'<line class="thr" x1="{sx(finite(thr)):.1f}" y1="{y0 + 3}" x2="{sx(finite(thr)):.1f}" y2="{y0 + row_h - 3}" stroke-dasharray="3,2">'
+                         f'<title>threshold {esc(fmt(thr, digits, unit))}</title></line>')
+        flagged = set(str(x) for x in (g.get("outliers") or [])) | set(str(x) for x in (g.get("beyond") or []))  # type: ignore[union-attr]
+        for key, v in pts:
+            if key in flagged:
+                parts.append(f'<circle class="bad" cx="{sx(v):.1f}" cy="{yc + _jitter(key, 10):.1f}" r="3">'
+                             f'<title>{esc(key)}: {esc(fmt(v, digits, unit))}</title></circle>')
+    return _svg(label_w + width, len(groups) * row_h + 4, "".join(parts))
+
+
+def strip_or_band(groups: list[dict[str, object]], **kw: object) -> str:
+    """strip() below BAND_FROM points in the largest group, band() from there."""
+    n = max((len(g.get("points") or []) for g in groups), default=0)  # type: ignore[arg-type]
+    if n >= BAND_FROM:
+        kw.pop("row_h", None)
+        return band(groups, **kw)  # type: ignore[arg-type]
+    return strip(groups, **kw)  # type: ignore[arg-type]
 
 
 def stacked(rows: list[tuple[str, dict[str, float]]], categories: list[str], *, width: int = 560, label_w: int = 150,

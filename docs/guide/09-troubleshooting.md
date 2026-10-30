@@ -18,7 +18,9 @@
    ends as `pbrun` exit 255 with no `OUT_OF_MEMORY` state in SLURM, because a
    pinned allocation that does not fit fails instead of being killed. Failed
    runs keep their work directories; successful ones are reclaimed.
-5. The task's `slurm_singularity.log.txt`: the job id on the first line and
+5. The task's `slurm-<jobid>.out` (SLURM's own messages: `CANCELLED ... DUE
+   TO TIME LIMIT`, `oom_kill event`; one file per job the task submitted)
+   and `slurm_singularity.log.txt`: the job id on the first line and
    slurmd's messages (`DUE TO TIME LIMIT`, `oom_kill`) below it; the ids are
    also in the manifest's `slurm_job_ids`. `sacct -j <id>` shows
    `OUT_OF_MEMORY` or `TIMEOUT`.
@@ -34,7 +36,7 @@ wins. The kind decides whether the driver re-attempts on its own.
 | `version` | class `version_mismatch` | Blocked until fixed. |
 | `transient` | class `driver_lost`, `Interrupted`, `Terminated`, `launch_error`, `killed`, `NoResult`; or `DUE TO PREEMPTION`, `NODE_FAIL`, `Socket timed out`, `Unable to contact slurm controller` in the task's SLURM log | Re-attempted automatically after the backoff, up to `auto_retry_max` times. |
 | `input` | class `InputError` (also what the driver's own preflight of the raw read files reports: missing, empty, truncated or resized since registration, chapter 05), `DownloadFailed`; or a failed command whose logs say `No such file or directory`, `does not exist`, `Permission denied`, `EOF marker is absent`, `Invalid BGZF header` | Blocked until the file is fixed and `ugc-wgw retry`. |
-| `resource` | exit status 137 or 253; `oom_kill`, `OUT_OF_MEMORY`, `Out of memory`, `DUE TO TIME LIMIT`, `TIMEOUT`, or a CUDA host-memory failure (`cudaErrorMemoryAllocation`, `CUDA_ERROR_OUT_OF_MEMORY`) in the task's SLURM log, stderr or stdout; or `sbatch` refused the request (`Requested node configuration is not available`, `CPU count per node can not be satisfied`) | Time and memory failures are re-attempted at once with the task's limit multiplied (`resource_retry_factor`, 2), up to `resource_retry_max` (2) times, and the working request is learned for the project (chapter 06, "Resource escalation"); a refused request, or a failure at the site's memory cap, is blocked: cap or change the request (chapter 12), then `ugc-wgw retry`. |
+| `resource` | exit status 137 or 253; `oom_kill`, `OUT_OF_MEMORY`, `Out of memory`, `DUE TO TIME LIMIT`, `TIMEOUT`, or a CUDA host-memory failure (`cudaErrorMemoryAllocation`, `CUDA_ERROR_OUT_OF_MEMORY`) in the task's `slurm-<jobid>.out` (newest first), sbatch log, stderr or stdout (every try's: `stderr2.txt` is miniwdl's second try); or `sbatch` refused the request (`Requested node configuration is not available`, `CPU count per node can not be satisfied`) | Time and memory failures are re-attempted at once with the task's limit multiplied (`resource_retry_factor`, 2), up to `resource_retry_max` (2) times, and the working request is learned for the project (chapter 06, "Resource escalation"); a refused request, or a failure at the site's memory cap, is blocked: cap or change the request (chapter 12), then `ugc-wgw retry`. |
 | `tool` | any other `CommandFailed`, `OutputError` or class | Blocked until `ugc-wgw retry`. |
 | `cancelled` | the driver stopped the run | Blocked until `ugc-wgw retry`. |
 | `unknown` | no error class | Blocked until `ugc-wgw retry`. |

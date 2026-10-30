@@ -1,9 +1,13 @@
 """SLURM job ids of an attempt, read from miniwdl-slurm's per-task submission logs; `sacct` for their accounting;
 orphan cancellation.
 
-miniwdl-slurm 0.4.0 runs `sbatch --wait --parsable --job-name <call id>`; sbatch's stdout (the job id, `<id>` or
-`<id>;<cluster>`) and slurmd's messages land in `<task dir>/slurm_singularity.log.txt`. Nothing else records the id.
-A retried task keeps its final attempt in `call-x/` and the earlier ones in `call-x/failedN/`.
+miniwdl-slurm 0.4.0 runs `sbatch --wait --parsable --job-name <call id>` in the task directory; sbatch's stdout
+(the job id, `<id>` or `<id>;<cluster>`) lands in `<task dir>/slurm_singularity.log.txt`, which miniwdl truncates
+for every try, and SLURM writes each job's own output to `<task dir>/slurm-<id>.out`, which stays. A retried task
+(miniwdl 1.15) keeps every try in the same directory: `work`, `stdout.txt`, `stderr.txt` for the first,
+`work2`, `stdout2.txt`, `stderr2.txt` for the second; older layouts put earlier tries under `call-x/failedN/`.
+Job ids therefore come from the sbatch log and from the `slurm-<id>.out` names, so a retried task's earlier jobs
+reach the accounting too (the 864-sample run's first cohort_call had 52 such jobs, 2026-10-30).
 """
 from __future__ import annotations
 
@@ -33,17 +37,21 @@ SACCT_OPTIONAL = frozenset({"ReqCPUS", "TimelimitRaw", "MaxDiskRead", "MaxDiskWr
 class JobRef:
     """A job id and the task directory it was read from."""
     job_id: str
-    rel_dir: str      # task dir relative to the attempt, as on disk: `call-sub-1/call-b-0`, `call-a/failed1`
+    rel_dir: str      # task dir relative to the attempt, as on disk: `call-sub-1/call-b-0` (`call-a/failed1` in the older layout)
     call_path: str    # rel_dir without a trailing failedN: unique per call within the attempt
     call_id: str      # the last component of call_path, miniwdl's run id and sbatch's --job-name
-    retry: int        # 0 for the final attempt of the call, n for failedN
+    retry: int        # 0 for the call's final job, n for an earlier one (an earlier `slurm-<id>.out` of the task dir, or failedN)
+
+
+_OUT_RE = re.compile(r"^slurm-(\d+)\.out$")
 
 
 def task_dirs(attempt_path: Path) -> Iterator[Path]:
-    """Task directories holding a submission log, walking only call-*/failed* subtrees (never work/ or out/)."""
+    """Task directories holding a submission log or a job output file, walking only call-*/failed* subtrees
+    (never work/ or out/)."""
     for root, dirs, files in os.walk(attempt_path):
         dirs[:] = sorted(d for d in dirs if d.startswith("call-") or d.startswith("failed"))
-        if LOG_NAME in files:
+        if LOG_NAME in files or any(_OUT_RE.match(f) for f in files):
             yield Path(root)
 
 
@@ -51,13 +59,21 @@ def job_refs(attempt_path: Path) -> list[JobRef]:
     attempt_path = Path(attempt_path)
     refs: list[JobRef] = []
     for d in task_dirs(attempt_path):
+        ids: list[str] = []
         try:
             with open(d / LOG_NAME, errors="replace") as fh:
-                first = fh.readline()
+                m = _ID_RE.match(fh.readline())
+            if m:
+                ids.append(m.group(1))
         except OSError:
-            continue
-        m = _ID_RE.match(first)
-        if not m:
+            pass
+        final = ids[0] if ids else None
+        # the job output files name every job the task submitted; the sbatch log only the last try's
+        for f in sorted(os.listdir(d), key=lambda n: int(_OUT_RE.match(n).group(1)) if _OUT_RE.match(n) else -1):
+            om = _OUT_RE.match(f)
+            if om and om.group(1) not in ids:
+                ids.append(om.group(1))
+        if not ids:
             continue
         rel = d.relative_to(attempt_path).as_posix()
         parts = rel.split("/")
@@ -66,7 +82,12 @@ def job_refs(attempt_path: Path) -> list[JobRef]:
         if fm and len(parts) > 1:
             retry = int(fm.group(1) or 1)
             parts = parts[:-1]
-        refs.append(JobRef(m.group(1), rel, "/".join(parts), parts[-1], retry))
+        # earlier tries of the same directory get retry numbers below the final try's 0: 1 for the one before it
+        earlier = [i for i in ids if i != final]   # ascending job ids: the oldest try first
+        for idx, job_id in enumerate(earlier):
+            refs.append(JobRef(job_id, rel, "/".join(parts), parts[-1], retry + len(earlier) - idx))
+        if final is not None:
+            refs.append(JobRef(final, rel, "/".join(parts), parts[-1], retry))
     return refs
 
 

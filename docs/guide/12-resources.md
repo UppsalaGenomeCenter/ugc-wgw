@@ -354,11 +354,25 @@ same-source shards with `bcftools concat --naive` (compressed blocks copied,
 sample columns checked), minutes instead of hours, and the split task runs
 `+split` once per contig that holds records, `split_threads` (default 8) at
 a time, with its pieces on the node-local scratch, then one concatenation
-per sample in contig order. Give the split task 8 to 16 cores and
-`split_mem_gb` (default 8 + 0.04 GB per sample: every `+split` process
-holds one output stream per sample) and expect tens of minutes. The
-records are byte-identical to the one-pass commands' (verified on the
-joint smoke's GLnexus VCF in both filter modes).
+per sample in contig order. On the 864-sample cohort (2026-10-30) the naive
+concat took 22 minutes and the split 2h14m at 8 threads, so `split_threads`
+now defaults to 16 and `split_mem_gb` to 8 + 0.005 GB per sample per thread
+(every `+split` process holds one output stream per sample): about an hour
+for 864 samples, 77 GB. The records are byte-identical to the one-pass
+commands' (verified on the joint smoke's GLnexus VCF in both filter modes).
+
+The same run's `cohort_merge` spent 13h52m in one `trgt-lps` task over the
+whole cohort TRGT VCF (and its first attempt died at the catch-all two
+hours). Since 0.13.1 trgt-lps runs once per TRGT merge shard, `trgt_lps_threads`
+(4) each, and a gather task joins the tables in the cohort VCF's record
+order; with 26 shards the step is about half an hour.
+
+The cohort tasks of that run, for the policy's rows: GLnexus 54 minutes
+median and 89.7 of 119 GB at 864 samples (the formula 32 + 0.1 GB per
+sample held); the gVCF slices 10 minutes each (864 small jobs, queue-bound);
+svx 34 minutes per shard at 15.3 of 52 GB; the TRGT merge 20 minutes per
+shard. The campaign's clock was the GPU queue: Parabricks ran 14 minutes
+per sample and waited 48h39m in the median.
 
 ## The pangenome's sizes
 

@@ -44,6 +44,7 @@ Reading the tables:
 | `ugc_wgw_flagger_hmm` | 16 | 32G | assembly | cpu from workflow input default; cpu input: flagger_threads; memory from workflow input default; memory input: flagger_mem_gb; command uses threads |
 | `ugc_wgw_minimap2_align_asm` | 16 | 32G | assembly_call | cpu from workflow input default; cpu input: align_threads; memory from workflow input default; memory input: align_mem_gb; command uses threads |
 | `samtools_fasta` | 16 | 16G | assembly | cpu from input default; memory from input default; command uses threads |
+| `ugc_wgw_bcftools_split` | 16 | - | cohort_call | cpu from workflow input default; cpu input: split_threads; memory: "~{mem_gb} GiB" where mem_gb = split_mem = select_first([split_mem_gb, 8 + ceil(n_samples * 0.005 * split_threads)]); memory scales with N; command uses threads |
 | `ugc_wgw_cactus_chrom` | 16 | - | cohort_pangenome | cpu from workflow input default; cpu input: chrom_cpu; memory: "~{mem_gb} GiB" where mem_gb = chrom_mem = if chrom == "chrOther" then chrom_mem_gb_floor else ugc_wgw_pangenome_names.chrom_mem_gb[chrom]; command uses threads; command uses mem |
 
 ## ugc_wgw_singleton
@@ -119,7 +120,7 @@ Reading the tables:
 | `ugc_wgw_bcftools_slice` | 2 | 4G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/cohort/gvcf_slice.wdl:9` |
 | `glnexus` | 32 | - | cpu from workflow input default; cpu input: glnexus_threads; memory: "~{mem_gb} GiB" where mem_gb = glnexus_mem_gb = glnexus_mem = select_first([glnexus_mem_gb, 32 + ceil(n_samples * 0.1)]); memory scales with N; command uses threads; command uses mem | `workflows/overrides/glnexus.wdl:9` |
 | `ugc_wgw_bcftools_concat` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/cohort/concat.wdl:9` |
-| `ugc_wgw_bcftools_split` | 8 | - | cpu from workflow input default; cpu input: split_threads; memory: "~{mem_gb} GiB" where mem_gb = split_mem = select_first([split_mem_gb, 8 + ceil(n_samples * 0.04)]); memory scales with N; command uses threads | `workflows/ugc_wgw/cohort/split_by_sample.wdl:9` |
+| `ugc_wgw_bcftools_split` | 16 | - | cpu from workflow input default; cpu input: split_threads; memory: "~{mem_gb} GiB" where mem_gb = split_mem = select_first([split_mem_gb, 8 + ceil(n_samples * 0.005 * split_threads)]); memory scales with N; command uses threads | `workflows/ugc_wgw/cohort/split_by_sample.wdl:9` |
 | `split_vcf_by_sample` | 2 | 4G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/bcftools.wdl:224` |
 
 ## ugc_wgw_downstream
@@ -142,7 +143,7 @@ Reading the tables:
 
 ## ugc_wgw_cohort_merge
 
-10 tasks, in first-call order.
+11 tasks, in first-call order.
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
@@ -155,7 +156,8 @@ Reading the tables:
 | `ugc_wgw_svx_merge` | 8 | - | cpu from workflow input default; cpu input: svx_threads; memory: "~{mem_gb} GiB" where mem_gb = svx_mem = select_first([svx_mem_gb, 8 + ceil(n_samples * 0.05)]); memory scales with N; command uses threads | `workflows/ugc_wgw/cohort/svx.wdl:9` |
 | `ugc_wgw_bcftools_merge` | 4 | - | cpu from input default; memory: "~{mem_gb} GiB" where mem_gb = bcftools_merge_mem = select_first([bcftools_merge_mem_gb, 8 + ceil(n_samples * 0.02)]); memory scales with N; command uses threads | `workflows/ugc_wgw/cohort/sv_merge_bcftools.wdl:9` |
 | `ugc_wgw_trgt_merge` | 2 | - | cpu from workflow input default; cpu input: trgt_merge_threads; memory: "~{mem_gb} GiB" where mem_gb = trgt_merge_mem = select_first([trgt_merge_mem_gb, 8 + ceil(n_samples * 0.02)]); memory scales with N; command uses threads | `workflows/ugc_wgw/cohort/trgt_merge_lps.wdl:9` |
-| `ugc_wgw_trgt_lps` | 8 | 16G | cpu from workflow input default; cpu input: trgt_lps_threads; memory from input default; command uses threads | `workflows/ugc_wgw/cohort/trgt_merge_lps.wdl:122` |
+| `ugc_wgw_trgt_lps` | 4 | 16G | cpu from workflow input default; cpu input: trgt_lps_threads; memory from input default; command uses threads | `workflows/ugc_wgw/cohort/trgt_merge_lps.wdl:122` |
+| `ugc_wgw_trgt_lps_gather` | 1 | 2G | - | `workflows/ugc_wgw/cohort/trgt_merge_lps.wdl:217` |
 
 ## ugc_wgw_cohort_freq
 

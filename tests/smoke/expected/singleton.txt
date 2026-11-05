@@ -30,4 +30,6 @@ kivvi_d4z4_json/*.kivvi.d4z4.json
 kivvi_d4z4_vcf/*.kivvi.d4z4.vcf.gz
 mitorsaw_vcf/*.vcf.gz
 pbstarphase_summary/*
+somalier_extract/*.somalier
+somalier_sex_tsv/*.sex.tsv
 ugc_wgw_manifest/*.singleton.ugc_wgw_manifest.json

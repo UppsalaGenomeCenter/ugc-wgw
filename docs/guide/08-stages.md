@@ -34,8 +34,9 @@ flowchart TD
   subgraph a["upstream half"]
     ubam[/"HiFi uBAMs"/] --> pbmm2["pbmm2 align in 16 chunks, pbsamoa merge"]
     pbmm2 --> mos["mosdepth, inferred sex"]
+    mos --> sex["somalier extract, resolved sex"]
     pbmm2 --> dv["DeepVariant: VCF, gVCF"]
-    pbmm2 --> sd["sawfish discover and call"]
+    sex --> sd["sawfish discover and call"]
     pbmm2 --> pm["Paraphase, mitorsaw, kivvi"]
   end
   subgraph b["downstream half"]
@@ -79,9 +80,10 @@ flowchart TD
   pbmm2 --> merge["pbsamoa merge, if more than one"]
   merge --> bam[/"aligned BAM"/]
   bam --> mosdepth["mosdepth: depth, inferred sex"]
+  mosdepth --> sex["somalier extract and chrX call; resolved sex"]
   bam --> dv["DeepVariant: VCF and gVCF"]
   bam --> disc["sawfish discover"]
-  mosdepth --> disc
+  sex --> disc
   bam --> para["Paraphase"]
   bam --> mito["mitorsaw"]
   bam --> kiv["kivvi: KIV-2, D4Z4"]
@@ -110,6 +112,81 @@ Outputs: aligned BAM, optional aligned fail reads, mosdepth and
 `inferred_sex`, DeepVariant VCF and gVCF, `discover_tar`, optional per-sample
 SV set, Paraphase, mitorsaw, kivvi (the allele plots only when an allele was
 called; nothing when kivvi fails on low coverage), `msg` (chapter 07).
+
+Since 0.14 both per-sample stages make a somalier **extract** (a 200 KB
+genotype sketch at 17,766 informative sites, `<sample_id>.somalier`) right
+after mosdepth and **resolve the sex** the run uses from the sheet, the
+coverage inference and somalier's chrX heterozygosity call, in that order
+(chapter 02); sawfish and TRGT take the resolved value, and the outputs
+`resolved_sex`, `resolved_sex_source`, `somalier_sex`, `somalier_extract`
+and `somalier_sex_tsv` (one row of every source and statistic) record it.
+The three tasks sit at the end of the mosdepth branch, so a re-run of an
+older sample replays everything else from the call cache; sawfish onward
+recomputes only where the resolved sex differs from what coverage said.
+`declared_sex` (the sheet's, filled by the driver), `somalier_sex_min_x_sites`
+(50) and `somalier_sex_min_x_depth` (5.0) are the inputs.
+
+## `cohort_qc`
+
+The identity check of a frozen cohort, first of the cohort stages in both
+read modes and the one stage that never blocks the stages after it: it
+runs in minutes at any cohort size, and its findings go to the cohort page
+and the identity pass list (chapter 06) rather than into the gating rule.
+Everything in it is ours around somalier 0.3.7 (`workflows/ugc_wgw/qc/somalier.wdl`).
+
+```mermaid
+flowchart TD
+  ex[/"members' somalier extracts (singleton or upstream)"/] --> rel
+  subgraph legacy["per member whose run predates the extract"]
+    bam[/"aligned BAM"/] --> extract["somalier extract"]
+  end
+  extract --> rel
+  sheet[/"sample sheet: sex, father, mother"/] --> ped["PED"] --> rel["somalier relate: pairs, samples, groups, HTML"]
+  rel --> summ["summary, members, related pairs"]
+  kg[/"1000 Genomes set, if installed"/] --> anc["somalier ancestry"] --> summ
+  ex --> anc
+```
+
+Text version: `ugc_wgw_somalier_extract` for each member without an
+extract; `ugc_wgw_somalier_ped`; `ugc_wgw_somalier_relate` over every
+extract (`SOMALIER_SEED=1`, every pair reported); `ugc_wgw_somalier_ancestry`
+when `run_ancestry`; `ugc_wgw_qc_summary`; the manifest.
+
+| Driver fills | You may override |
+|---|---|
+| `cohort_id`, `sample_ids`, `somalier_files` (each member's extract, null where the run predates it), `aligned_bams` and `aligned_bam_indices` (for those members: the haplotagged BAM in standalone, the aligned BAM in joint; one warning names them), `sample_sexes` and `sample_sex_sources` (the resolved sex of each member's run), `father_ids`, `mother_ids` (the sheet), `run_ancestry` (on when the reference map's `somalier_1kg_tar` exists) | `min_depth` (7), `min_ab` (0.3), `report_all_pairs` (true), `relate_threads` (2), `relate_mem_gb` (4), `ancestry_mem_gb` (8), `extract_mem_gb` (2) |
+
+Outputs: `<cohort_id>.qc.GRCh38_GIABv3.` pairs, samples, groups and HTML
+(somalier's), the PED, the summary, members and related-pairs tables, the
+ancestry table and report when run (chapter 07). What the numbers mean:
+
+- **Relatedness** is somalier's coefficient from shared genotypes at the
+  sites: about 1 for the same individual, 0.5 for parent-child or
+  siblings, 0.25 for second degree, near 0 for unrelated people. The
+  cohort page bins every pair and flags `duplicate` at or above 0.9,
+  `related` (undeclared) at or above 0.2, `pedigree_mismatch` for a
+  declared parent-child pair outside 0.35–0.65 (chapter 07 lists the
+  thresholds). `expected_relatedness` in the pairs table is the pedigree's
+  (−1 when the PED says nothing about the pair).
+- **Sex** per member: somalier's chrX call next to the sheet and the
+  coverage inference, and the one the run used. On chr20-only data (the
+  smoke) somalier genotypes no chrX site and says nothing; on a genome it
+  has 365 sites.
+- **Heterozygosity ratio** `n_het / (n_het + n_hom_alt)`: a contaminated
+  sample or a mix of two has more heterozygous genotypes than the cohort;
+  `het_outlier` is median ± 3 scaled MADs across the cohort.
+- **Ancestry** is a projection onto the principal components of the 2,504
+  1000 Genomes samples with the nearest superpopulation (AFR, AMR, EAS,
+  EUR, SAS) and its probability: a description of genetic structure that
+  `cohort_freq`'s export uses as strata, not a statement about origin. It
+  needs the 83 MB reference set (`ugc-wgw-qc`), which the bundle carries
+  unless it was built `--without-ancestry`.
+
+A member whose run predates 0.14 (no extract among its outputs) is extracted
+inside the stage from its aligned BAM: 1 CPU, 2 GB, a few minutes, cached by
+BAM, sites file and reference, so it happens once however many cohorts the
+member joins. The stage therefore runs on the 864 cohort without
+re-running anything per sample (chapter 10).
 
 ## `cohort_call`
 
@@ -271,7 +348,7 @@ flowchart TD
   regions[/"scatter_regions.GRCh38_GIABv3.tsv"/] --> prep["ugc_wgw_regions_prepare"]
   sv[/"cohort_merge: merged SV VCF"/] --> f2
   jv[/"cohort_call or cohort_merge: joint small-variant VCF, if any"/] --> f1
-  sheet[/"sample sheet sex, else inferred sex"/] --> groups["sample to XX or XY"]
+  sheet[/"the sex each run resolved: sheet, else coverage, else somalier"/] --> groups["sample to XX or XY"]
   groups --> f1
   groups --> f2
   subgraph sm["per shard, if a joint VCF exists"]
@@ -292,7 +369,7 @@ VCF; `bcftools concat` of each; `ugc_wgw_freq_summary`; the manifest.
 
 | Driver fills | You may override |
 |---|---|
-| `cohort_id`, `sample_ids`, `sample_sexes` and `sample_sex_sources` (sheet sex, else the sex `singleton`/`upstream` inferred, else unknown), `sv_vcf` (+ index; from `cohort_merge`), `small_variant_vcf` (+ index; from `cohort_call` in joint mode, from `cohort_merge` with `run_glnexus` in standalone mode; absent otherwise) | `freq_threads` (2), `freq_mem_gb` (4) |
+| `cohort_id`, `sample_ids`, `sample_sexes` and `sample_sex_sources` (the sex each member's run resolved and where it came from: `declared`, `coverage` or `somalier`; for a run from before 0.14 the sheet, else the coverage inference), `sv_vcf` (+ index; from `cohort_merge`), `small_variant_vcf` (+ index; from `cohort_call` in joint mode, from `cohort_merge` with `run_glnexus` in standalone mode; absent otherwise) | `freq_threads` (2), `freq_mem_gb` (4) |
 
 Outputs: `<cohort_id>.freq.GRCh38.` small-variant VCF (only with a joint
 VCF), SV VCF, summary TSV, samples TSV (chapter 07). Resources are small:

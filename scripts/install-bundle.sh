@@ -1,13 +1,21 @@
 #!/usr/bin/env bash
 # Install a code bundle on the isolated HPC. See docs/DESIGN.md §14.
 #
-# Usage: install-bundle.sh --bundle <ugc-pacbio-wgw-X.Y.Z.tar> --prefix <root>
+# Usage: install-bundle.sh --bundle <ugc-pacbio-wgw-X.Y.Z[-delta].tar> --prefix <root>
 #            [--references <dir>] [--site <site.cfg>] [--python <exe>] [--activate] [--verify-only] [--force]
+#            [--sif-source <dir>]...
+#        install-bundle.sh --prefix <root> --dedupe-sif
 #
 # Steps:
-#   1. verify the tar's .sha256 (if present), unpack into <root>/.staging/, verify every manifest.json entry
-#   2. move to <root>/versions/<version>/{code,sif,wheels}; python3 -m venv --without-pip venv;
-#      bootstrap pip from the bundled wheel; pip install --no-index --find-links wheels -r requirements.txt
+#   1. verify the tar's .sha256 (if present), unpack into <root>/.staging-<pid>/, verify every manifest.json entry
+#   1b. the SIF store <root>/sif/<sha256>.sif, one copy of each image for every installed version: every image the
+#      manifest requires but the bundle does not ship (a delta bundle) must be in the store or adoptable by name and
+#      sha256 from <root>/current, the other versions/*/sif or a --sif-source directory (hardlinked into the store,
+#      copied across file systems); otherwise the install is refused before anything is placed (the HPC never pulls)
+#   2. move to <root>/versions/<version>/{code,sif,wheels}; shipped SIFs are linked into the store, the others
+#      linked from it (versions/<v>/sif/ holds hardlinks: miniwdl's image_cache stays per version);
+#      python3 -m venv --without-pip venv; bootstrap pip from the bundled wheel;
+#      pip install --no-index --find-links wheels -r requirements.txt
 #   3. render code/backends/hpc/miniwdl.cfg.template -> <root>/versions/<version>/miniwdl.cfg
 #      ({{SIF_CACHE_DIR}}, {{CALL_CACHE_DIR}}, {{TASK_CONCURRENCY}}, {{SLURM_EXTRA_ARGS}},
 #      {{TASK_RUNTIME_DEFAULTS}} from TASK_TIME_MINUTES + SLURM_PARTITION + SLURM_ACCOUNT (+ the _GPU pair),
@@ -23,13 +31,17 @@
 #      render references/ugc_wgw_ref_map.<build>.template.tsv into <root>/versions/<version>/references/
 #      and check it against the manifest, render the inputs templates into .../inputs/
 #   5. --verify-only: step 1, a temporary venv, the ugc_wgw_resources plugin entry point, `miniwdl check
-#      --strict` on every entrypoint, whether the reference data container is in the bundle; nothing installed
+#      --strict` on every entrypoint, whether the reference data container is in the bundle, and for a delta
+#      bundle whether every unshipped image is in the store or adoptable (sha256 verified); nothing installed
 #   6. --activate: <root>/current -> versions/<version> (never done implicitly)
 #   7. print the paths the driver needs and the `ugc-wgw init` command line
+#   --dedupe-sif (no --bundle): replace every versions/*/sif/*.sif that is its own copy by a hardlink into the
+#      store (adopting it when the store lacks its content); prints the bytes freed
 # Needs only bash, coreutils, tar, python3 (matching the bundle's python_version), apptainer for step 4. No network.
 set -euo pipefail
 
-bundle=""; prefix=""; references=""; site=""; python_exe=""; activate=0; verify_only=0; force=0
+bundle=""; prefix=""; references=""; site=""; python_exe=""; activate=0; verify_only=0; force=0; dedupe=0
+sif_sources=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --bundle) bundle="$2"; shift 2 ;;
@@ -37,20 +49,213 @@ while [ $# -gt 0 ]; do
     --references) references="$2"; shift 2 ;;
     --site) site="$2"; shift 2 ;;
     --python) python_exe="$2"; shift 2 ;;
+    --sif-source) sif_sources+=("$2"); shift 2 ;;
     --activate) activate=1; shift ;;
     --verify-only) verify_only=1; shift ;;
     --force) force=1; shift ;;
-    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+    --dedupe-sif) dedupe=1; shift ;;
+    -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
-if [ -z "$bundle" ] || [ -z "$prefix" ]; then echo "--bundle <tar> and --prefix <root> are required" >&2; exit 2; fi
-[ -f "$bundle" ] || { echo "bundle not found: $bundle" >&2; exit 1; }
+[ -n "$prefix" ] || { echo "--prefix <root> is required" >&2; exit 2; }
+if [ "$dedupe" -eq 0 ] && [ -z "$bundle" ]; then echo "--bundle <tar> and --prefix <root> are required (or --prefix with --dedupe-sif)" >&2; exit 2; fi
+[ -z "$bundle" ] || [ -f "$bundle" ] || { echo "bundle not found: $bundle" >&2; exit 1; }
 python_exe=${python_exe:-python3}
 command -v "$python_exe" >/dev/null || { echo "python not found: $python_exe" >&2; exit 1; }
 
 log() { echo "[install-bundle] $*" >&2; }
 die() { echo "[install-bundle] error: $*" >&2; exit 1; }
+
+# The SIF store: <prefix>/sif/<sha256>.sif, one file per distinct image content, shared by every installed
+# version; versions/<v>/sif/<miniwdl name>.sif are hardlinks into it (a relative symlink where the file system
+# refuses hardlinks). Modes: resolve (adopt what the bundle does not ship; refuse on anything missing),
+# dry-run (--verify-only: report, write nothing), link (step 2b), dedupe (--dedupe-sif).
+read -r -d '' SIF_STORE_PY <<'PYEOF' || true
+import hashlib, json, os, shutil, sys, time
+mode = sys.argv[1]
+def log(msg):
+    print("[install-bundle]   " + msg, file=sys.stderr)
+def sha256_of(path):
+    side = path + ".sha256"
+    try:
+        if os.path.isfile(side) and os.path.getmtime(side) >= os.path.getmtime(path):
+            tok = open(side).read().split()
+            if tok and len(tok[0]) == 64:
+                return tok[0], "sidecar"
+    except OSError:
+        pass
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 22), b""):
+            h.update(chunk)
+    return h.hexdigest(), "sha256"
+def gb(n):
+    return f"{n / 1e9:.2f} GB"
+def index_row(store, sha, size, sif, image, note):
+    try:
+        with open(os.path.join(store, "INDEX.tsv"), "a") as fh:
+            if fh.tell() == 0:
+                fh.write("# sha256\tsize\tsif\timage\tadded_by\tdate\n")
+            fh.write("\t".join([sha, str(size), sif, image, note, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())]) + "\n")
+    except OSError as exc:
+        log(f"warning: INDEX.tsv not updated: {exc}")
+def place(src, dst):
+    """Link src to dst (same file system), else copy through a partial file verified while copying; dst must not exist."""
+    try:
+        os.link(src, dst)
+        return "linked"
+    except FileExistsError:
+        return "exists"
+    except OSError:
+        pass
+    tmp = f"{dst}.partial-{os.getpid()}"
+    h = hashlib.sha256()
+    with open(src, "rb") as fi, open(tmp, "wb") as fo:
+        for chunk in iter(lambda: fi.read(1 << 22), b""):
+            h.update(chunk); fo.write(chunk)
+    want = os.path.basename(dst)[:-4] if dst.endswith(".sif") else ""
+    if want and len(want) == 64 and h.hexdigest() != want:
+        os.unlink(tmp)
+        raise SystemExit(f"[install-bundle] error: {src} changed while being copied")
+    os.replace(tmp, dst)
+    return "copied"
+def version_key(name):
+    out = []
+    for tok in name.replace("-", ".").split("."):
+        out.append((0, int(tok)) if tok.isdigit() else (1, tok))
+    return out
+
+if mode in ("resolve", "dry-run"):
+    manifest, store, prefix, version, plan_out, *sources = sys.argv[2:]
+    doc = json.load(open(manifest))
+    cand_dirs = []
+    cur = os.path.join(prefix, "current")
+    if os.path.islink(cur):
+        cand_dirs.append(os.path.join(os.path.realpath(cur), "sif"))
+    vdir = os.path.join(prefix, "versions")
+    if os.path.isdir(vdir):
+        for v in sorted(os.listdir(vdir), key=version_key, reverse=True):
+            cand_dirs.append(os.path.join(vdir, v, "sif"))
+    cand_dirs += sources
+    seen = set(); dirs = []
+    for d in cand_dirs:
+        d = os.path.realpath(d)
+        if d not in seen and os.path.isdir(d):
+            seen.add(d); dirs.append(d)
+    rows = []; n_store = n_adopt = n_ship = n_missing = 0; b_missing = 0; t0 = time.time(); hashed = 0
+    for img in doc.get("images", []):
+        name, sha, size, shipped = img["sif"], img.get("sha256"), img.get("size"), img.get("shipped", True)
+        if shipped:
+            rows.append((name, sha, size, "shipped", "bundle")); n_ship += 1; continue
+        sp = os.path.join(store, sha + ".sif")
+        if os.path.isfile(sp) and os.path.getsize(sp) == size:
+            if mode == "dry-run":
+                got, how = sha256_of(sp); hashed += size if how == "sha256" else 0
+                if got != sha:
+                    rows.append((name, sha, size, "corrupt", sp)); n_missing += 1; b_missing += size
+                    log(f"{name}: the store's {os.path.basename(sp)} does not hash to its name"); continue
+            rows.append((name, sha, size, "store", sp)); n_store += 1; continue
+        found = None
+        for d in dirs:
+            c = os.path.join(d, name)
+            if os.path.isfile(c) and os.path.getsize(c) == size:
+                got, how = sha256_of(c); hashed += size if how == "sha256" else 0
+                if got == sha:
+                    found = c; break
+        if found is None:
+            rows.append((name, sha, size, "missing", "")); n_missing += 1; b_missing += size; continue
+        if mode == "dry-run":
+            rows.append((name, sha, size, "adoptable", found)); n_adopt += 1; continue
+        os.makedirs(store, exist_ok=True)
+        how = place(found, sp)
+        index_row(store, sha, size, name, img.get("image", ""), f"{version} (from {os.path.dirname(found)})")
+        rows.append((name, sha, size, "adopted", found)); n_adopt += 1
+    with open(plan_out, "w") as fh:
+        for r in rows:
+            fh.write("\t".join(str(x) for x in r) + "\n")
+    elapsed = time.time() - t0
+    where = f" ({gb(hashed)} hashed in {elapsed:.0f} s)" if hashed else ""
+    if mode == "dry-run":
+        log(f"images: {len(rows)} required; {n_ship} shipped; {n_store} in the SIF store {store}; {n_adopt} adoptable from the installed versions"
+            + (" or --sif-source" if sources else "") + f"; {n_missing} missing{where}")
+    else:
+        log(f"1b. SIF store {store}: {n_ship} shipped by the bundle, {n_store} already in the store, {n_adopt} adopted from the installed versions"
+            + (" or --sif-source" if sources else "") + f", {n_missing} missing{where}")
+    if n_missing:
+        base = doc.get("base") or {}
+        log(f"error: {n_missing} image(s) this bundle needs are neither in it nor on this site ({store}, versions/*/sif"
+            + (", --sif-source" if sources else "") + f"), {gb(b_missing)}:")
+        for name, sha, size, status, _src in rows:
+            if status in ("missing", "corrupt"):
+                log(f"  {name} ({gb(size)}){' (corrupt in the store)' if status == 'corrupt' else ''}")
+        if base:
+            log(f"  This is a delta bundle (base {base.get('name')}). Install the full bundle (make-bundle.sh --images all) or a delta built against this site's manifest; the HPC never pulls.")
+        sys.exit(1)
+
+elif mode == "link":
+    dest, store, plan, version = sys.argv[2:6]
+    os.makedirs(store, exist_ok=True)
+    added = linked = symlinked = 0; b_added = 0
+    for line in open(plan):
+        name, sha, size, status, _src = line.rstrip("\n").split("\t")
+        size = int(size)
+        dsif = os.path.join(dest, "sif", name)
+        sp = os.path.join(store, sha + ".sif")
+        if status == "shipped":
+            how = place(dsif, sp)
+            if how == "exists":   # the store already had this content: keep one copy, relink the version's file to it
+                tmp = dsif + ".relink"
+                os.link(sp, tmp); os.replace(tmp, dsif)
+            else:
+                added += 1; b_added += size
+                index_row(store, sha, size, name, "", f"{version} (shipped)")
+        else:
+            try:
+                os.link(sp, dsif); linked += 1
+            except OSError:
+                os.symlink(os.path.relpath(sp, os.path.dirname(dsif)), dsif); symlinked += 1
+    for line in open(plan):
+        name, sha, size, status, _src = line.rstrip("\n").split("\t")
+        p = os.path.join(dest, "sif", name)
+        if not os.path.isfile(p) or os.path.getsize(p) != int(size):
+            sys.exit(f"[install-bundle] error: {p} is missing or has the wrong size after linking")
+    n_store = len([f for f in os.listdir(store) if f.endswith(".sif")])
+    b_store = sum(os.path.getsize(os.path.join(store, f)) for f in os.listdir(store) if f.endswith(".sif"))
+    log(f"2b. SIF store {store}: {added} added ({gb(b_added)}), {linked} linked from the store"
+        + (f", {symlinked} symlinked (no hardlinks on this file system: the store must stay)" if symlinked else "")
+        + f"; {n_store} images, {gb(b_store)} in the store")
+
+elif mode == "dedupe":
+    prefix, store = sys.argv[2:4]
+    os.makedirs(store, exist_ok=True)
+    vdir = os.path.join(prefix, "versions")
+    freed = adopted = relinked = 0
+    for v in sorted(os.listdir(vdir)) if os.path.isdir(vdir) else []:
+        sdir = os.path.join(vdir, v, "sif")
+        if not os.path.isdir(sdir):
+            continue
+        for name in sorted(os.listdir(sdir)):
+            p = os.path.join(sdir, name)
+            if not name.endswith(".sif") or os.path.islink(p) or not os.path.isfile(p) or os.stat(p).st_nlink > 1:
+                continue
+            sha, _how = sha256_of(p)
+            sp = os.path.join(store, sha + ".sif")
+            if os.path.isfile(sp):
+                if os.path.getsize(sp) != os.path.getsize(p):
+                    log(f"warning: {sp} has the size of neither {p}; skipped"); continue
+                tmp = p + ".relink"
+                try:
+                    os.link(sp, tmp); os.replace(tmp, p)
+                except OSError as exc:
+                    log(f"warning: {p}: {exc}"); continue
+                freed += os.path.getsize(sp); relinked += 1
+            else:
+                how = place(p, sp)
+                index_row(store, sha, os.path.getsize(p), name, "", f"{v} (dedupe)")
+                adopted += 1
+    log(f"dedupe: {relinked} file(s) replaced by store hardlinks ({gb(freed)} freed), {adopted} adopted into {store}")
+PYEOF
 fs_id() { stat -c %d "$1" 2>/dev/null || echo "?"; }
 md5_is() { [ "$(md5sum "$1" | cut -d' ' -f1)" = "$2" ]; }
 warn_fs() {  # $1 label, $2 path, $3 label, $4 path: warn when the two paths are on different file systems
@@ -64,6 +269,14 @@ warn_fs() {  # $1 label, $2 path, $3 label, $4 path: warn when the two paths are
 mkdir -p "$prefix"
 prefix=$(cd "$prefix" && pwd)
 references=${references:-$prefix/references}
+store="$prefix/sif"
+
+if [ "$dedupe" -eq 1 ]; then
+  [ -z "$bundle" ] || die "--dedupe-sif runs on its own (no --bundle)"
+  log "dedupe: hashing every versions/*/sif/*.sif that is its own copy under $prefix"
+  "$python_exe" -c "$SIF_STORE_PY" dedupe "$prefix" "$store"
+  exit 0
+fi
 
 # ---- 1. verify and unpack ----------------------------------------------
 if [ -f "$bundle.sha256" ]; then
@@ -72,9 +285,10 @@ if [ -f "$bundle.sha256" ]; then
 else
   log "1. no .sha256 next to the bundle; relying on manifest.json only"
 fi
-staging="$prefix/.staging"
+staging="$prefix/.staging-$$"
 rm -rf "$staging"
 mkdir -p "$staging"
+trap 'rm -rf "$staging"' EXIT
 tar -C "$staging" -xf "$bundle"
 name=$(ls "$staging")
 if [ -z "$name" ] || [ ! -d "$staging/$name" ]; then die "unexpected bundle layout"; fi
@@ -87,6 +301,15 @@ src = sys.argv[1]
 doc = json.load(open(os.path.join(src, "manifest.json")))
 bad = []
 seen = set()
+if doc.get("schema", 1) > 2:
+    bad.append(f"bundle manifest schema {doc['schema']} is newer than this installer understands (2); use the installer shipped with the bundle")
+for img in doc.get("images", []):
+    shipped = img.get("shipped", True)
+    present = any(f["path"] == "sif/" + img["sif"] for f in doc["files"])
+    if shipped and not present:
+        bad.append(f"image marked shipped but absent from files: {img['sif']}")
+    if not shipped and present:
+        bad.append(f"image marked not shipped but present in files: {img['sif']}")
 for f in doc["files"]:
     p = os.path.join(src, f["path"])
     seen.add(f["path"])
@@ -103,7 +326,7 @@ for f in doc["files"]:
 for root, _, names in os.walk(src):
     for fn in names:
         rel = os.path.relpath(os.path.join(root, fn), src)
-        if rel != "manifest.json" and rel not in seen:
+        if rel not in ("manifest.json", "DELTA-BUNDLE") and rel not in seen:
             bad.append(f"not in manifest: {rel}")
 want = doc["python_version"]
 have = f"{sys.version_info[0]}.{sys.version_info[1]}"
@@ -112,9 +335,15 @@ if want != have:
 if bad:
     print("\n".join("[install-bundle]   " + b for b in bad), file=sys.stderr)
     sys.exit(1)
-print(f"[install-bundle]   {len(doc['files'])} files OK; {len(doc.get('images', []))} images; version {doc['ugc_pacbio_wgw']['version']}", file=sys.stderr)
+imgs = doc.get("images", [])
+shipped = sum(1 for i in imgs if i.get("shipped", True))
+base = doc.get("base") or {}
+print(f"[install-bundle]   {len(doc['files'])} files OK; {len(imgs)} images ({shipped} shipped"
+      + (f", {len(imgs) - shipped} to be taken from the site's SIF store; delta on {base.get('name')}" if base else "")
+      + f"); version {doc['ugc_pacbio_wgw']['version']}", file=sys.stderr)
 PYEOF
 version=$("$python_exe" -c 'import json,sys; print(json.load(open(sys.argv[1]))["ugc_pacbio_wgw"]["version"])' "$src/manifest.json")
+sif_plan="$staging/sif-plan.tsv"
 
 make_venv() {  # $1 = venv dir, $2 = wheels dir
   "$python_exe" -m venv --without-pip "$1"
@@ -167,6 +396,11 @@ if [ "$verify_only" -eq 1 ]; then
   else
     log "   FAIL ugc-wgw-miniwdl incomplete in the venv (task plugin, container backend or exec script missing)"; status=1
   fi
+  if "$python_exe" -c 'import json,sys; sys.exit(0 if all(i.get("shipped", True) for i in json.load(open(sys.argv[1])).get("images", [])) else 1)' "$src/manifest.json"; then
+    log "   images: all $("$python_exe" -c 'import json,sys; print(len(json.load(open(sys.argv[1])).get("images", [])))' "$src/manifest.json") shipped"
+  elif ! "$python_exe" -c "$SIF_STORE_PY" dry-run "$src/manifest.json" "$store" "$prefix" "$version" "$sif_plan" ${sif_sources[@]+"${sif_sources[@]}"}; then
+    log "   FAIL image(s) not shipped and not on this site; a delta bundle needs a site that already holds them (install the full bundle there; on the dev machine verify with --sif-source <sif cache>)"; status=1
+  fi
   rm -rf "$staging"
   [ "$status" -eq 0 ] || die "verify-only failed"
   log "verify-only passed for $name"
@@ -199,14 +433,20 @@ if [ -n "$TASK_SCRATCH_ENV" ] && ! printf '%s' "$TASK_SCRATCH_ENV" | grep -qE '^
   die "TASK_SCRATCH_ENV must be an environment variable name (TMPDIR, SNIC_TMP) or empty, got '$TASK_SCRATCH_ENV'"
 fi
 
-# ---- 2. place and venv ---------------------------------------------------
+# ---- 1b. SIF store: every image the bundle needs but does not ship must be on this site ------
 dest="$prefix/versions/$version"
+if [ -e "$dest" ] && [ "$force" -ne 1 ]; then die "$dest exists (use --force to replace)"; fi
+"$python_exe" -c "$SIF_STORE_PY" resolve "$src/manifest.json" "$store" "$prefix" "$version" "$sif_plan" ${sif_sources[@]+"${sif_sources[@]}"} \
+  || die "the bundle cannot be installed here (see above)"
+
+# ---- 2. place and venv ---------------------------------------------------
 if [ -e "$dest" ]; then
-  [ "$force" -eq 1 ] || die "$dest exists (use --force to replace)"
   rm -rf "$dest"
 fi
 mkdir -p "$prefix/versions"
+mv "$sif_plan" "$staging/sif-plan.keep.tsv"
 mv "$src" "$dest"
+"$python_exe" -c "$SIF_STORE_PY" link "$dest" "$store" "$staging/sif-plan.keep.tsv" "$version" || die "linking the SIFs failed"
 rm -rf "$staging"
 log "2. venv from bundled wheels"
 make_venv "$dest/venv" "$dest/wheels"
@@ -315,6 +555,8 @@ with open(sys.argv[3], "w") as out:
         if key == "hifi-wdl-resources":
             continue
         out.write("\x1f".join(["files", key, x["install_subdir"], " ".join(f["name"] for f in x["files"])]) + "\n")
+        for ft in x.get("fetched", []):   # downloaded into the bundle's references/ by make-bundle.sh (absent with --without-ancestry)
+            out.write("\x1f".join(["fetched", key, x["install_subdir"], ft["name"], ft["sha256"], ft.get("optional", "")]) + "\n")
         for bt in x.get("built", []):   # built by this installer, not shipped
             out.write("\x1f".join(["built", key, x["install_subdir"], bt["name"], bt["md5"], bt["image"], images.get(bt["image"], ""),
                                    bt["source_file"], bt.get("resources", ""), bt["command"]]) + "\n")
@@ -368,6 +610,25 @@ while IFS=$'\x1f' read -r kind entry subdir names _; do
     log "   $entry installed to $references/$subdir ($names)"
   else
     log "   warning: $references not writable; copy code/references/{$names} to $references/$subdir/ yourself"
+  fi
+done < "$plan"
+# fetched files (references.lock <entry>.fetched: the 1000 Genomes somalier set): copied from the bundle's references/ and
+# verified by sha256; a bundle built with --without-ancestry lacks them, which the map then names as absent paths
+while IFS=$'\x1f' read -r kind entry subdir name sha optional; do
+  [ "$kind" = fetched ] || continue
+  target=$references/$subdir/$name
+  if [ -f "$target" ] && [ "$(sha256sum "$target" | cut -d' ' -f1)" = "$sha" ]; then
+    log "   $name present and verified ($entry)"
+  elif [ -f "$dest/references/$name" ]; then
+    [ "$(sha256sum "$dest/references/$name" | cut -d' ' -f1)" = "$sha" ] || die "$dest/references/$name does not match references.lock (sha256 $sha)"
+    if mkdir -p "$references/$subdir" 2>/dev/null && [ -w "$references/$subdir" ]; then
+      cp "$dest/references/$name" "$target"
+      log "   $name installed to $references/$subdir ($entry)"
+    else
+      log "   warning: $references/$subdir not writable; copy $dest/references/$name there yourself"
+    fi
+  else
+    log "   warning: $name not in the bundle (make-bundle.sh --without-ancestry${optional:+; optional: $optional}): the map names it, the stage that needs it skips that step"
   fi
 done < "$plan"
 # built files (references.lock <entry>.built: the reference's pbmm2 index, the assembly stages' decoy-free fasta): built once
@@ -461,6 +722,7 @@ code=$dest/code
 miniwdl=$dest/venv/bin/miniwdl
 cfg=$dest/miniwdl.cfg
 sif_cache=$dest/sif
+sif_store=$store
 references=$tree
 ref_map=$ref_map
 inputs_templates=$dest/inputs

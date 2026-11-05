@@ -109,7 +109,9 @@ missing or misnamed: compare the image string in the task's `command` (or the
 workflow's `runtime` block) with `ls <prefix>/versions/<v>/sif/`. A missing
 image means the bundle was built without it (`--images ugc-wgw` or `none`) or a
 new tool was added without repopulating the cache; the maintainer rebuilds the
-bundle. A different registry name in the rendered inputs
+bundle. (A delta bundle cannot leave an image out: the installer refuses it
+when the site's SIF store lacks one, so a missing SIF under a version means
+the directory, or the store, was edited by hand; chapter 04.) A different registry name in the rendered inputs
 (`ugc_wgw_container_registry`) than the one the SIFs were cached under has the
 same symptom for the svx and trgt-lps tasks of `cohort_merge` and the hifiasm
 and minimap2 tasks of `assembly` and `assembly_call`.

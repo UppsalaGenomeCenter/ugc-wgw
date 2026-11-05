@@ -48,7 +48,9 @@ ugc-wgw inputs <subject_id> --stage S [--mode M] [--cohort ID]
 ugc-wgw progress [--mode M] [--stage S] [--samples ... | --cohort ID] [--json]  # done/total per stage, ETA
 ugc-wgw report [--mode M] [--cohort ID] [--any-version] [--sizes] [--price K=V ...] [--basis allocated|requested] [--out FILE]   # self-contained HTML run summary
 ugc-wgw summary [--samples ... | --cohort ID] [--mode M] [--any-version] [--out-dir DIR] [--force] [--pass-list FILE]
-            [--threshold KEY=VALUE ...] [--jobs N]  # per-sample and cohort analysis pages (what was found, QC flags)
+            [--pass-on assembly|identity|all] [--threshold KEY=VALUE ...] [--jobs N]  # per-sample and cohort analysis pages (what was found, QC flags)
+ugc-wgw export --cohort ID [--domains D[,D...]] [--mode M] [--any-version] [--out DIR] [--strata none|sex|ancestry|all]
+            [--force] [--threshold KEY=VALUE ...] [--jobs N] [--json]   # the cohort's tables as TSV files, one per domain
 ugc-wgw resources [--stage S] [--changed] [--json]     # what each task asks SLURM for: declared → site caps → policy
 ugc-wgw stage-inputs [--stage S | --mode M] [--nested] [--json]   # every workflow input: default, who fills it, your override
 ugc-wgw usage [--by stage|task|subject|attempt|all] [--top N] [--sizes] [--price K=V ...] [--basis allocated|requested]
@@ -61,7 +63,10 @@ by meaning on a terminal (the file log stays plain; `NO_COLOR` is honoured).
 `ugc-wgw report` is the technical view of a campaign (runs, timings, failures);
 `ugc-wgw summary` is the analysis view (coverage, variants, phasing, repeats,
 methylation, targeted callers, software versions) rendered from per-sample
-JSON digests under `<results>/reports/summary/` (guide chapter 07).
+JSON digests under `<results>/reports/summary/` (guide chapter 07);
+`ugc-wgw export` writes the same numbers as TSV tables per domain for
+joining (members, coverage, variants, phasing, copy number, PGx, HLA,
+mitochondria, assembly, and the cohort stages' own tables).
 
 ## Samples TSV
 

@@ -54,6 +54,8 @@ with open(sys.argv[2], "w") as out:   # the other entries: shipped files and fil
         out.write("\x1f".join(["files", key, x["install_subdir"], " ".join(f["name"] for f in x["files"])]) + "\n")
         for bt in x.get("built", []):
             out.write("\x1f".join(["built", key, x["install_subdir"], bt["name"], bt["md5"], bt["image"], bt["source_file"], bt["command"]]) + "\n")
+        for ft in x.get("fetched", []):
+            out.write("\x1f".join(["fetched", key, x["install_subdir"], ft["name"], ft["sha256"], ft["url"]]) + "\n")
 for k, v in {"image": r["source"], "subdir": r["install_subdir"], "data_path": r["container_paths"]["data"],
              "manifest_path": r["container_paths"]["manifest"]}.items():
     print(f"{k}={shlex.quote(v)}")
@@ -99,6 +101,22 @@ PY
     [ "$kind" = files ] || continue
     mkdir -p "$smoke/references/$xsubdir"
     for name in $names; do cp "$repo/references/$name" "$smoke/references/$xsubdir/"; done
+  done < "$plan"
+  # fetched reference files (references.lock fetched[]: the 1000 Genomes somalier set), downloaded as make-bundle.sh does
+  local fsha furl
+  while IFS=$'\x1f' read -r kind entry xsubdir name fsha furl; do
+    [ "$kind" = fetched ] || continue
+    target=$smoke/references/$xsubdir/$name
+    if [ -f "$target" ] && [ "$(sha256sum "$target" | cut -d' ' -f1)" = "$fsha" ] && [ "$force" -eq 0 ]; then
+      log "references: $name present and verified"
+      continue
+    fi
+    mkdir -p "$smoke/references/$xsubdir"
+    log "references: fetching $name ($entry) from $furl"
+    curl -fsSL -o "$target.partial" "$furl"
+    [ "$(sha256sum "$target.partial" | cut -d' ' -f1)" = "$fsha" ] || { echo "[prepare] fetched $name differs from references.lock" >&2; exit 1; }
+    mv "$target.partial" "$target"
+    log "references: $name fetched and verified"
   done < "$plan"
   # derived reference files (references.lock built[]), built once as install-bundle.sh does and md5-verified
   while IFS=$'\x1f' read -r kind entry xsubdir name md5 bimage source command; do

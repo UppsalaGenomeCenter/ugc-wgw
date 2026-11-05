@@ -12,9 +12,11 @@ shared by all versions.
 
 | File | Purpose |
 |---|---|
-| `ugc-pacbio-wgw-<v>.tar` | The bundle. About 27 GB with all images (33 in 0.11.0), the reference data container among them. |
-| `ugc-pacbio-wgw-<v>.tar.sha256` | Checksum of the tar; the installer verifies it when present. |
-| `install-bundle.sh` | The installer, shipped loose so it can run before anything is unpacked. It is also inside the tar. |
+| `ugc-pacbio-wgw-<v>.tar` | The full bundle: code, every container image as a SIF (32 in 0.13.1, the reference data container among them), the engine's wheels. About 27 GB. The first install of a prefix needs one. |
+| `ugc-pacbio-wgw-<v>-delta.tar` | A delta bundle: the same code and wheels, but only the SIFs that changed since the bundle it was built against (`base` in its manifest). About 10 MB when no image changed. It installs only on a prefix whose SIF store already holds the other images (section "The SIF store"). |
+| `ugc-pacbio-wgw-<v>[-delta].tar.sha256` | Checksum of the tar; the installer verifies it when present. |
+| `ugc-pacbio-wgw-<v>[-delta].manifest.json` | The tar's `manifest.json`, loose: what the bundle requires and what it ships; the next delta is built against it. |
+| `install-bundle.sh` | The installer, shipped loose so it can run before anything is unpacked. It is also inside the tar. Use the one shipped with the bundle: an older installer refuses a delta bundle. |
 
 ## Prerequisites on the HPC
 
@@ -41,17 +43,17 @@ flowchart LR
     reg --> build
   end
   subgraph share["transfer share"]
-    tar["bundle tar (code, SIFs incl. the reference data container, wheels), .sha256, install-bundle.sh"]
+    tar["bundle tar (code, wheels, the SIFs the site lacks), .sha256, manifest.json, install-bundle.sh"]
   end
   subgraph hpc["HPC, no network"]
     subgraph login["login node or workflow job"]
       inst["install-bundle.sh"]
-      prefix["prefix/versions/v, prefix/current, prefix/call_cache, prefix/references"]
+      prefix["prefix/versions/v, prefix/sif (one copy of each image), prefix/current, prefix/call_cache, prefix/references"]
       drv["ugc-wgw submit"]
       mw["miniwdl run, one per subject and stage"]
     end
     subgraph nodes["compute nodes"]
-      job["sbatch --wait per task, apptainer exec on a SIF from prefix/versions/v/sif"]
+      job["sbatch --wait per task, apptainer exec on a SIF from prefix/versions/v/sif (hardlinks into prefix/sif)"]
     end
     res["results/samples/id/v/stage/attempt-N"]
   end
@@ -64,9 +66,10 @@ Text version:
 ```
 dev machine (internet)      transfer share                 HPC (no network)
 make-bundle.sh ───────────► bundle tar + .sha256 ─────────► install-bundle.sh
-  pulls images to SIFs      install-bundle.sh                 ├─► <prefix>/versions/<v>/
-  (reference data container                                   └─► <prefix>/references/
-   among them)                                                    (copied out of the SIF once)
+  pulls images to SIFs      + manifest.json                   ├─► <prefix>/versions/<v>/ (sif/ = hardlinks)
+  (reference data container install-bundle.sh                 ├─► <prefix>/sif/ (one copy of each image)
+   among them; a delta      (a delta tar ships only           └─► <prefix>/references/
+   ships only what changed)  the SIFs the site lacks)             (copied out of the SIF once)
   downloads wheels
                                                             ugc-wgw submit (login node / job)
                                                               └─► miniwdl run ×N
@@ -204,13 +207,19 @@ tasks would need more than this, is in chapter 12.
 ./install-bundle.sh --bundle ugc-pacbio-wgw-0.11.0.tar --prefix /proj/ugc --verify-only
 ```
 
-This checks the tar's `.sha256`, unpacks into `<prefix>/.staging/`, verifies
-the size and sha256 of every file against `manifest.json` (an unlisted file is
-an error), checks the Python version, builds a throwaway virtual environment
-from the wheels, runs `miniwdl check --strict` on every entrypoint, checks
-that the `ugc_wgw_resources` task plugin is registered in that environment,
-prints the engine and plugin versions, says whether the reference data
-container is in the bundle, and removes the staging directory. It ends with
+This checks the tar's `.sha256`, unpacks into `<prefix>/.staging-<pid>/`,
+verifies the size and sha256 of every file against `manifest.json` (an
+unlisted file is an error), checks the Python version, builds a throwaway
+virtual environment from the wheels, runs `miniwdl check --strict` on every
+entrypoint, checks that the `ugc_wgw_resources` task plugin is registered in
+that environment, prints the engine and plugin versions, says whether the
+reference data container is in the bundle, and removes the staging
+directory. For a delta bundle it also reports the images the bundle needs
+but does not ship, as a line `images: 32 required; 0 shipped; 32 in the SIF
+store /proj/ugc/sif (sha256 verified); 0 missing` (or `adoptable from the
+installed versions` on a prefix from before the store existed, which costs
+one read of every SIF); a missing image fails the verification, naming the
+SIF, because a delta can only be installed where its base was. It ends with
 `verify-only passed for ugc-pacbio-wgw-0.11.0`.
 
 ### 4. Install and activate
@@ -222,8 +231,14 @@ container is in the bundle, and removes the staging directory. It ends with
 
 The installer refuses to overwrite an existing `<prefix>/versions/<v>` unless
 `--force` is given. `--activate` repoints `<prefix>/current`; without it the
-version is installed but not current. The last lines of the output are the
-paths the driver needs and the `ugc-wgw init` line to copy:
+version is installed but not current. Before anything is placed, the
+installer settles the images (step 1b): every SIF the bundle ships is linked
+into the store `<prefix>/sif/`, and every one it requires but does not ship
+is linked from the store, or adopted into it from an installed version's
+`sif/` (or a `--sif-source DIR`) after its sha256 was verified; an image
+that is nowhere stops the install before `versions/<v>` exists. The last
+lines of the output are the paths the driver needs and the `ugc-wgw init`
+line to copy:
 
 ```
 install_dir=/proj/ugc/versions/0.11.0
@@ -231,6 +246,7 @@ code=/proj/ugc/versions/0.11.0/code
 miniwdl=/proj/ugc/versions/0.11.0/venv/bin/miniwdl
 cfg=/proj/ugc/versions/0.11.0/miniwdl.cfg
 sif_cache=/proj/ugc/versions/0.11.0/sif
+sif_store=/proj/ugc/sif
 references=/proj/ugc/references/hifi-wdl-resources-v4.0.0-GRCh38_GIABv3
 ref_map=/proj/ugc/versions/0.11.0/references/ugc_wgw_ref_map.GRCh38_GIABv3.tsv
 inputs_templates=/proj/ugc/versions/0.11.0/inputs
@@ -251,9 +267,12 @@ again with `--force`.
 
 ```
 <prefix>/
+├── sif/                      the SIF store: one <sha256>.sif per distinct image content, shared by every
+│                             version (INDEX.tsv lists what was added when and by which version)
 ├── versions/<v>/
 │   ├── code/                 the repository at the tagged commit (workflows/, vendor/, bin/, docs/)
-│   ├── sif/                  one .sif per container image, named by miniwdl's rule
+│   ├── sif/                  one .sif per container image this version uses, named by miniwdl's rule:
+│                             a hardlink into <prefix>/sif (a relative symlink where hardlinks are refused)
 │   ├── wheels/               miniwdl, miniwdl-slurm, their dependencies, pip, the ugc-wgw-miniwdl plugin
 │   ├── venv/                 python3 -m venv with the wheels installed; venv/bin/miniwdl
 │   ├── miniwdl.cfg           rendered from backends/hpc/miniwdl.cfg.template and the site file
@@ -289,7 +308,7 @@ and the next run picks it up.
 | `[file_io] output_hardlinks`, `delete_work` | `true`, `success` | Work directories of successful runs are reclaimed; failed runs keep theirs for diagnosis. A hardlink that would cross file systems becomes a symlink (section 1). |
 | `[call_cache] dir` | site value | Shared across versions. |
 | `[singularity] exe` | `["apptainer"]` | |
-| `[singularity] image_cache` | `<prefix>/versions/<v>/sif` | Every image must already be here; miniwdl never pulls. |
+| `[singularity] image_cache` | `<prefix>/versions/<v>/sif` | Every image must already be here; miniwdl never pulls. The files are hardlinks into the store `<prefix>/sif`, so a version costs no image space of its own. |
 | `[singularity] run_options` | `--containall --no-mount hostfs --env APPTAINER_BIND= --env SINGULARITY_BIND=`, plus `--nv` with `SINGULARITY_NV=1` | `--nv` is what lets the GPU DeepVariant and Parabricks tasks see a device (chapter 12). The two `--env` empty the bind list Apptainer exports into every container: miniwdl binds every input file, and past about 500 files that one string exceeds the kernel's 128 KB limit per environment string, so the container's `/bin/sh` cannot start ("argument list too long"). Nothing of ours reads the variables; `ugc-wgw resources` warns when they are missing. |
 | `[scheduler] container_backend` | `ugc_slurm_singularity` | miniwdl-slurm's `slurm_singularity` plus the node-local scratch below; identical to it when `scratch_env` is empty. |
 | `[ugc_wgw] scratch_env`, `scratch_mount` | `TASK_SCRATCH_ENV`, `/mnt/scratch` | The job variable naming the node's per-job scratch directory and where it is bound inside the containers. |
@@ -305,3 +324,39 @@ How a SIF is named: `docker://` plus the image reference with every `/` and
 becomes `docker___quay.io_pacbio_glnexus@sha256_ce6f....sif`. The container
 registry names written into the rendered inputs must therefore match the
 names the images were cached under; the installer takes them from the bundle.
+
+## The SIF store
+
+`<prefix>/sif/` holds one copy of each image for every version installed
+in the prefix, named by its content: `<sha256>.sif`. A version's
+`versions/<v>/sif/<miniwdl name>.sif` is a hardlink to that copy, so the
+same image installed in seven versions takes the space of one, and an image
+that a tag re-pushed with different content (the DeepVariant and Parabricks
+tags) keeps both contents apart. `INDEX.tsv` in the store records what was
+added when and by which install; the directory and each version's
+`manifest.json` are the truth, the index is for reading.
+
+That is what makes delta bundles possible. A release whose images did not
+change ships about 10 MB (`ugc-pacbio-wgw-<v>-delta.tar`); the installer
+links every required image from the store and refuses, before placing
+anything, a delta whose images are not all on the site. A prefix installed
+before the store existed is adopted at the first install with the new
+installer: for every image the bundle does not ship, the installer looks
+for a SIF of that name under `current`'s `sif/`, the other
+`versions/*/sif/` (newest first) and any `--sif-source DIR`, hashes it, and
+links a match into the store (copying it when the directory is on another
+file system). The old version is untouched; the pass reads every SIF once
+(26 GB, a few minutes on the login node) and prints how long it took.
+
+Disk: a version from a delta costs its code, wheels and venv (about 100 MB)
+plus the images that changed. Removing `versions/<old>/` frees what no
+other version links; the store keeps an image until the last version using
+it is gone, after which `find <prefix>/sif -maxdepth 1 -name '*.sif'
+-links 1` lists the unreferenced copies, safe to delete. Older versions
+that still carry their own copies are deduplicated by
+`install-bundle.sh --prefix <prefix> --dedupe-sif` (no `--bundle`): every
+`versions/*/sif/*.sif` with no other link is hashed and replaced by a
+hardlink into the store, or adopted; it prints the bytes freed. Deleting
+the store itself is safe when every version holds hardlinks (the next
+install re-adopts what it needs) and breaks every version that holds
+symlinks, which the installer warned about.

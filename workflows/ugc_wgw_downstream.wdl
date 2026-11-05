@@ -24,7 +24,7 @@ workflow ugc_wgw_downstream {
       description: "Sample ID"
     }
     sex: {
-      description: "Sex used by TRGT and the stats table: pass the inferred_sex output of the upstream stage (MALE, FEMALE, or empty for XX)",
+      description: "The sample's sex for TRGT's karyotype: upstream's resolved_sex (declared, else coverage, else somalier; the driver uses inferred_sex for an upstream run from before 0.14.0); MALE, FEMALE or empty",
       choices: [
         "MALE",
         "FEMALE",

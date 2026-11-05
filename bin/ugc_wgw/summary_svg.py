@@ -113,7 +113,10 @@ def hist(bins: list[tuple[str, float]], *, width: int = 560, height: int = 170, 
     right = 40 if cumulative else 8
     plot_w, plot_h = width - left - right, height - bottom - top_pad
     vmax = max(finite(v) for _, v in bins) or 1.0
-    ticks = nice_ticks(0, vmax, 4)
+    if vmax <= 8 and all(float(finite(v)).is_integer() for _, v in bins):
+        ticks = [float(t) for t in range(0, int(vmax) + 1)]   # counts: one tick per integer, no repeated labels
+    else:
+        ticks = nice_ticks(0, vmax, 4)
     vmax = max(vmax, ticks[-1])
     slot = plot_w / len(bins)
     bw = slot * 0.8
@@ -373,3 +376,42 @@ def legend(items: list[tuple[str, str]]) -> str:
         parts.append(f'<rect class="{cls}" x="{x}" y="3" width="10" height="10"/><text x="{x + 13}" y="12">{esc(label)}</text>')
         x += 13 + 7 * len(label) + 14
     return _svg(x, 16, "".join(parts), cls="legend")
+
+
+def scatter(background: list[tuple[str, float, float]], points: list[tuple[str, float, float, str]], *,
+            width: int = 460, height: int = 320, x_label: str = "PC1", y_label: str = "PC2") -> str:
+    """A PCA plane: the background set as small points coloured by label (SERIES classes), the members as larger
+    points with their id and label on hover. background: (label, x, y); points: (id, x, y, label)."""
+    allx = [x for _, x, _ in background] + [x for _, x, _, _ in points]
+    ally = [y for _, _, y in background] + [y for _, _, y, _ in points]
+    if not allx:
+        return "<p class='muted'>No data.</p>"
+    left, bottom, top, right = 44, 28, 8, 8
+    plot_w, plot_h = width - left - right, height - top - bottom
+    lo_x, hi_x, lo_y, hi_y = min(allx), max(allx), min(ally), max(ally)
+    if hi_x <= lo_x:
+        lo_x, hi_x = lo_x - 1.0, hi_x + 1.0
+    if hi_y <= lo_y:
+        lo_y, hi_y = lo_y - 1.0, hi_y + 1.0
+    pad_x, pad_y = (hi_x - lo_x) * 0.05, (hi_y - lo_y) * 0.05
+    lo_x, hi_x, lo_y, hi_y = lo_x - pad_x, hi_x + pad_x, lo_y - pad_y, hi_y + pad_y
+
+    def sx(v: float) -> float:
+        return left + (v - lo_x) / (hi_x - lo_x) * plot_w
+
+    def sy(v: float) -> float:
+        return top + (hi_y - v) / (hi_y - lo_y) * plot_h
+
+    labels = sorted({lab for lab, _, _ in background} | {lab for _, _, _, lab in points if lab})
+    cls_of = {lab: SERIES[i % len(SERIES)] for i, lab in enumerate(labels)}
+    parts = [f'<rect class="plot" x="{left}" y="{top}" width="{plot_w}" height="{plot_h}" fill="none"/>',
+             f'<line class="axis" x1="{left}" y1="{top + plot_h}" x2="{left + plot_w}" y2="{top + plot_h}"/>',
+             f'<line class="axis" x1="{left}" y1="{top}" x2="{left}" y2="{top + plot_h}"/>',
+             f'<text x="{left + plot_w / 2:.1f}" y="{height - 8}" text-anchor="middle">{esc(x_label)}</text>',
+             f'<text x="12" y="{top + plot_h / 2:.1f}" text-anchor="middle" transform="rotate(-90 12 {top + plot_h / 2:.1f})">{esc(y_label)}</text>']
+    for lab, x, y in background:
+        parts.append(f'<circle class="{cls_of.get(lab, "m1")} bg" cx="{sx(finite(x)):.1f}" cy="{sy(finite(y)):.1f}" r="2" opacity="0.35"/>')
+    for sid, x, y, lab in points:
+        parts.append(f'<circle class="pt {cls_of.get(lab, "")}" cx="{sx(finite(x)):.1f}" cy="{sy(finite(y)):.1f}" r="4.5" stroke="#000" stroke-width="0.8">'
+                     f'<title>{esc(sid)}{(": " + esc(lab)) if lab else ""}</title></circle>')
+    return _svg(width, height, "".join(parts)) + legend([(lab, cls_of[lab]) for lab in labels])

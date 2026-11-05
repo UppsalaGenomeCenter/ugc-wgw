@@ -3,6 +3,53 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.14.0
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin (0.6.0)
+unchanged; one new image, somalier 0.3.7, and one new reference bundle,
+`ugc-wgw-qc` 0.1.0. Identity QC for cohorts gathered over years, the
+cohort's numbers as tables, and releases that ship only what changed.
+
+- **A new stage, `cohort_qc`.** somalier relates every pair of members from
+  one 200 KB genotype sketch per member (made by `singleton`/`upstream`
+  since this release, or by the stage itself from the aligned BAM for
+  members whose run predates it), checks the sheet's pedigree, calls sex
+  from chrX heterozygosity and projects the members onto the 1000 Genomes
+  superpopulations when that set is installed. Minutes at any cohort size,
+  first of the cohort stages in both read modes, and the one stage that
+  never blocks the stages after it. The cohort page gets an Identity
+  section and the flags `duplicate` and `pedigree_mismatch` (fail),
+  `related` and `het_outlier` (warn); `summary --pass-list --pass-on
+  identity` writes the members to freeze from; `cohort freeze` warns about
+  known duplicates.
+- **The sex a run uses is resolved before sawfish.** The sample sheet's sex
+  (now also `M`/`F`, `XX`/`XY`, `1`/`2`) is taken when given, else
+  mosdepth's coverage inference, else somalier's chrX call; sawfish and
+  TRGT take that value, so an XY sample whose coverage inference came back
+  empty is no longer called as XX silently. Every source is kept: the
+  manifest's `sex` block, the digest's identity block, the pages' sex
+  columns; `sex_mismatch` names the disagreeing sources and
+  `sex_not_inferred` fails when no source could sex the sample. A re-run of
+  an older sample replays every other task from the call cache.
+- **`ugc-wgw export --cohort ID`** writes the cohort's numbers as TSV files,
+  one per domain (members, coverage, variants, phasing, Paraphase copy
+  number, StarPhase diplotypes, HLA alleles, mitochondria, assembly, and
+  copies of `cohort_qc`'s tables), with frequencies per stratum (`ALL`, sex,
+  the ancestry projection) and an `export_manifest.json`. The cohort page's
+  new "Targeted callers" section draws from the same computation. Digest
+  schema 3 carries the per-gene rows; `mito_unexplained_high` warns on
+  mitorsaw's unexplained fraction; StarPhase's `./.`, `NO_MATCH` and
+  `Multiple` count as uncalled.
+- **Delta bundles and one copy of each SIF per prefix.** `make-bundle.sh
+  --images delta --base <previous manifest>` ships only the images the
+  previous bundle did not carry (about 10 MB plus the changed SIFs instead
+  of 27 GB); the installer keeps a content-addressed SIF store under the
+  prefix and hardlinks every version's images into it (`--dedupe-sif`
+  converts older versions; `--verify-only` reports what is shipped, in the
+  store or missing). A delta needs its base installed; the full tar stays
+  on the share for new sites.
+
 ## 0.13.1
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

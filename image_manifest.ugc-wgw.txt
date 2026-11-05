@@ -3,7 +3,8 @@
 # Built by this repository (containers/<tool>/Dockerfile) with scripts/build-containers.sh:
 # svx 0.6.0 and trgt-lps 0.10.0 pushed 2026-09-10; hifiasm 0.25.0 pushed 2026-09-22 (replaces quay.io/pacbio/hifiasm 0.25.0_build1);
 # minimap2 2.31 + samtools 1.24 + k8/paftools.js pushed 2026-10-20 (assembly v2; replaced quay.io/pacbio/align_hifiasm 2.17_1.14_build2,
-# which left the manifest after 0.11.0: no task used it since the calling stage landed):
+# which left the manifest after 0.11.0: no task used it since the calling stage landed);
+# somalier 0.3.7 pushed 2026-11-05 (identity QC: the extract and sex resolution in upstream/singleton, cohort_qc):
 ghcr.io/uppsalagenomecenter/hifiasm@sha256:0e03f1dc2ab6ede5200bbc0e8e9c3ea10e693ce87cad9346e3a1aa59cec272cf
 ghcr.io/uppsalagenomecenter/minimap2@sha256:00dd2dfbb7f395672eb0e71317899f913cd64af80c02864655dc9d848202604a
 ghcr.io/uppsalagenomecenter/svx@sha256:5f5577e979e4a1e629c9630ebb647e3efe8ebe3978cd20dfb81a712807007a94
@@ -21,3 +22,4 @@ mobinasri/secphase@sha256:0c5b3f0dd0bf6351fbdf5638ff67b421df1ee2a610d89cdc2bdd6b
 ghcr.io/becklaboratory/pav3@sha256:729964f51e6c2d6f84c42f56065d218bfd1f275026ad50b821898dc4874925c9
 quay.io/comparative-genomics-toolkit/cactus@sha256:fb4f1bab95d9c3b003d1036989f977e8cde2ffcf90a27691b992bd7d2d1a253d
 quay.io/biocontainers/truvari@sha256:28a193205760fad402674f6011425cee09f45085ab82d57f5ff3df4bc59c1264
+ghcr.io/uppsalagenomecenter/somalier@sha256:8b4c7d98c83fdd1e459baad80876f6eeb9a607a488ef7ce2b3db0a4ae707fe64

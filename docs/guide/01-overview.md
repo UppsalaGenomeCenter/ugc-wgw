@@ -40,11 +40,11 @@ under `<results>/<samples|cohorts>/<id>/<v>/<stage>/`.
 flowchart LR
   subgraph standalone
     direction LR
-    a1(["singleton"]) --> a2{{"cohort_merge"}} --> a3{{"cohort_freq"}}
+    a1(["singleton"]) --> a0{{"cohort_qc"}} --> a2{{"cohort_merge"}} --> a3{{"cohort_freq"}}
   end
   subgraph joint
     direction LR
-    b1(["upstream"]) --> b2{{"cohort_call"}} --> b3(["downstream"]) --> b4{{"cohort_merge"}} --> b5{{"cohort_freq"}}
+    b1(["upstream"]) --> b0{{"cohort_qc"}} --> b2{{"cohort_call"}} --> b3(["downstream"]) --> b4{{"cohort_merge"}} --> b5{{"cohort_freq"}}
   end
   subgraph assembly
     direction LR
@@ -53,11 +53,13 @@ flowchart LR
 ```
 
 Rounded nodes run once per sample. Hexagons run once per cohort and start only
-when every frozen member has finished the stage before. Text version:
+when every frozen member has finished the stage before; `cohort_qc`, the
+identity check, is the exception: the stages after it never wait for it.
+Text version:
 
 ```
-standalone:  singleton ──► cohort_merge ──► cohort_freq
-joint:       upstream ──► cohort_call ──► downstream ──► cohort_merge ──► cohort_freq
+standalone:  singleton ──► cohort_qc ──► cohort_merge ──► cohort_freq
+joint:       upstream ──► cohort_qc ──► cohort_call ──► downstream ──► cohort_merge ──► cohort_freq
 assembly:    assembly ──► assembly_call ──► cohort_pangenome
              per-sample stage    per-cohort stage (waits for every member)
 ```

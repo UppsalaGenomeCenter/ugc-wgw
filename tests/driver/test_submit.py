@@ -96,6 +96,31 @@ class SubmitTest(unittest.TestCase):
         self.assertEqual({r["subject"]: r.get("cohort_merge", r.get("singleton")) for r in rows},
                          {"S1": "success", "S2": "success", "S3": "success", "C1": "success"})
 
+    def test_cohort_qc_never_gates(self):
+        """cohort_qc fails (or is simply not there): cohort_merge and cohort_freq run anyway; a later `--stage cohort_qc`
+        runs it alone, and the cohort's status shows it."""
+        code, out, err = run_cli(["--project", self.proj, "submit", "--mode", "standalone", "--cohort", "C1"], env={"UGC_WGW_FAKE_FAIL_STAGES": "cohort_qc"})
+        self.assertEqual(code, 1, err)                       # a failure is still reported ...
+        self.assertIn("5 done, 1 blocked", err)              # ... but the stages after cohort_qc ran
+        db = self.db()
+        try:
+            self.assertEqual(db.latest_run("cohort", "C1", "cohort_qc", VERSION).status, "failed")
+            self.assertEqual(db.latest_run("cohort", "C1", "cohort_merge", VERSION).status, "success")
+            self.assertEqual(db.latest_run("cohort", "C1", "cohort_freq", VERSION).status, "success")
+        finally:
+            db.close()
+        code, out, err = run_cli(["--project", self.proj, "retry", "--mode", "standalone", "--cohort", "C1", "--stage", "cohort_qc"])
+        self.assertEqual(code, 0, err)
+        db = self.db()
+        try:
+            qc = db.latest_run("cohort", "C1", "cohort_qc", VERSION)
+            self.assertEqual((qc.status, qc.attempt), ("success", 2))
+            self.assertEqual(len(db.runs_for("cohort", "C1", "cohort_merge")), 1)   # nothing else re-ran
+        finally:
+            db.close()
+        code, out, _ = run_cli(["--project", self.proj, "status", "--json"])
+        self.assertEqual([r.get("cohort_qc") for r in json.loads(out) if r["subject"] == "C1"], ["success(2)"])
+
     def test_failure_blocks_cohort_then_retry(self):
         code, _, err = run_cli(["--project", self.proj, "submit", "--mode", "standalone", "--cohort", "C1"],
                                env={"UGC_WGW_FAKE_FAIL": "S2"})

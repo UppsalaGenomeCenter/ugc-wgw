@@ -235,3 +235,85 @@ def seed_success(cfg: config.Config, db: DB, stage: str, subject_type: str, subj
     layout.point_current(stage_path, attempt)
     run.status = "success"
     return run
+
+
+def seed_files(cfg: config.Config, db: DB, stage: str, subject_type: str, subject_id: str, files: dict[str, str | None], *,
+               mode: str = "standalone", version: str = VERSION, attempt: int | None = None,
+               scalars: dict[str, object] | None = None) -> RunRecord:
+    """Insert a successful run whose outputs are hand-written files (for stages the fake engine does not know, or
+    outputs it does not fake): `files` maps an output name to the file's text (None = the optional output is absent);
+    `scalars` adds non-File outputs; the attempt is the next free one unless given."""
+    ns = f"ugc_wgw_{stage}."
+    stage_path = layout.stage_dir(cfg.results_dir, subject_type, subject_id, version, stage)
+    if attempt is None:
+        attempt = max(layout.existing_attempts(stage_path), default=0) + 1
+    attempt_path = layout.make_attempt_dir(stage_path / f"attempt-{attempt}")
+    run_files = layout.run_files(attempt_path)
+    run_files.inputs.write_text(json.dumps({ns + "ugc_wgw_version": version}, indent=2) + "\n")
+    outputs: dict[str, object] = {ns + "ugc_wgw_version": version}
+    for name, text in files.items():
+        if text is None:
+            outputs[ns + name] = None
+            continue
+        p = attempt_path / "out" / name / f"{subject_id}.{stage}.{name}.tsv"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+        outputs[ns + name] = str(p)
+    for k, v in (scalars or {}).items():
+        outputs[ns + k] = v
+    run_files.outputs.write_text(json.dumps(outputs, indent=2, sort_keys=True) + "\n")
+    run_files.run_json.write_text(json.dumps({"dir": str(attempt_path), "outputs": outputs}) + "\n")
+    run = RunRecord(run_id=f"{subject_id}-{stage}-a{attempt}-seedfiles", subject_type=subject_type, subject_id=subject_id,
+                    stage=stage, mode=mode, ugc_wgw_version=version, run_dir=str(attempt_path), status="pending",
+                    attempt=attempt, inputs_path=str(run_files.inputs), started_at=utc_now())
+    db.insert_run(run)
+    db.finalize_run(run.run_id, "success", utc_now(), exit_code=0)
+    layout.point_current(stage_path, attempt)
+    run.status = "success"
+    return run
+
+
+def _deep_merge(base: dict, over: dict) -> dict:
+    """Dicts merge recursively; an empty dict or list replaces (the way to blank a block)."""
+    for k, v in over.items():
+        if isinstance(v, dict) and v and isinstance(base.get(k), dict):
+            _deep_merge(base[k], v)
+        else:
+            base[k] = v
+    return base
+
+
+def make_digest(sid: str, **overrides: object) -> dict[str, object]:
+    """A minimal per-sample digest of the current schema with the fixtures' targeted callers; `overrides` deep-merge."""
+    from ugc_wgw import summary
+    from ugc_wgw import summary_parsers as sp
+    from fixtures import MITORSAW, PARAPHASE, STARPHASE_JSON, STARPHASE_TSV, KIVVI_NA, KIVVI_OK  # noqa: E402
+    d: dict[str, object] = {
+        "schema": summary.DIGEST_SCHEMA, "generated_at": "2026-11-05T00:00:00Z", "mode": "standalone",
+        "sample": {"id": sid, "sex_sheet": "MALE", "father_id": None, "mother_id": None},
+        "runs": {"singleton": {"run_id": f"{sid}-singleton-a1", "ugc_wgw_version": VERSION, "attempt": 1, "finished_at": "2026-11-05T00:00:00Z"}},
+        "warnings": [], "messages": [],
+        "stats": {"depth_mean": "30.1", "mapped_read_percent": "99.9", "read_quality_median": "31", "inferred_sex": "MALE",
+                  "SNV_count": "3800000", "INDEL_count": "700000", "TSTV_ratio": "1.96", "HETHOM_ratio": "1.3", "foo_extra": "7"},
+        "reads": {k: 1.0 for k in summary.READ_KEYS},
+        "coverage": {"mean": 30.1, "inferred_sex": "MALE", "total": {}, "chrom": [{"chrom": "chr1", "mean": 30.0}, {"chrom": "chrX", "mean": 15.0}],
+                     "ratios": {"chrX_ratio": 0.5, "chrY_ratio": 0.4, "sex_from_ratio": "MALE"}, "track": {},
+                     "copynum": {"haploid_coverage": 15.0, "chrom": [], "segments": {}}},
+        "small_variants": {"snv": 3800000.0, "indel": 700000.0, "tstv": 1.96, "hethom": 1.3, "sn": {"number of records": 4500000},
+                           "psc": {"n_hets": 2000000, "n_nonref_hom": 1500000, "n_singletons": 100, "n_missing": 10}, "st": {}, "idd": [],
+                           "qual": [], "dp": [], "roh": {"n": 3, "total_bp": 10000000, "longest_bp": 5000000}},
+        "sv": {"counts": {"DEL": 10.0, "INS": 12.0, "DUP": 1.0, "INV": 0.0, "BND": 2.0, "SWAP": 0.0}, "vcf_counts": {}, "sizes": {},
+               "size_bins": [], "filters": {}, "n": 25},
+        "phasing": {"phased_bp": 2.8e9, "block_ng50": 300000.0, "all": {"num_variants": 100, "num_heterozygous": 60, "num_phased": 54,
+                    "num_unphased": 6, "num_blocks": 3}, "chrom": [], "blocks": {"n": 3, "n50": 400000, "total_bp": 900000}},
+        "tandem_repeats": {"genotyped": 930000.0, "uncalled": 5000.0, "n_records": 935000, "dropouts": {"n": 2, "by_class": {}},
+                           "n_named": 70, "n_named_called": 69, "disease_loci": [], "fail_reads_trids": []},
+        "methylation": {"cpg": {"combined": 28000000.0, "hap1": 1.0, "hap2": 1.0}, "methbat": {"methylated": 1.0, "unmethylated": 2.0, "asm": 3.0}, "profile": {}},
+        "targeted": {"paraphase": sp.parse_paraphase(PARAPHASE), "mitorsaw": sp.parse_mitorsaw(MITORSAW),
+                     "starphase": sp.parse_starphase_tsv(STARPHASE_TSV.splitlines()), "starphase_meta": sp.parse_starphase_json(STARPHASE_JSON),
+                     "kivvi": {"kiv2": sp.parse_kivvi(KIVVI_NA), "d4z4": sp.parse_kivvi(KIVVI_OK)}},
+        "files": {}, "assembly": {}, "provenance": {"ugc_wgw": {"version": VERSION}},
+    }
+    _deep_merge(d, overrides)  # type: ignore[arg-type]
+    d["qc"] = summary.qc_flags(d, dict(summary.DEFAULT_THRESHOLDS))
+    return d

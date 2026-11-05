@@ -142,6 +142,36 @@
           "resources": "seconds"
         }
       ]
+    },
+    "ugc-wgw-qc": {
+      "version": "0.1.0",
+      "source": "this repository (references/) for the shipped files; the URLs in fetched[] for the 1000 Genomes set",
+      "files": [
+        {
+          "name": "somalier_sites.hg38.vcf.gz",
+          "sha256": "d1a853b8bb2e5f1a520bc67c8303be699543d225d785bce51e8335a2420489b5",
+          "bytes": 265818,
+          "url": "https://github.com/brentp/somalier/files/3412456/sites.hg38.vcf.gz"
+        },
+        {
+          "name": "somalier_ancestry_labels_1kg.tsv",
+          "sha256": "ef198b72cde1258a2df484e8fb9234b1a0727ad85d09413ed0775ccd078b4fd8",
+          "bytes": 56028,
+          "url": "https://raw.githubusercontent.com/brentp/somalier/v0.3.7/scripts/ancestry-labels-1kg.tsv"
+        }
+      ],
+      "fetched": [
+        {
+          "name": "1kg.somalier.tar.gz",
+          "sha256": "b2b7959cfd6d37d1ac7a96e03aeb13707cfe84e5c3a208329220712a935c5a1e",
+          "md5": "25c62e15fe71d44fbb525a8648ff3ec2",
+          "bytes": 82856769,
+          "url": "https://zenodo.org/records/3479773/files/1kg.somalier.tar.gz",
+          "optional": "ancestry"
+        }
+      ],
+      "install_subdir": "ugc-wgw-qc-0.1.0",
+      "notes": "References of cohort_qc and the sex resolution (somalier 0.3.7, containers/somalier). somalier_sites.hg38.vcf.gz: the sites file every somalier release links (a 2019 attachment, not a release asset): 17,766 sites, 17,384 autosomal, 365 chrX, 17 chrY, chr-prefixed, every contig in the GRCh38_GIABv3 fasta.fai (verified 2026-11-05); the 1000 Genomes set was extracted with this exact file and `somalier relate` refuses a site-count mismatch, so it is pinned by sha256. somalier_ancestry_labels_1kg.tsv: scripts/ancestry-labels-1kg.tsv at tag v0.3.7 (#sample superpop population). fetched[]: 1kg.somalier.tar.gz (Zenodo 3479773; unpacks to 1kg-somalier/ with 2,504 .somalier files) is downloaded by make-bundle.sh into the bundle's references/ and verified, unless --without-ancestry (optional = ancestry); install-bundle.sh copies it to the install subdirectory; ugc_wgw_cohort_qc untars it (WDL 1.0 has no Directory). Map keys: somalier_sites_vcf, somalier_1kg_labels, somalier_1kg_tar."
     }
   }
 }

@@ -47,14 +47,14 @@ usage() { sed -n '2,22p' "$0"; exit "${1:-0}"; }
 
 mode_of_stage() {
   case "$1" in
-    singleton|cohort_merge|cohort_freq) echo standalone ;;
+    singleton|cohort_qc|cohort_merge|cohort_freq) echo standalone ;;   # cohort_qc, cohort_merge and cohort_freq exist in joint too: --mode joint
     upstream|cohort_call|downstream) echo joint ;;
     assembly|assembly_call|cohort_pangenome) echo assembly ;;
     *) die "unknown stage $1" ;;
   esac
 }
 cohort_of_mode() { case "$1" in joint) echo SMOKEJ ;; *) echo SMOKE ;; esac; }
-is_cohort_stage() { case "$1" in cohort_call|cohort_merge|cohort_freq|cohort_pangenome) return 0 ;; *) return 1 ;; esac; }
+is_cohort_stage() { case "$1" in cohort_qc|cohort_call|cohort_merge|cohort_freq|cohort_pangenome) return 0 ;; *) return 1 ;; esac; }
 
 members() { sed 's/#.*//' "$smoke/data/cohort.txt" | awk 'NF { print $1 }'; }
 
@@ -267,12 +267,14 @@ cmd_all() {  # cmd_all [standalone] [joint] [assembly]: the named phases in the 
   if [[ "$want" == *" standalone "* ]]; then
     phase standalone --mode standalone --cohort SMOKE
     for m in $(members); do cmd_check singleton "$m" || fails=$((fails + 1)); done
+    cmd_check cohort_qc SMOKE || fails=$((fails + 1))
     cmd_check cohort_merge SMOKE || fails=$((fails + 1))
     cmd_check cohort_freq SMOKE || fails=$((fails + 1))
   fi
   if [[ "$want" == *" joint "* ]]; then
     phase joint --mode joint --cohort SMOKEJ
     for m in $(members); do cmd_check upstream "$m" || fails=$((fails + 1)); done
+    cmd_check cohort_qc SMOKEJ || fails=$((fails + 1))
     cmd_check cohort_call SMOKEJ || fails=$((fails + 1))
     for m in $(members); do cmd_check downstream "$m" || fails=$((fails + 1)); done
     cmd_check cohort_merge SMOKEJ || fails=$((fails + 1))
@@ -374,10 +376,11 @@ cmd_summary() {  # ugc-wgw summary for both cohorts: per-sample pages plus the c
   set_ugc
   local dir fails=0 f
   dir=$smoke/logs/summary-$(date -u +%Y%m%dT%H%M%SZ)
-  "${ugc[@]}" summary --cohort SMOKE --mode standalone --any-version --out-dir "$dir/standalone" || fails=$((fails + 1))
+  "${ugc[@]}" summary --cohort SMOKE --mode standalone --any-version --out-dir "$dir/standalone" \
+      --pass-list "$dir/standalone/identity-pass.txt" --pass-on identity || fails=$((fails + 1))   # HG002ds duplicates HG002: both out
   "${ugc[@]}" summary --cohort SMOKEJ --mode joint --any-version --out-dir "$dir/joint" || fails=$((fails + 1))
   "${ugc[@]}" summary --cohort SMOKE --mode assembly --any-version --out-dir "$dir/assembly" || fails=$((fails + 1))
-  for f in standalone/SMOKE.summary.html standalone/SMOKE.summary.json standalone/HG002.summary.html standalone/HG002.summary.json \
+  for f in standalone/SMOKE.summary.html standalone/SMOKE.summary.json standalone/HG002.summary.html standalone/HG002.summary.json standalone/identity-pass.txt \
            joint/SMOKEJ.summary.html joint/HG002.summary.html assembly/SMOKE.summary.html assembly/HG002.summary.html; do
     [ -s "$dir/$f" ] || { log "summary: missing or empty $dir/$f"; fails=$((fails + 1)); }
   done
@@ -396,6 +399,6 @@ case "$1" in
   summary) cmd_summary ;;
   sacct) cmd_sacct ;;
   -h|--help) usage ;;
-  singleton|upstream|cohort_call|downstream|cohort_merge|cohort_freq|assembly|assembly_call|cohort_pangenome) cmd_stage "$@" ;;
+  singleton|upstream|cohort_qc|cohort_call|downstream|cohort_merge|cohort_freq|assembly|assembly_call|cohort_pangenome) cmd_stage "$@" ;;
   *) die "unknown command $1" ;;
 esac

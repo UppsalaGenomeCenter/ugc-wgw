@@ -1,0 +1,16 @@
+# Expected outputs of ugc_wgw_cohort_qc in every mode, one glob per line relative to out/.
+# groups.tsv is empty for a cohort without look-alikes; the smoke has HG002ds (a downsampled HG002), so it is not.
+# The ancestry pair needs the 1000 Genomes set (somalier_1kg_tar in the map, fetched by prepare.sh): the driver turns
+# run_ancestry on when the tar is there; the smoke's chr20-only extracts still project (verified 2026-11-05).
+qc_pairs/*.qc.*.pairs.tsv
+qc_samples/*.qc.*.samples.tsv
+qc_groups/*.qc.*.groups.tsv
+qc_html/*.qc.*.html
+qc_ped/*.qc.ped
+qc_summary/*.qc.*.summary.tsv
+qc_members/*.qc.*.members.tsv
+qc_related_pairs/*.qc.*.related_pairs.tsv
+qc_ancestry/*.qc.*.somalier-ancestry.tsv
+qc_ancestry_html/*.qc.*.somalier-ancestry.html
+somalier_extracts/*/*.somalier
+ugc_wgw_manifest/*.cohort_qc.ugc_wgw_manifest.json

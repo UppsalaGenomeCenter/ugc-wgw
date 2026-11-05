@@ -30,6 +30,8 @@ class StagesTest(unittest.TestCase):
                            "stat_depth_mean": False, "aligned_fail_reads": False},
             "cohort_merge": {"sv_vcfs": True, "trgt_vcfs": True, "gvcfs": False, "ugc_wgw_container_registry": True,
                              "run_glnexus": False, "svx_mem_gb": False},
+            "cohort_qc": {"cohort_id": True, "sample_ids": True, "somalier_files": True, "aligned_bams": False, "aligned_bam_indices": False,
+                          "sample_sexes": True, "father_ids": True, "mother_ids": True, "run_ancestry": False, "ugc_wgw_container_registry": True},
             "cohort_freq": {"cohort_id": True, "sample_ids": True, "sample_sexes": True, "sample_sex_sources": False,
                             "small_variant_vcf": False, "sv_vcf": True, "sv_vcf_index": True, "freq_mem_gb": False,
                             "ref_map_file": True},

@@ -59,9 +59,9 @@ class SummarizeTest(unittest.TestCase):
             self.assertAlmostEqual(s.eta, 87.5)
             c = by["cohort_merge"]
             self.assertEqual((c.total, c.waiting, c.median, c.eta), (1, 1, None, None))
-            self.assertEqual((summary.done, summary.total), (2, 7))
+            self.assertEqual((summary.done, summary.total), (2, 8))
             text = summary.format()
-            self.assertIn("progress mode=standalone 2/7 (28%) eta≈1m28s", text)
+            self.assertIn("progress mode=standalone 2/8 (25%) eta≈1m28s", text)
             self.assertIn("active 1 (S3 2/4 tasks)", text)
             self.assertIn("failed 1 (needs retry)", text)
             self.assertIn("waiting 1", text)
@@ -81,13 +81,13 @@ class SummarizeTest(unittest.TestCase):
         prog = [e for e in events if e["event"] == "submit.progress"]
         self.assertGreaterEqual(len(prog), 2)
         last = prog[-1]["detail"]
-        self.assertEqual((last["done"], last["total"]), (2, 4))  # cohort_merge and cohort_freq count as waiting for --cohort
+        self.assertEqual((last["done"], last["total"]), (2, 5))  # cohort_qc, cohort_merge and cohort_freq count as waiting for --cohort
         self.assertEqual((last["stages"]["singleton"]["done"], last["stages"]["singleton"]["total"]), (2, 2))
         self.assertEqual(last["stages"]["cohort_merge"]["waiting"], 1)
         self.assertIn("progress mode=standalone", (self.cfg.logs_dir / "ugc-wgw.log").read_text())
         code, out, err = run_cli(["--project", self.proj, "progress", "--mode", "standalone", "--cohort", "C1"])
         self.assertEqual(code, 0, err)
-        self.assertIn("progress mode=standalone 2/7", out)
+        self.assertIn("progress mode=standalone 2/8", out)
         code, out, err = run_cli(["--project", self.proj, "progress", "--mode", "standalone", "--cohort", "C1", "--json"])
         self.assertEqual(json.loads(out)["stages"]["singleton"]["done"], 2)
 

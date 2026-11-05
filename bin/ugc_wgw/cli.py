@@ -8,7 +8,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import cohorts, config, engine, escalate, manifest, progress, report, resources, samples, stage_inputs, summary, usage
+from . import cohorts, config, engine, escalate, export, manifest, progress, report, resources, samples, stage_inputs, summary, usage
 from .log import LOGGER
 from .db import DB
 from .log import Events, setup_logging
@@ -156,8 +156,30 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--threshold", action="append", default=[], metavar="KEY=VALUE",
                    help="QC threshold override (keys: " + ", ".join(sorted(summary.DEFAULT_THRESHOLDS)) + "); repeatable")
     s.add_argument("--jobs", type=int, default=1, metavar="N", help="build per-sample digests in N processes")
-    s.add_argument("--pass-list", metavar="FILE", help="also write the IDs whose assembly QC has no fail flag, in sample-sheet order "
-                                                       "(the input of `cohort freeze` for a pangenome cohort)")
+    s.add_argument("--pass-list", metavar="FILE", help="also write the IDs that pass --pass-on, in sample-sheet order "
+                                                       "(the input of `cohort freeze`)")
+    s.add_argument("--pass-on", default="assembly", choices=summary.PASS_ON,
+                   help="what the pass list gates on: assembly (no assembly QC fail; the pangenome cohort), identity (no identity failure "
+                        "in the cohort's cohort_qc run and no related or duplicate partner earlier in the sheet; needs --cohort), "
+                        "or all (both) (default: assembly)")
+
+    s = sub.add_parser("export", help="write the cohort's tables as TSV files, one per domain, from the members' digests "
+                                      "and the cohort stages' outputs (the pages are for reading; the export is for joining)")
+    s.add_argument("--cohort", required=True, metavar="ID")
+    s.add_argument("--domains", action="append", default=[], metavar="D[,D...]",
+                   help="domains to write (default: all): " + ", ".join(export.DOMAINS))
+    s.add_argument("--mode", default="standalone", choices=sorted(MODES), help="which runs the digests come from (default: standalone)")
+    s.add_argument("--any-version", action="store_true", help="runs of every ugc-wgw version (default: the current one)")
+    s.add_argument("--out", metavar="DIR", help="output directory (default: <results>/cohorts/<ID>/<version>/export)")
+    s.add_argument("--summary-dir", metavar="DIR", help="where the per-sample digests live (default: <results>/reports/summary)")
+    s.add_argument("--strata", default="all", choices=export.STRATA,
+                   help="frequency strata besides ALL: sex (XX/XY), ancestry (cohort_qc's projection), both, or none (default: all)")
+    s.add_argument("--force", action="store_true", help="rebuild the digests even when current; write into a non-empty --out; "
+                                                        "remove stale tables this export does not write")
+    s.add_argument("--threshold", action="append", default=[], metavar="KEY=VALUE",
+                   help="QC threshold override (keys: " + ", ".join(sorted(summary.DEFAULT_THRESHOLDS)) + "); repeatable")
+    s.add_argument("--jobs", type=int, default=1, metavar="N", help="build per-sample digests in N processes")
+    s.add_argument("--json", action="store_true", help="print the export manifest instead of the file paths")
 
     s = sub.add_parser("resources", help="what every task will ask SLURM for: declared in the WDL, capped by the site "
                                          "(cpu_max, memory_max), overridden by the resource policy")
@@ -330,7 +352,8 @@ def cmd_samples(a: argparse.Namespace) -> int:
 def cmd_cohort(a: argparse.Namespace) -> int:
     cfg, db, events, _ = _open(a)
     try:
-        cohort = cohorts.freeze(db, events, a.cohort_id, Path(a.samples))
+        thr = summary.thresholds_for(cfg)
+        cohort = cohorts.freeze(db, events, a.cohort_id, Path(a.samples), duplicate_threshold=thr["duplicate_relatedness_min"])
         diag(f"froze cohort {cohort.cohort_id}: {len(cohort.members)} samples, sha256 {cohort.sample_list_sha256}")
         return 0
     finally:
@@ -531,12 +554,38 @@ def cmd_summary(a: argparse.Namespace) -> int:
         out_dir = Path(a.out_dir) if a.out_dir else cfg.results_dir / "reports" / "summary"
         written = summary.run(cfg, db, code, sample_ids=sel.samples, cohort_id=a.cohort, mode=a.mode,
                               version=None if a.any_version else version, out_dir=out_dir, force=a.force,
-                              thresholds=thr, jobs=max(1, a.jobs), pass_list=Path(a.pass_list) if a.pass_list else None)
+                              thresholds=thr, jobs=max(1, a.jobs), pass_list=Path(a.pass_list) if a.pass_list else None, pass_on=a.pass_on)
         for p in written:
             print(p)
         if not written:
             diag("nothing written: no sample has a successful run to summarise")
             return 1
+        return 0
+    finally:
+        db.close()
+
+
+def cmd_export(a: argparse.Namespace) -> int:
+    cfg, db, events, version = _open(a)
+    try:
+        code = manifest.load_code_info(cfg.code_dir)
+        reconcile(cfg, db, events, code, {})
+        thr = summary.thresholds_for(cfg, a.threshold)
+        domains = export.parse_domains(a.domains)
+        res = export.build(cfg, db, code, cohort_id=a.cohort, domains=domains, strata=a.strata, out_dir=Path(a.out) if a.out else None,
+                           any_version=a.any_version, mode=a.mode, force=a.force, thresholds=thr, jobs=max(1, a.jobs),
+                           summary_dir=Path(a.summary_dir) if a.summary_dir else None)
+        for note in res.notes + res.skipped:
+            diag(note)
+        if not res.files:
+            diag(f"nothing written: no table could be made for {a.cohort}")
+            return 1
+        if a.json:
+            print(json.dumps(res.manifest, indent=2, sort_keys=True))
+        else:
+            for p in res.files:
+                print(p)
+        diag(f"wrote {len(res.files)} file(s) to {res.out_dir}")
         return 0
     finally:
         db.close()
@@ -699,6 +748,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_report(a)
         if a.command == "summary":
             return cmd_summary(a)
+        if a.command == "export":
+            return cmd_export(a)
         if a.command == "progress":
             return cmd_progress(a)
         if a.command == "resources":

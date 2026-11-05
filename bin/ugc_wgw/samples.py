@@ -15,6 +15,7 @@ from .util import UgcError, utc_now
 COLUMNS = ("sample_id", "sex", "hifi_reads", "fail_reads", "father_id", "mother_id")
 REQUIRED_COLUMNS = ("sample_id", "hifi_reads")
 SEX_VALUES = ("MALE", "FEMALE")
+SEX_ALIASES = {"MALE": "MALE", "M": "MALE", "XY": "MALE", "1": "MALE", "FEMALE": "FEMALE", "F": "FEMALE", "XX": "FEMALE", "2": "FEMALE"}
 ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 # Advisory floors for the input check (config.json `input_thresholds`, guide chapter 05); 0 disables one.
 INPUT_THRESHOLDS: dict[str, float] = {
@@ -58,6 +59,7 @@ def parse_tsv(path: Path) -> list[SampleRecord]:
             if not sid:
                 continue
             sex_raw = (row.get("sex") or "").strip().upper()
+            sex_raw = SEX_ALIASES.get(sex_raw, sex_raw)   # M/F, XX/XY and PLINK's 1/2 are accepted spellings
             meta = {k: v for k, v in row.items() if k and k not in COLUMNS and v not in (None, "")}
             records.append(
                 SampleRecord(
@@ -93,7 +95,7 @@ def validate(records: list[SampleRecord], db: DB, check_paths: bool = True, *, i
             problems.append(f"{rec.sample_id}: duplicated in the TSV")
         seen.add(rec.sample_id)
         if rec.sex is not None and rec.sex not in SEX_VALUES:
-            problems.append(f"{rec.sample_id}: sex must be MALE, FEMALE or blank, not {rec.sex!r}")
+            problems.append(f"{rec.sample_id}: sex must be MALE or FEMALE (also M/F, XY/XX, 1/2) or blank, not {rec.sex!r}")
         if not rec.hifi_reads:
             problems.append(f"{rec.sample_id}: at least one hifi_reads path is required")
         for kind in ("hifi_reads", "fail_reads"):

@@ -1,8 +1,8 @@
 version 1.0
 
-# ugc-pacbio-wgw — upstream subworkflow with a prebuilt pbmm2 reference index (override of upstream subworkflow: imports overrides/pbmm2.wdl, pbmm2_index input passed to the HiFi and fail-reads alignments)
+# ugc-pacbio-wgw — upstream subworkflow with a prebuilt pbmm2 reference index and the sex resolved before sawfish (override of upstream subworkflow: imports overrides/pbmm2.wdl, pbmm2_index input passed to the HiFi and fail-reads alignments; somalier extract, one-sample relate and ugc_wgw_resolve_sex after mosdepth, sawfish_discover gets the resolved sex)
 # origin: vendor/hifi-human-wgs-wdl/workflows/upstream/upstream.wdl @ v4.0.0
-# see docs/DESIGN.md §18 (2026-10-15), DERIVED_FILES.md
+# see docs/DESIGN.md §18 (2026-10-15, 2026-11-05), DERIVED_FILES.md
 
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/structs.wdl"
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/kivvi.wdl" as Kivvi
@@ -15,11 +15,12 @@ import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/sawfish.w
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl" as DeepVariant
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/parabricks/parabricks_deepvariant.wdl" as ParabricksDeepVariant
 import "pbmm2.wdl" as Pbmm2  # ugc-wgw override of the alignment subworkflow: prebuilt reference index
+import "../ugc_wgw/qc/somalier.wdl" as Somalier  # ugc-wgw: somalier extract and the sex resolution
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl" as Pbmm2Tasks  # upstream's tasks for the fail-reads path
 
 workflow upstream {
   meta {
-    description: "Align reads and call variants. (ugc-wgw override: a prebuilt pbmm2 reference index replaces the per-BAM create_pbmm2_index calls)"
+    description: "Align reads and call variants. (ugc-wgw override: a prebuilt pbmm2 reference index replaces the per-BAM create_pbmm2_index calls; the sex sawfish uses is resolved from the sheet, the coverage inference and somalier's chrX heterozygosity, in that order)"
     help: "Called by singleton and family entrypoints.  Not intended to be called directly."
     category: "Subworkflow"
     outputs: {
@@ -48,7 +49,22 @@ workflow upstream {
         description: "Distribution of aligned read depth"
       },
       inferred_sex: {
-        description: "Inferred sex"
+        description: "Inferred sex (mosdepth's chrY inference; ugc-wgw: unchanged in meaning, resolved_sex is what the callers use)"
+      },
+      resolved_sex: {
+        description: "ugc-wgw: the sex sawfish and TRGT use: declared (sheet), else coverage, else somalier; empty when no source could sex the sample"
+      },
+      resolved_sex_source: {
+        description: "ugc-wgw: declared, coverage, somalier or none"
+      },
+      somalier_sex: {
+        description: "ugc-wgw: somalier's call from chrX heterozygosity (MALE, FEMALE or empty)"
+      },
+      somalier_extract: {
+        description: "ugc-wgw: the sample's somalier extract (.somalier), read by cohort_qc"
+      },
+      somalier_sex_tsv: {
+        description: "ugc-wgw: the sex resolution's table (every source, the resolved value, the X/Y statistics)"
       },
       stat_depth_mean: {
         description: "Mean depth"
@@ -211,6 +227,21 @@ workflow upstream {
     use_gpu: {
       description: "Use GPU when possible"
     }
+    declared_sex: {
+      description: "ugc-wgw: the sample sheet's sex (MALE or FEMALE), when it has one; the first source of the resolved sex"
+    }
+    somalier_sites_vcf: {
+      description: "ugc-wgw: somalier's sites VCF (reference map somalier_sites_vcf)"
+    }
+    somalier_sex_min_x_sites: {
+      description: "ugc-wgw: chrX sites somalier must have genotyped before its sex call is used"
+    }
+    somalier_sex_min_x_depth: {
+      description: "ugc-wgw: mean chrX depth somalier must have seen before its sex call is used"
+    }
+    ugc_wgw_container_registry: {
+      description: "ugc-wgw: registry holding the ugc-built images (somalier)"
+    }
     use_parabricks_deepvariant: {
       description: "Use Parabricks DeepVariant"
     }
@@ -239,6 +270,11 @@ workflow upstream {
     Boolean single_sample = false
     Boolean use_gpu
     Boolean use_parabricks_deepvariant
+    String? declared_sex
+    File somalier_sites_vcf
+    Int somalier_sex_min_x_sites = 50
+    Float somalier_sex_min_x_depth = 5.0
+    String ugc_wgw_container_registry
     RuntimeAttributes default_runtime_attributes
   }
 
@@ -281,6 +317,41 @@ workflow upstream {
     infer_sex = true,
     max_norm_female_chrY_depth = max_norm_female_chrY_depth,
     runtime_attributes = default_runtime_attributes
+  }
+
+  # ugc-wgw: the sex the sex-dependent callers use, resolved before sawfish (declared > coverage > somalier)
+  call Somalier.ugc_wgw_somalier_extract { input:
+    sample_id = sample_id,
+    aligned_bam = aligned_bam_data,
+    aligned_bam_index = aligned_bam_index,
+    sites_vcf = somalier_sites_vcf,
+    ref_fasta = ref_fasta,
+    ref_index = ref_index,
+    ugc_wgw_container_registry = ugc_wgw_container_registry,
+    runtime_attributes = default_runtime_attributes
+  }
+
+  call Somalier.ugc_wgw_somalier_relate_one { input:
+    sample_id = sample_id,
+    somalier = ugc_wgw_somalier_extract.somalier,
+    sites_vcf = somalier_sites_vcf,
+    ugc_wgw_container_registry = ugc_wgw_container_registry,
+    runtime_attributes = default_runtime_attributes
+  }
+
+  call Somalier.ugc_wgw_resolve_sex { input:
+    sample_id = sample_id,
+    declared_sex = declared_sex,
+    coverage_sex = mosdepth.inferred_sex,
+    somalier_samples_tsv = ugc_wgw_somalier_relate_one.samples_tsv,
+    min_x_sites = somalier_sex_min_x_sites,
+    min_x_depth = somalier_sex_min_x_depth,
+    runtime_attributes = default_runtime_attributes
+  }
+
+  # an empty resolved sex stays undefined for sawfish, so its own "Sex is not defined" message fires
+  if (ugc_wgw_resolve_sex.resolved_sex != "") {
+    String resolved_sex_defined = ugc_wgw_resolve_sex.resolved_sex
   }
 
   if (use_gpu && use_parabricks_deepvariant) {
@@ -331,7 +402,7 @@ workflow upstream {
 
   call Sawfish.sawfish_discover { input:
     sample_id = sample_id,
-    sex = mosdepth.inferred_sex,
+    sex = resolved_sex_defined,  # ugc-wgw: the resolved sex (upstream: mosdepth.inferred_sex)
     aligned_bam = aligned_bam_data,
     aligned_bam_index = aligned_bam_index,
     ref_fasta = ref_fasta,
@@ -509,6 +580,13 @@ workflow upstream {
     String inferred_sex = mosdepth.inferred_sex
     String stat_depth_mean = mosdepth.stat_depth_mean
 
+    # ugc-wgw: the resolved sex and somalier's extract
+    String resolved_sex = ugc_wgw_resolve_sex.resolved_sex
+    String resolved_sex_source = ugc_wgw_resolve_sex.resolved_sex_source
+    String somalier_sex = ugc_wgw_resolve_sex.somalier_sex
+    File somalier_extract = ugc_wgw_somalier_extract.somalier
+    File somalier_sex_tsv = ugc_wgw_resolve_sex.sex_tsv
+
     # per sample sv signatures
     File discover_tar = sawfish_discover.discover_tar
 
@@ -562,7 +640,8 @@ workflow upstream {
       ],
       kivvi_kiv2.msg,
       kivvi_d4z4.msg,
-      sawfish_discover.msg
+      sawfish_discover.msg,
+      ugc_wgw_resolve_sex.msg
     ])
   }
 }

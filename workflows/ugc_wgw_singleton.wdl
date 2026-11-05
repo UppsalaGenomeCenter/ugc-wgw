@@ -39,6 +39,18 @@ workflow ugc_wgw_singleton {
     use_gpu: {
       description: "Use GPU when possible"
     }
+    declared_sex: {
+      description: "The sample sheet's sex (MALE or FEMALE), when it has one: the first source of the sex the sex-dependent callers use (declared, else mosdepth's coverage inference, else somalier's chrX heterozygosity)"
+    }
+    somalier_sex_min_x_sites: {
+      description: "chrX sites somalier must have genotyped before its sex call is used"
+    }
+    somalier_sex_min_x_depth: {
+      description: "Mean chrX depth somalier must have seen before its sex call is used"
+    }
+    ugc_wgw_container_registry: {
+      description: "Registry holding the ugc-built images (somalier)"
+    }
     use_parabricks_deepvariant: {
       description: "Use Parabricks DeepVariant"
     }
@@ -77,6 +89,10 @@ workflow ugc_wgw_singleton {
     Boolean use_alignment_chunking = true
     Boolean use_gpu = false
     Boolean use_parabricks_deepvariant = false
+    String? declared_sex
+    Int somalier_sex_min_x_sites = 50
+    Float somalier_sex_min_x_depth = 5.0
+    String ugc_wgw_container_registry
 
     # Backend configuration
     String backend = "HPC"
@@ -106,6 +122,7 @@ workflow ugc_wgw_singleton {
 
   String ref_name = ref_map["name"]
   File ref_fasta = ref_map["fasta"]  # !FileCoercion
+  File somalier_sites_vcf = ref_map["somalier_sites_vcf"]  # !FileCoercion
   File ref_index = ref_map["fasta_index"]  # !FileCoercion
   File pbmm2_index = ref_map["pbmm2_index"]  # !FileCoercion
   Float max_norm_female_chrY_depth = ref_map["max_norm_female_chrY_depth"]  # !StringCoercion
@@ -145,12 +162,17 @@ workflow ugc_wgw_singleton {
     single_sample = true,
     use_gpu = use_gpu,
     use_parabricks_deepvariant = use_parabricks_deepvariant,
+    declared_sex = declared_sex,
+    somalier_sites_vcf = somalier_sites_vcf,
+    somalier_sex_min_x_sites = somalier_sex_min_x_sites,
+    somalier_sex_min_x_depth = somalier_sex_min_x_depth,
+    ugc_wgw_container_registry = ugc_wgw_container_registry,
     default_runtime_attributes = default_runtime_attributes
   }
 
   call Downstream.downstream { input:
     sample_id = sample_id,
-    sex = upstream.inferred_sex,
+    sex = upstream.resolved_sex,  # the resolved sex (declared, else coverage, else somalier); upstream passes mosdepth's inference
     aligned_hifi_reads = upstream.aligned_hifi_reads,
     aligned_hifi_reads_index = upstream.aligned_hifi_reads_index,
     aligned_fail_reads = upstream.aligned_fail_reads,
@@ -367,6 +389,11 @@ workflow ugc_wgw_singleton {
     File mosdepth_depth_distribution_plot = upstream.mosdepth_depth_distribution_plot
     String stat_depth_mean = upstream.stat_depth_mean
     String inferred_sex = upstream.inferred_sex
+    String resolved_sex = upstream.resolved_sex
+    String resolved_sex_source = upstream.resolved_sex_source
+    String somalier_sex = upstream.somalier_sex
+    File somalier_extract = upstream.somalier_extract
+    File somalier_sex_tsv = upstream.somalier_sex_tsv
 
     # phasing stats
     File phase_stats = downstream.phase_stats

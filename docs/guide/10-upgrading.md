@@ -5,9 +5,10 @@
 ```mermaid
 flowchart LR
   subgraph prefix["prefix"]
-    v1["versions/0.9.4: code, sif, venv, miniwdl.cfg, references, inputs"]
-    v2["versions/0.11.0: code, sif, venv, miniwdl.cfg, references, inputs"]
+    v1["versions/0.9.4: code, sif (hardlinks), venv, miniwdl.cfg, references, inputs"]
+    v2["versions/0.11.0: code, sif (hardlinks), venv, miniwdl.cfg, references, inputs"]
     cur["current -> versions/0.11.0, after --activate"]
+    store["sif: one copy of each image, shared"]
     cc["call_cache, shared"]
     refs["references, shared"]
     pol["resources.tsv, shared"]
@@ -24,6 +25,8 @@ flowchart LR
   end
   cfgA --> v1
   cfgB --> v2
+  v1 --> store
+  v2 --> store
   v1 --> cc
   v2 --> cc
   v1 --> refs
@@ -34,8 +37,9 @@ flowchart LR
   cfgB --> r2
 ```
 
-A bundle installs into its own `versions/<v>/` with its own SIF cache,
-engine and rendered configuration; `install-bundle.sh` never touches another
+A bundle installs into its own `versions/<v>/` with its own image
+directory (hardlinks into the prefix's SIF store, chapter 04), engine and
+rendered configuration; `install-bundle.sh` never touches another
 version, and every version's rendered config names the same
 `<prefix>/resources.tsv`, so the resource policy carries over (a new
 version's inventory may list new tasks: check `ugc-wgw resources` for rows that
@@ -81,6 +85,21 @@ outputs were used, so the mixture is traceable. Do not use it across an
 upstream change that alters the earlier stage's outputs in a way the later
 stage cares about; the changelog says when that is the case.
 
+## Members from before 0.14 in `cohort_qc`
+
+`cohort_qc` wants one somalier extract per member, an output `singleton`
+and `upstream` make since 0.14. For a member whose latest run predates it
+the driver passes the aligned BAM instead and the stage extracts the sketch
+itself (minutes, cached), with one warning naming those members. So the
+stage runs on an existing cohort at once: `submit --mode <mode> --cohort
+<id> --stage cohort_qc --any-version`, no per-sample re-run. Such a member
+has no somalier sex in its own run; the cohort page takes the stage's chrX
+call for it, and the sex its run used stays what 0.13 used (the coverage
+inference). Re-running `singleton` or `upstream` for an old member at 0.14
+replays every task but the three new ones from the call cache; sawfish
+onward recomputes only where the resolved sex differs from the coverage
+inference (none of the 864), and `downstream` then takes the resolved sex.
+
 ## Assemblies across versions
 
 A new version re-gates every stage: `submit` only counts runs of the current
@@ -116,12 +135,24 @@ stage read (`cohort_members` in `run_manifest.json`).
 
 ## SIF cache and storage
 
-Each version carries its own `sif/` (about 27 GB with every image; 33 SIFs
-in 0.11.0). Unchanged images are duplicated between versions; remove
-`versions/<old>/` when no project references it any more
+The prefix holds one copy of each image in `<prefix>/sif/` (about 27 GB
+for every image of a release; 32 SIFs in 0.13.1); a version's `sif/` is
+hardlinks into it, so a new version adds only the images that changed,
+and a release whose images did not change ships as a delta bundle of
+about 10 MB (chapter 04, "The SIF store"). A delta installs only where
+its base was installed; the installer checks that before placing anything.
+Prefixes from before 0.14.0 carry a full copy per version: the first
+install with the new installer adopts the active version's SIFs into the
+store (a read of every SIF, minutes), and `install-bundle.sh --prefix
+<prefix> --dedupe-sif` replaces the older versions' copies by hardlinks and
+prints what it freed (161 GB for six old versions on the smoke cluster).
+
+Remove `versions/<old>/` when no project references it any more
 (`grep -l versions/<old> */.ugc-wgw/config.json` across your projects) and
-its results have their manifests. The call cache grows with every distinct
-task execution; it is safe to delete entries, at the price of
-recomputation. Successful runs' work directories are already reclaimed by
-`delete_work = success`; failed attempts keep theirs until you remove the
-attempt directory by hand, which the driver never does.
+its results have their manifests; it frees what no other version links,
+and `find <prefix>/sif -maxdepth 1 -name '*.sif' -links 1` then lists the
+store's unreferenced copies, safe to delete. The call cache grows with
+every distinct task execution; it is safe to delete entries, at the price
+of recomputation. Successful runs' work directories are already reclaimed
+by `delete_work = success`; failed attempts keep theirs until you remove
+the attempt directory by hand, which the driver never does.

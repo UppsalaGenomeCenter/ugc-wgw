@@ -31,7 +31,7 @@ from .report import Raw, _bytes, _esc, _table
 from .stages import namespace
 from .util import UgcError, diag, read_json, utc_now, write_json
 
-DIGEST_SCHEMA = 2   # 2 (0.12.0): the assembly track's full detail; every per-sample digest rebuilds once
+DIGEST_SCHEMA = 3   # 3 (0.14.0): per-gene rows of the targeted callers, identity; every per-sample digest rebuilds once
 # The public repository (scripts/export-public.sh fills the owner); `project_url` in config.json overrides it.
 DEFAULT_PROJECT_URL = "https://github.com/UppsalaGenomeCenter/ugc-wgw"
 
@@ -48,9 +48,18 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "asm_switch_error_max": 0.05,         # yak trioeval switch-error rate above which a trio-binned haplotype fails
     "asm_genotype_concordance_min": 0.90, # genotype concordance with the sample's read-based SNVs below which the assembly fails (a swap scores 0.5-0.7)
     "pg_member_call_rate_min": 0.90,      # a member's call rate in the pangenome VCF below which the cohort page lists it (no sample flag: the cohort is frozen)
+    "mito_unexplained_max": 0.02,         # mitorsaw's unexplained fingerprint fraction above which the sample warns (mitorsaw's own passing criterion)
+    # identity (cohort_qc, somalier relatedness: ~1 duplicate, ~0.5 parent-child or siblings, ~0.25 second degree)
+    "duplicate_relatedness_min": 0.9,     # a pair at or above this is the same individual: both fail `duplicate`
+    "pedigree_relatedness_min": 0.35,     # a declared parent-child pair below this fails `pedigree_mismatch` ...
+    "pedigree_relatedness_max": 0.65,     # ... as does one above this (a "parent" that is a duplicate)
+    "related_relatedness_max": 0.2,       # an undeclared pair at or above this warns `related`
+    "het_ratio_mad_max": 3.0,             # het/(het+hom-alt) beyond median ± this many MADs across the cohort warns `het_outlier`
+    "sex_unknown_fails": 1,               # 1: a sample no source could sex fails `sex_not_inferred`; 0: it warns
 }
 
 STAGE_ORDER = ("singleton", "downstream", "upstream", "assembly_call", "assembly")  # which stage's file wins when several carry it
+PASS_ON = ("assembly", "identity", "all")   # what `summary --pass-list` gates on (docs/guide/06-running.md)
 SOURCE_MAP: dict[str, dict[str, str]] = {  # logical name -> {stage: output name}
     "stats_file": {"singleton": "stats_file", "downstream": "stats_file"},
     "msg_file": {"singleton": "msg_file", "downstream": "msg_file"},
@@ -77,6 +86,9 @@ SOURCE_MAP: dict[str, dict[str, str]] = {  # logical name -> {stage: output name
     "small_variant_vcf": {"singleton": "phased_small_variant_vcf", "downstream": "phased_small_variant_vcf", "upstream": "small_variant_vcf"},
     "small_variant_gvcf": {"singleton": "small_variant_gvcf", "upstream": "small_variant_gvcf"},
     "cpg_pileup_bed": {"singleton": "cpg_pileup_bed", "downstream": "cpg_pileup_bed"},
+    # identity (0.14.0): the somalier extract and the sex resolution table of the per-sample run
+    "somalier_extract": {"singleton": "somalier_extract", "upstream": "somalier_extract"},
+    "somalier_sex_tsv": {"singleton": "somalier_sex_tsv", "upstream": "somalier_sex_tsv"},
     # the assembly track (arrays such as assembly_stats are read through Sources.paths)
     "assembler_version": {"assembly": "assembler_version"},
     "flagger_summary": {"assembly": "flagger_summary"},
@@ -258,8 +270,8 @@ def resolve_sources(db: DB, sample_id: str, mode: str, version: str | None) -> S
 
 
 def resolve_cohort_runs(db: DB, cohort_id: str, mode: str, version: str | None) -> dict[str, RunRecord]:
-    stages = (("cohort_call", "cohort_merge", "cohort_freq") if mode == "joint"
-              else ("cohort_pangenome",) if mode == "assembly" else ("cohort_merge", "cohort_freq"))
+    stages = (("cohort_qc", "cohort_call", "cohort_merge", "cohort_freq") if mode == "joint"
+              else ("cohort_pangenome",) if mode == "assembly" else ("cohort_qc", "cohort_merge", "cohort_freq"))
     out: dict[str, RunRecord] = {}
     for stage in stages:
         run = latest_success_in_mode(db, "cohort", cohort_id, stage, mode, version)
@@ -326,14 +338,26 @@ def qc_flags(digest: dict[str, object], thr: dict[str, float]) -> dict[str, obje
         if v is not None and v < thr[tkey]:
             flag(code, "fail", f"{label} {sv.fmt(v, 1)}{unit} is below {sv.fmt(thr[tkey], 1)}{unit}", v, thr[tkey])
     sample: dict[str, object] = digest.get("sample", {})  # type: ignore[assignment]
-    sheet = SEX_TO_GROUP.get(str(sample.get("sex_sheet") or "").upper())
+    ident: dict[str, object] = digest.get("identity", {}) or {}  # type: ignore[assignment]
     inferred_raw = str(stats.get("inferred_sex") or "")
-    inferred = SEX_TO_GROUP.get(inferred_raw.upper())
-    if sheet and inferred and sheet != inferred:
-        flag("sex_mismatch", "warn", f"sex in the sheet is {sample.get('sex_sheet')} ({sheet}) but coverage infers "
-                                    f"{inferred_raw} ({inferred})", inferred_raw, sample.get("sex_sheet"))
-    elif not inferred_raw and _has_read_data(digest):
-        flag("sex_not_inferred", "warn", "no sex inferred from coverage (autosome depth is zero or mosdepth did not run)")
+    somalier_raw = str(ident.get("somalier") or "")
+    sources = [("the sheet", str(sample.get("sex_sheet") or "")), ("coverage", inferred_raw), ("somalier", somalier_raw)]
+    groups = [(name, raw, SEX_TO_GROUP.get(raw.upper())) for name, raw in sources if SEX_TO_GROUP.get(raw.upper())]
+    if len({g for _n, _r, g in groups}) > 1:
+        used = f"; the run used {ident.get('resolved')} ({ident.get('source')})" if ident.get("resolved") else ""
+        flag("sex_mismatch", "warn", "sex sources disagree: " + ", ".join(f"{name} {raw} ({g})" for name, raw, g in groups) + used,
+             ", ".join(f"{name.replace('the ', '')} {raw}" for name, raw, _g in groups), sample.get("sex_sheet"))
+    if _has_read_data(digest):
+        if not groups:
+            missing = "not in the sheet, coverage inferred nothing (autosome depth zero or mosdepth did not run)" + \
+                      (", somalier's chrX call is empty (too few sites or an intermediate heterozygosity)" if not ident.get("legacy") else
+                       "; this run predates the somalier extract (ugc-wgw 0.13)")
+            flag("sex_not_inferred", "fail" if thr.get("sex_unknown_fails", 1) else "warn",
+                 f"no source could sex the sample: {missing}; sawfish and TRGT ran with the XX default")
+        elif not inferred_raw:
+            flag("sex_not_inferred", "warn", "coverage inferred no sex (autosome depth zero or mosdepth did not run); "
+                 + (f"the run used {ident.get('resolved')} ({ident.get('source')})" if ident.get("resolved") else
+                    f"the sheet says {sample.get('sex_sheet')}"))
     targeted: dict[str, object] = digest.get("targeted", {})  # type: ignore[assignment]
     kivvi: dict[str, object] = targeted.get("kivvi", {})  # type: ignore[assignment]
     for region, d in kivvi.items():
@@ -347,6 +371,10 @@ def qc_flags(digest: dict[str, object], thr: dict[str, float]) -> dict[str, obje
     mito: dict[str, object] = targeted.get("mitorsaw", {})  # type: ignore[assignment]
     if mito and not mito.get("haplotypes"):
         flag("tool_status", "warn", "mitorsaw reported no haplotypes")
+    uf = (mito.get("fingerprint") or {}).get("unexplained_fraction") if mito else None  # type: ignore[union-attr]
+    if isinstance(uf, (int, float)) and uf > thr["mito_unexplained_max"]:
+        flag("mito_unexplained_high", "warn", f"mitorsaw's haplotypes leave {sv.fmt(100 * uf, 1)}% of the fingerprint reads unexplained, above "
+             f"{sv.fmt(100 * thr['mito_unexplained_max'], 1)}% (a contamination or NUMT signal)", uf, thr["mito_unexplained_max"])
     asm: dict[str, object] = digest.get("assembly", {}) or {}  # type: ignore[assignment]
     if asm:
         fl: dict[str, object] = asm.get("flagger") or {}  # type: ignore[assignment]
@@ -676,6 +704,20 @@ def build_digest(src: Sources, thr: dict[str, float], y_threshold: float = 0.1) 
                      "starphase": text("pbstarphase_tsv", sp.parse_starphase_tsv) or [],
                      "starphase_meta": jsonf("pbstarphase_json", sp.parse_starphase_json) or {},
                      "kivvi": {k: (jsonf(f"kivvi_{k}_json", sp.parse_kivvi) or {}) for k in ("kiv2", "d4z4")}}
+
+    # identity: the sex resolution of the per-sample run (0.14.0); a legacy run (no somalier outputs) gets the
+    # rule cohort_freq's grouping applies to it: the sheet, else the coverage inference
+    sex_tsv = text("somalier_sex_tsv", sp.parse_sex_tsv) or {}
+    legacy = src.path("somalier_sex_tsv") is None and src.scalar("resolved_sex") is None
+    declared = str(sex_tsv.get("declared") or src.sheet_sex or "")
+    coverage_sex = str(stats.get("inferred_sex") or "")
+    somalier_sex = str(src.scalar("somalier_sex") or sex_tsv.get("somalier") or "")
+    if legacy:
+        resolved, source = (declared, "declared") if SEX_TO_GROUP.get(declared.upper()) else (coverage_sex, "coverage") if coverage_sex else ("", "none")
+    else:
+        resolved, source = str(src.scalar("resolved_sex") or sex_tsv.get("resolved") or ""), str(src.scalar("resolved_sex_source") or sex_tsv.get("source") or "none")
+    d["identity"] = {"declared": declared, "coverage": coverage_sex, "somalier": somalier_sex, "resolved": resolved, "source": source,
+                     "legacy": legacy, "detail": sex_tsv}
 
     d["messages"] = messages
     files: dict[str, object] = {}
@@ -1075,7 +1117,10 @@ def _assembly_html(asm: dict[str, object]) -> str:
 
 
 def render_sample(d: dict[str, object], tools: list[dict[str, object]], *, project_name: str, project_url: str,
-                  cohort_links: list[tuple[str, str]] | None = None) -> str:
+                  cohort_links: list[tuple[str, str]] | None = None, identity_row: dict[str, object] | None = None,
+                  identity_cohort: str | None = None) -> str:
+    """The sample's page. `identity_row` is the sample's row of the cohort's cohort_qc tables (with the identity flags
+    the cohort page computed for it) when the page is made with --cohort and that cohort has a cohort_qc run."""
     s: dict[str, object] = d["sample"]  # type: ignore[assignment]
     sid = str(s["id"])
     stats: dict[str, object] = d.get("stats", {})  # type: ignore[assignment]
@@ -1091,6 +1136,8 @@ def render_sample(d: dict[str, object], tools: list[dict[str, object]], *, proje
     prov: dict[str, object] = d.get("provenance", {})  # type: ignore[assignment]
     runs: dict[str, dict[str, object]] = d.get("runs", {})  # type: ignore[assignment]
     inferred = str(cov.get("inferred_sex") or "") or "not inferred"
+    ident: dict[str, object] = d.get("identity", {}) or {}  # type: ignore[assignment]
+    sex_used = (f"{ident.get('resolved')} ({ident.get('source')})" if ident.get("resolved") else "none")
     sections: list[tuple[str, str]] = []
     parts: list[str] = []
 
@@ -1100,7 +1147,8 @@ def render_sample(d: dict[str, object], tools: list[dict[str, object]], *, proje
 
     # overview
     cards = [("QC", _status_badge(str(qc.get("status", "pass")))), ("sex (sheet)", s.get("sex_sheet") or "–"),
-             ("sex (inferred)", inferred), ("mean depth", sv.fmt(cov.get("mean"), 2, "x")),
+             ("sex (coverage)", inferred), ("sex (somalier)", ident.get("somalier") or ("not run" if ident.get("legacy") else "unknown")),
+             ("sex used", sex_used), ("mean depth", sv.fmt(cov.get("mean"), 2, "x")),
              ("reads", sv.fmt(reads.get("read_count"))), ("read N50", sv.fmt(reads.get("read_length_n50"), 0, " bp")),
              ("SNVs", sv.fmt(smv.get("snv"))), ("indels", sv.fmt(smv.get("indel"))),
              ("SVs", sv.fmt(sum(sv.finite(v) for v in svd.get("counts", {}).values()))),  # type: ignore[union-attr]
@@ -1230,22 +1278,32 @@ def render_sample(d: dict[str, object], tools: list[dict[str, object]], *, proje
     star: list[dict[str, str]] = tg.get("starphase", [])  # type: ignore[assignment]
     star_meta: dict[str, object] = tg.get("starphase_meta", {})  # type: ignore[assignment]
     kivvi: dict[str, dict[str, object]] = tg.get("kivvi", {})  # type: ignore[assignment]
-    para_rows = [[r["region"], r.get("genes"), sv.fmt(r.get("depth_median"), 1), sv.fmt(r.get("total_cn")), sv.fmt(r.get("n_haplotypes")),
+    para_rows = [[r["region"], r.get("genes"), sv.fmt(r.get("depth_median"), 1), sv.fmt(r.get("total_cn")), sv.fmt(r.get("gene_cn")), sv.fmt(r.get("n_haplotypes")),
+                  ", ".join(f"{g} {n}" for g, n in (r.get("haplotypes_by_gene") or {}).items()) or "–", ", ".join(r.get("fusions") or []) or "–",  # type: ignore[union-attr]
                   Raw('<span class="flag-warn">failed for coverage</span>') if r.get("failed") else "ok"] for r in para.get("regions", [])]  # type: ignore[union-attr]
     mito_rows = [[h.get("label"), sv.fmt(h.get("seq_len")), sv.fmt(h.get("num_ref_variants")), sv.fmt(h.get("estimated_abundance"), 3)] for h in mito.get("haplotypes", [])]  # type: ignore[union-attr]
+    fp: dict[str, object] = mito.get("fingerprint", {}) or {}  # type: ignore[assignment]
+    thr_mito = (d.get("qc", {}) or {}).get("thresholds", {}).get("mito_unexplained_max", DEFAULT_THRESHOLDS["mito_unexplained_max"])  # type: ignore[union-attr]
+    star_genes: dict[str, dict[str, object]] = star_meta.get("genes", {}) or {}  # type: ignore[assignment]
+    pgx_rows = [[g, v.get("diplotype"), v.get("simple_diplotype"), v.get("hap1"), v.get("hap2"), "yes" if v.get("called") else Raw('<span class="flag-warn">no</span>')]
+                for g, v in star_genes.items() if not v.get("hla")]
+    hla_rows = [[g, v.get("hap1") or "–", v.get("hap2") or "–", "yes" if v.get("called") else Raw('<span class="flag-warn">no</span>')] for g, v in star_genes.items() if v.get("hla")]
     kivvi_rows = [[{"kiv2": "LPA KIV-2", "d4z4": "DUX4 D4Z4"}.get(k, k), sv.fmt(v.get("allele_cn"), 1) if isinstance(v.get("allele_cn"), (int, float)) else (v.get("allele_cn") or "–"),
                    sv.fmt(v.get("n_complete_alleles")), sv.fmt(v.get("repeat_depth"), 1), sv.fmt(v.get("genome_depth"), 1), v.get("call_status") or "ok"] for k, v in kivvi.items()]
     db_meta = star_meta.get("database", {})
     add("sec-targeted", "Targeted callers",
         "<h3>Paraphase (paralogous regions)</h3>"
         + _cards([("regions", sv.fmt(para.get("n_regions"))), ("with a copy number", sv.fmt(para.get("n_with_cn"))), ("failed for coverage", sv.fmt(para.get("n_failed")))])
-        + ("<details><summary>per region</summary>" + _table(["region", "genes", "depth median", "total copy number", "haplotypes", "status"], para_rows) + "</details>" if para_rows else "<p class='muted'>Not available.</p>")
+        + ("<details><summary>per region</summary>" + _table(["region", "genes", "depth median", "total copy number", "gene copy number", "haplotypes", "haplotypes by gene", "fusions", "status"], para_rows) + "</details>" if para_rows else "<p class='muted'>Not available.</p>")
         + "<h3>mitorsaw (mitochondrial haplotypes)</h3>"
         + (_table(["haplotype", "length", "variants vs reference", "estimated abundance"], mito_rows, cls="") if mito_rows else "<p class='muted'>Not available.</p>")
-        + (f"<p class='small muted'>fingerprint explanation passing: {_esc(mito.get('fingerprint', {}).get('passing_explanation'))}</p>" if mito.get("fingerprint") else "")  # type: ignore[union-attr]
+        + (f"<p class='small muted'>fingerprint explanation passing: {_esc(fp.get('passing_explanation'))}; unexplained fraction "
+           f"{sv.fmt(fp.get('unexplained_fraction'), 4)} (warns above {sv.fmt(thr_mito, 3)})</p>" if fp else "")
         + "<h3>StarPhase (pharmacogenomic diplotypes)</h3>"
         + (f"<p class='small muted'>StarPhase {_esc(star_meta.get('version') or '')}; database: " + _esc(", ".join(f"{k} {v}" for k, v in sorted(db_meta.items()))) + "</p>" if star_meta else "")  # type: ignore[union-attr]
-        + (_table(["gene", "diplotype"], [[r["gene"], r["diplotype"]] for r in star]) if star else "<p class='muted'>Not available.</p>")
+        + (_table(["gene", "diplotype", "core alleles", "haplotype 1", "haplotype 2", "called"], pgx_rows) if pgx_rows
+           else (_table(["gene", "diplotype"], [[r["gene"], r["diplotype"]] for r in star]) if star else "<p class='muted'>Not available.</p>"))
+        + ("<h3>StarPhase (HLA alleles)</h3>" + _table(["gene", "allele 1", "allele 2", "called"], hla_rows) if hla_rows else "")
         + "<h3>kivvi (KIV-2 and D4Z4 repeats)</h3>"
         + (_table(["repeat", "copy number", "complete alleles", "repeat depth", "genome depth", "status"], kivvi_rows, cls="") if kivvi_rows else "<p class='muted'>Not available.</p>"))
 
@@ -1253,6 +1311,21 @@ def render_sample(d: dict[str, object], tools: list[dict[str, object]], *, proje
     asm: dict[str, object] = d.get("assembly", {})  # type: ignore[assignment]
     if asm:
         add("sec-assembly", "Assembly", _assembly_html(asm))
+
+    # identity in the cohort (cohort_qc's row for this member)
+    if identity_row:
+        ir = identity_row
+        iflags: list[dict[str, object]] = ir.get("flags", []) or []  # type: ignore[assignment]
+        exp = ir.get("closest_expected")
+        add("sec-identity", f"Identity in cohort {identity_cohort}",
+            _cards([("somalier sex (cohort_qc)", ir.get("somalier_sex") or "unknown"), ("closest relative", ir.get("closest_relative") or "–"),
+                    ("relatedness", sv.fmt(ir.get("closest_relatedness"), 3)), ("expected from the pedigree", sv.fmt(exp, 2) if exp not in (None, "") else "none declared"),
+                    ("IBS0 with the closest", sv.fmt(ir.get("closest_ibs0"))), ("heterozygosity ratio", sv.fmt(ir.get("het_ratio"), 3)),
+                    ("ancestry (1000 Genomes projection)", f"{ir.get('ancestry')} ({sv.fmt(ir.get('ancestry_prob'), 2)})" if ir.get("ancestry") else "not run"),
+                    ("extract made in cohort_qc", ir.get("extracted_here") or "no")])
+            + ("<h3>Identity flags</h3>" + _table(["flag", "severity", "message"], [[f.get("code"), Raw(f"<span class='flag-{_esc(f.get('severity'))}'>{_esc(f.get('severity'))}</span>"), f.get("message")] for f in iflags], cls="")
+               if iflags else "<p class='muted'>No identity flag.</p>")
+            + f"<p class='small muted'>From the cohort's latest <code>cohort_qc</code> run; the cohort page's Identity section has every pair.</p>")
 
     # messages and files
     msgs: list[str] = d.get("messages", [])  # type: ignore[assignment]
@@ -1301,36 +1374,33 @@ def assembly_passes(digest: dict[str, object]) -> bool:
     return not any(str(f.get("code", "")).startswith("asm_") and f.get("severity") == "fail" for f in qc.get("flags", []))  # type: ignore[union-attr]
 
 
-def run(cfg: Config, db: DB, code: CodeInfo, *, sample_ids: list[str] | None, cohort_id: str | None, mode: str,
-        version: str | None, out_dir: Path, force: bool = False, thresholds: dict[str, float] | None = None,
-        jobs: int = 1, pass_list: Path | None = None) -> list[Path]:
-    """Write the per-sample reports (and the cohort report when asked); returns the report paths written. With
-    pass_list, also the IDs whose assembly QC has no fail, in the sample sheet's order, one per line."""
+@dataclass
+class Collected:
+    """The digests of the requested samples, fresh: reused from disk or rebuilt, QC re-evaluated, written back."""
+    digests: dict[str, dict[str, object]]
+    sources: dict[str, Sources]
+    rebuilt: list[str]
+    skipped: list[str]   # samples without a successful run in the mode
+
+
+def collect_digests(cfg: Config, db: DB, code: CodeInfo, *, sample_ids: list[str], mode: str, version: str | None, out_dir: Path,
+                    force: bool = False, thresholds: dict[str, float] | None = None, jobs: int = 1) -> Collected:
+    """Fresh digests for the samples: reused from `out_dir` when `digest_is_fresh`, rebuilt (in `jobs` processes) and
+    written back otherwise; `qc` re-evaluated against the thresholds either way. Shared by `summary` and `export`."""
     thr = thresholds or dict(DEFAULT_THRESHOLDS)
-    cohort: Cohort | None = None
-    if cohort_id:
-        cohort = db.get_cohort(cohort_id)
-        if cohort is None:
-            raise UgcError(f"unknown cohort {cohort_id}")
-    targets: list[str] = []
-    for sid in (sample_ids or []) + (cohort.members if cohort else []) + ([] if (sample_ids or cohort) else db.list_sample_ids()):
-        if sid not in targets:
-            targets.append(sid)
-    for sid in targets:
+    for sid in sample_ids:
         if not db.sample_exists(sid):
             raise UgcError(f"unknown sample {sid}")
     out_dir.mkdir(parents=True, exist_ok=True)
-    tools = sp.scan_tool_versions(cfg.code_dir)
     y = y_threshold_of(code)
-    project_name = cfg.project_dir.name or "project"
-    written: list[Path] = []
     digests: dict[str, dict[str, object]] = {}
     sources: dict[str, Sources] = {}
     to_build: list[str] = []
-    for sid in targets:
+    skipped: list[str] = []
+    for sid in sample_ids:
         src = resolve_sources(db, sid, mode, version)
         if src is None:
-            diag(f"{sid}: no successful {mode} run; skipped")
+            skipped.append(sid)
             continue
         sources[sid] = src
         dpath = out_dir / f"{sid}.summary.json"
@@ -1349,29 +1419,68 @@ def run(cfg: Config, db: DB, code: CodeInfo, *, sample_ids: list[str] | None, co
             results = [_digest_job(w) for w in work]
         for sid, digest in zip(to_build, results):
             digests[sid] = digest
+    for sid, digest in digests.items():
+        digest["qc"] = qc_flags(digest, thr)  # thresholds may have changed since the digest was written
+        write_json(out_dir / f"{sid}.summary.json", digest)
+    return Collected(digests=digests, sources=sources, rebuilt=to_build, skipped=skipped)
+
+
+def run(cfg: Config, db: DB, code: CodeInfo, *, sample_ids: list[str] | None, cohort_id: str | None, mode: str,
+        version: str | None, out_dir: Path, force: bool = False, thresholds: dict[str, float] | None = None,
+        jobs: int = 1, pass_list: Path | None = None, pass_on: str = "assembly") -> list[Path]:
+    """Write the per-sample reports (and the cohort report when asked); returns the report paths written. With
+    pass_list, also the IDs that pass `pass_on`, in the sample sheet's order, one per line: `assembly` (an assembly
+    without a QC fail), `identity` (no identity failure in the cohort's cohort_qc run and no related or duplicate
+    partner earlier in the sheet; needs --cohort), `all` (both)."""
+    thr = thresholds or dict(DEFAULT_THRESHOLDS)
+    if pass_on not in PASS_ON:
+        raise UgcError(f"--pass-on must be one of {', '.join(PASS_ON)}, not {pass_on!r}")
+    cohort: Cohort | None = None
+    if cohort_id:
+        cohort = db.get_cohort(cohort_id)
+        if cohort is None:
+            raise UgcError(f"unknown cohort {cohort_id}")
+    if pass_list is not None and pass_on != "assembly" and cohort is None:
+        raise UgcError(f"--pass-on {pass_on} needs --cohort: the identity checks come from the cohort's cohort_qc run")
+    targets: list[str] = []
+    for sid in (sample_ids or []) + (cohort.members if cohort else []) + ([] if (sample_ids or cohort) else db.list_sample_ids()):
+        if sid not in targets:
+            targets.append(sid)
+    tools = sp.scan_tool_versions(cfg.code_dir)
+    project_name = cfg.project_dir.name or "project"
+    written: list[Path] = []
+    collected = collect_digests(cfg, db, code, sample_ids=targets, mode=mode, version=version, out_dir=out_dir, force=force,
+                                thresholds=thr, jobs=jobs)
+    for sid in collected.skipped:
+        diag(f"{sid}: no successful {mode} run; skipped")
+    digests, to_build = collected.digests, collected.rebuilt
     cohort_links = [(c, f"{c}.summary.html") for c in ([cohort.cohort_id] if cohort else [])]
-    passed: list[str] = []
+    # the cohort digest first: the identity rows of its cohort_qc run go into the members' pages
+    cdigest: dict[str, object] | None = None
+    identity_rows: dict[str, dict[str, object]] = {}
+    if cohort:
+        from .summary_cohort import build_cohort_digest  # noqa: PLC0415 - keeps the cohort page optional
+        cruns = resolve_cohort_runs(db, cohort.cohort_id, mode, version)
+        cdigest = build_cohort_digest(cohort, {sid: digests[sid] for sid in cohort.members if sid in digests}, cruns, mode, thr)
+        ident: dict[str, object] = cdigest.get("identity", {}) or {}  # type: ignore[assignment]
+        identity_rows = ident.get("members", {}) or {}  # type: ignore[assignment]
+    asm_passed: list[str] = []
     for i, sid in enumerate(targets):
         if sid not in digests:
             continue
         digest = digests[sid]
-        digest["qc"] = qc_flags(digest, thr)  # thresholds may have changed since the digest was written
         if assembly_passes(digest):
-            passed.append(sid)
-        dpath = out_dir / f"{sid}.summary.json"
-        write_json(dpath, digest)
+            asm_passed.append(sid)
         hpath = out_dir / f"{sid}.summary.html"
         links = cohort_links or [(c, f"{c}.summary.html") for c in db.sample_cohorts(sid) if (out_dir / f"{c}.summary.html").exists()]
         hpath.write_text(render_sample(digest, tools, project_name=project_name, project_url=cfg.project_url or DEFAULT_PROJECT_URL,
-                                       cohort_links=links))
+                                       cohort_links=links, identity_row=identity_rows.get(sid), identity_cohort=cohort.cohort_id if cohort else None))
         written.append(hpath)
         diag(f"{sid}: digest {'rebuilt' if sid in to_build else 'reused'}, wrote {hpath.name}")
         if (i + 1) % 50 == 0:
             diag(f"{i + 1}/{len(targets)} samples")
-    if cohort:
-        from .summary_cohort import build_cohort_digest, render_cohort  # noqa: PLC0415 - keeps the cohort page optional
-        cruns = resolve_cohort_runs(db, cohort.cohort_id, mode, version)
-        cdigest = build_cohort_digest(cohort, {sid: digests[sid] for sid in cohort.members if sid in digests}, cruns, mode, thr)
+    if cohort and cdigest is not None:
+        from .summary_cohort import render_cohort  # noqa: PLC0415
         write_json(out_dir / f"{cohort.cohort_id}.summary.json", cdigest)
         cpath = out_dir / f"{cohort.cohort_id}.summary.html"
         cpath.write_text(render_cohort(cdigest, tools, project_name=project_name, project_url=cfg.project_url or DEFAULT_PROJECT_URL))
@@ -1379,8 +1488,23 @@ def run(cfg: Config, db: DB, code: CodeInfo, *, sample_ids: list[str] | None, co
         diag(f"{cohort.cohort_id}: wrote {cpath.name} ({len(cdigest.get('members', []))} members)")  # type: ignore[arg-type]
     if pass_list is not None:
         sheet_order = {sid: i for i, sid in enumerate(db.list_sample_ids())}
+        if pass_on == "assembly":
+            passed, what = asm_passed, "have an assembly without a QC fail"
+        else:
+            from .summary_cohort import identity_pass  # noqa: PLC0415
+            assert cohort is not None and cdigest is not None
+            if not (cdigest.get("identity") or {}).get("available"):  # type: ignore[union-attr]
+                raise UgcError(f"--pass-on {pass_on}: cohort {cohort.cohort_id} has no successful cohort_qc run in {mode} mode "
+                               f"(ugc-wgw submit --mode {mode} --cohort {cohort.cohort_id} --stage cohort_qc)")
+            passed, excluded = identity_pass(cdigest, sheet_order)
+            for sid, why in excluded:
+                diag(f"pass list: {sid} excluded: {why}")
+            what = "pass the identity checks (no failure, no related or duplicate partner earlier in the sheet)"
+            if pass_on == "all":
+                passed = [sid for sid in passed if sid in asm_passed]
+                what += " and have an assembly without a QC fail"
         pass_list.parent.mkdir(parents=True, exist_ok=True)
         pass_list.write_text("".join(sid + "\n" for sid in sorted(passed, key=lambda s: sheet_order.get(s, len(sheet_order)))))
         written.append(pass_list)
-        diag(f"pass list: {len(passed)} of {len(digests)} summarised sample(s) have an assembly without a QC fail -> {pass_list}")
+        diag(f"pass list ({pass_on}): {len(passed)} of {len(digests)} summarised sample(s) {what} -> {pass_list}")
     return written

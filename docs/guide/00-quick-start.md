@@ -29,7 +29,9 @@ registered into the same project and a new cohort is frozen.
   `module load python/3.12.7`.
 - The bundle directory: `ugc-pacbio-wgw-0.8.0.tar`, its `.sha256`,
   `install-bundle.sh`, and a `site.cfg` to start from
-  (`examples/site.cfg` in this guide).
+  (`examples/site.cfg` in this guide). The first install of a prefix needs
+  the full tar; later releases arrive as a small `-delta.tar` that reuses
+  the images the prefix already holds (chapter 04).
 - Three writable places on a filesystem the compute nodes read: the install
   prefix (`/proj/ugc` below), a results root, and the raw HiFi BAMs.
 - The sample list: a sample sheet (chapter 05) or the facility's per-file
@@ -143,9 +145,10 @@ ugc-wgw -v submit --mode standalone --cohort C1 --max-inflight 40 --poll-interva
 ```
 
 `submit` is a foreground loop: it keeps `--max-inflight` samples running,
-starts `cohort_merge` when the last `singleton` succeeded and
-`cohort_freq` after that, and exits when nothing is runnable. Every sample
-is one miniwdl run; every task of it is one SLURM job.
+starts `cohort_qc` (the identity check, minutes) and `cohort_merge` when the
+last `singleton` succeeded and `cohort_freq` after that, and exits when
+nothing is runnable. Every sample is one miniwdl run; every task of it is
+one SLURM job.
 
 ## 6. Watch, retry, stop
 
@@ -195,13 +198,15 @@ frequencies under `cohort_freq`. Three commands give the overview:
 ```bash
 ugc-wgw report --mode standalone --cohort C1 --out /proj/ugc/results/cohort2026/report.html
 ugc-wgw summary --cohort C1 --jobs 8
+ugc-wgw export --cohort C1
 ugc-wgw usage --sizes
 ```
 
 The report is a technical summary of the campaign (runs, timings, failures,
 resource usage, provenance); the summary writes one analysis page per
 sample and one for the cohort under `<results>/reports/summary/` (coverage,
-variants, phasing, repeats, methylation, QC flags); `usage` prints the
+variants, phasing, repeats, methylation, QC flags); `export` writes the
+cohort's numbers as TSV tables, one per domain, for joining; `usage` prints the
 core-hours, GPU-hours, memory, queue wait and disk per stage, task and
 sample from SLURM's accounting, with a cost estimate when the project has
 prices. The pages are single self-contained HTML files: copy them to a

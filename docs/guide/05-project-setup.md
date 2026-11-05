@@ -189,7 +189,7 @@ is a complete example.
 |---|---|---|
 | `sample_id` | yes | Matches `[A-Za-z0-9._-]+`; it becomes a directory name and the sample name in every VCF and BAM. |
 | `hifi_reads` | yes | One or more unaligned HiFi BAM paths, comma-separated. All are aligned and merged. |
-| `sex` | no | `MALE`, `FEMALE` or blank; case-insensitive. Advisory only (chapter 02). |
+| `sex` | no | `MALE`/`FEMALE`, `M`/`F`, `XX`/`XY` or PLINK's `1`/`2`, case-insensitive; blank = unknown (PLINK's `0` is not accepted: leave the cell empty). Stored as `MALE`/`FEMALE`. The first source of the sex a run uses (chapter 02); a disagreement with the coverage or somalier evidence is a QC flag, not a correction. |
 | `fail_reads` | no | Fail-reads BAMs, comma-separated, for upstream's TRGT baiting. |
 | `father_id`, `mother_id` | no | Pedigree. Drive trio binning in assembly mode; otherwise informational. |
 | anything else | no | Kept as metadata on the sample record (`meta_json`), not used by any stage. |
@@ -284,6 +284,14 @@ The file has one sample ID per line; `#` comments and blank lines are ignored
 and only the first token of a line is read. `examples/cohort.txt` shows the
 format. Every ID must be a registered sample; duplicates and an empty list are
 errors. The cohort ID matches `[A-Za-z0-9._-]+`.
+
+When a `cohort_qc` run of the project has already reported two of the new
+members as the same individual (relatedness at or above
+`duplicate_relatedness_min`, 0.9), `freeze` prints a warning naming the pair
+and the cohort it was seen in, and freezes anyway: the list is yours. The
+usual loop is a candidate cohort, `submit --stage cohort_qc`, the cohort
+page's Identity section, `summary --pass-list --pass-on identity`, then the
+real freeze from that list (chapter 06).
 
 Freeze when the membership is final. The cohort is immutable and the order is
 the order of every array the cohort stages receive. A joint-mode `submit`

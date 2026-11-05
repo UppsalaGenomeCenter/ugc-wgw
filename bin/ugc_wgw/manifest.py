@@ -104,6 +104,17 @@ def build(run: RunRecord, result: RunResult, code: CodeInfo, engine: dict[str, s
                 doc["ugc_wgw_manifest"] = read_json(Path(path))
             except (OSError, ValueError):
                 doc["ugc_wgw_manifest"] = None
+        ns = namespace(run.stage)
+        if f"{ns}.resolved_sex" in result.outputs:   # upstream/singleton since 0.14.0: what was declared, inferred and used
+            declared = None
+            try:
+                inputs_doc = read_json(files.inputs) if files.inputs.exists() else {}
+                declared = inputs_doc.get(f"{ns}.declared_sex") if isinstance(inputs_doc, dict) else None
+            except (OSError, ValueError):
+                pass
+            doc["sex"] = {"declared": declared, "coverage": result.outputs.get(f"{ns}.inferred_sex"),
+                          "somalier": result.outputs.get(f"{ns}.somalier_sex"), "resolved": result.outputs.get(f"{ns}.resolved_sex"),
+                          "source": result.outputs.get(f"{ns}.resolved_sex_source")}
     return doc
 
 

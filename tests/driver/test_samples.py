@@ -94,6 +94,17 @@ class SamplesTest(unittest.TestCase):
         with self.assertRaises(UgcError):
             samples.add_samples(self.db, self.events, dup, check_paths=False)
 
+    def test_sex_aliases(self):
+        tsv = self.tmp / "aliases.tsv"
+        tsv.write_text("sample_id\thifi_reads\tsex\nA\ta.bam\tM\nB\tb.bam\tf\nC\tc.bam\tXY\nD\td.bam\t2\nE\te.bam\t1\nF\tf.bam\t\nG\tg.bam\tfemale\n")
+        samples.add_samples(self.db, self.events, tsv, check_paths=False)
+        self.assertEqual({s: self.db.get_sample(s).sex for s in "ABCDEFG"},
+                         {"A": "MALE", "B": "FEMALE", "C": "MALE", "D": "FEMALE", "E": "MALE", "F": None, "G": "FEMALE"})
+        tsv.write_text("sample_id\thifi_reads\tsex\nH\th.bam\t0\n")   # PLINK's 0 is not a sex: leave the cell empty instead
+        with self.assertRaises(UgcError) as ctx:
+            samples.add_samples(self.db, self.events, tsv, check_paths=False)
+        self.assertIn("sex", str(ctx.exception))
+
     def test_bad_values(self):
         for text in ("sample_id\thifi_reads\tsex\nS1\ta.bam\tother\n", "sample_id\thifi_reads\nbad id\ta.bam\n",
                      "sample_id\thifi_reads\nS1\t\n", "sample_id\nS1\n"):

@@ -104,10 +104,34 @@ def _deepvariant_inputs(ctx: BuildContext) -> dict[str, object]:
     return doc
 
 
+def _ref_map(ctx: BuildContext) -> dict[str, str]:
+    """The rendered reference map as a dict (two-column TSV, comments and blank lines ignored)."""
+    out: dict[str, str] = {}
+    try:
+        with open(ctx.cfg.ref_map_file) as fh:
+            for line in fh:
+                s = line.rstrip("\n")
+                if not s or s.startswith("#") or "\t" not in s:
+                    continue
+                k, v = s.split("\t", 1)
+                out[k] = v
+    except OSError:
+        pass
+    return out
+
+
+def _sex_inputs(ctx: BuildContext) -> dict[str, object]:
+    """The sheet's sex as the first source of the resolved sex (omitted when blank), and the registry of the
+    somalier image the per-sample stages run."""
+    rec = ctx.sample()
+    return {"declared_sex": rec.sex or None, "ugc_wgw_container_registry": ctx.cfg.ugc_wgw_container_registry}
+
+
 def build_singleton(ctx: BuildContext) -> dict[str, object]:
     doc = common_inputs(ctx)
     doc.update(_sample_reads(ctx))
     doc.update(_deepvariant_inputs(ctx))
+    doc.update(_sex_inputs(ctx))
     return doc
 
 
@@ -115,6 +139,7 @@ def build_upstream(ctx: BuildContext) -> dict[str, object]:
     doc = common_inputs(ctx)
     doc.update(_sample_reads(ctx))
     doc.update(_deepvariant_inputs(ctx))
+    doc.update(_sex_inputs(ctx))
     return doc
 
 
@@ -148,7 +173,11 @@ def build_downstream(ctx: BuildContext) -> dict[str, object]:
     sid = ctx.subject_id
     doc["sample_id"] = sid
     _, up = ctx.prior("upstream", "sample", sid)
-    doc["sex"] = up.req("inferred_sex")
+    sex = up.opt("resolved_sex")
+    if sex is None:   # an upstream run from before 0.14.0: mosdepth's inference is all there is
+        sex = up.req("inferred_sex")
+        LOGGER.info("downstream %s: upstream run %s predates resolved_sex; using inferred_sex %r", sid, up.run.run_id, sex)
+    doc["sex"] = sex
     doc["aligned_hifi_reads"] = up.req("aligned_hifi_reads")
     doc["aligned_hifi_reads_index"] = up.req("aligned_hifi_reads_index")
     doc["aligned_fail_reads"] = up.opt("aligned_fail_reads")
@@ -220,21 +249,69 @@ def build_cohort_merge(ctx: BuildContext) -> dict[str, object]:
 SEX_TO_GROUP = {"MALE": "XY", "FEMALE": "XX"}
 
 
+SEX_SOURCES = ("declared", "coverage", "somalier")   # the sources of a resolved sex, in precedence order
+
+
 def _sex_group(ctx: BuildContext, sid: str, inferred_stage: str) -> tuple[str, str]:
-    """(group, source) for the frequency strata: the sheet's sex first, else the sex upstream inferred from
-    coverage (an empty inferred_sex is unknown, as upstream itself treats it), else unknown."""
+    """(group, source) for the strata: the resolved sex of the member's per-sample run (0.14+: declared, else
+    coverage, else somalier, with its source); for a run from before that, the sheet's sex (`declared`), else the sex
+    upstream inferred from coverage (`coverage`; an empty inferred_sex is unknown, as upstream itself treats it)."""
     rec = ctx.db.get_sample(sid)
     sheet = SEX_TO_GROUP.get((rec.sex or "").upper()) if rec else None
-    _, outs = ctx.prior(inferred_stage, "sample", sid)
+    _, outs = ctx.prior(inferred_stage, "sample", sid)   # recorded as provenance even when the sheet decides
+    if sheet:   # the sheet is the first source of the resolved sex as well
+        return sheet, "declared"
+    resolved = outs.opt("resolved_sex")
+    if resolved is not None:
+        group = SEX_TO_GROUP.get(str(resolved).upper())
+        source = str(outs.opt("resolved_sex_source") or "")
+        return (group, source if source in SEX_SOURCES else "") if group else ("", "")
     inferred = SEX_TO_GROUP.get(str(outs.opt("inferred_sex") or "").upper())
-    if sheet and inferred and sheet != inferred:
-        LOGGER.warning("cohort_freq: sample %s is %s in the sheet but %s was inferred from coverage; using the sheet",
-                       sid, sheet, inferred)
-    if sheet:
-        return sheet, "sheet"
     if inferred:
-        return inferred, "inferred"
+        return inferred, "coverage"
     return "", ""
+
+
+def build_cohort_qc(ctx: BuildContext) -> dict[str, object]:
+    """Identity QC: every member's somalier extract (null, plus the aligned BAM, for a member whose per-sample run
+    predates the extract: the stage makes it), the sheet's pedigree, the resolved sex groups, and the ancestry
+    switch (on when the reference map names an installed 1000 Genomes set)."""
+    doc = common_inputs(ctx)
+    members = ctx.members()
+    doc["cohort_id"] = ctx.subject_id
+    doc["sample_ids"] = members
+    per_stage, bam_name = ("singleton", "merged_haplotagged_bam") if ctx.mode == "standalone" else ("upstream", "aligned_hifi_reads")
+    extracts: list[object] = []
+    bams: list[object] = []
+    bais: list[object] = []
+    legacy: list[str] = []
+    for sid in members:
+        _, outs = ctx.prior(per_stage, "sample", sid)
+        som = outs.opt("somalier_extract")
+        extracts.append(som)
+        if som is None:
+            legacy.append(sid)
+            bams.append(outs.req(bam_name))
+            bais.append(outs.req(bam_name + "_index"))
+        else:
+            bams.append(None)
+            bais.append(None)
+    doc["somalier_files"] = extracts
+    if legacy:
+        LOGGER.warning("cohort_qc %s: %d member(s) have no somalier_extract (per-sample runs before 0.14.0): the stage extracts "
+                       "from their aligned BAMs: %s", ctx.subject_id, len(legacy), ", ".join(legacy[:5]) + (" ..." if len(legacy) > 5 else ""))
+        doc["aligned_bams"] = bams
+        doc["aligned_bam_indices"] = bais
+    groups = [_sex_group(ctx, sid, per_stage) for sid in members]
+    doc["sample_sexes"] = [g for g, _ in groups]
+    doc["sample_sex_sources"] = [src for _, src in groups]
+    recs = {sid: ctx.db.get_sample(sid) for sid in members}
+    doc["father_ids"] = [(recs[sid].father_id if recs[sid] else "") or "" for sid in members]
+    doc["mother_ids"] = [(recs[sid].mother_id if recs[sid] else "") or "" for sid in members]
+    tar = _ref_map(ctx).get("somalier_1kg_tar")
+    doc["run_ancestry"] = bool(ctx.ov("cohort_qc", "run_ancestry", bool(tar) and Path(str(tar)).exists()))
+    doc["ugc_wgw_container_registry"] = ctx.cfg.ugc_wgw_container_registry
+    return doc
 
 
 def build_cohort_freq(ctx: BuildContext) -> dict[str, object]:
@@ -366,6 +443,7 @@ def build_cohort_pangenome(ctx: BuildContext) -> dict[str, object]:
 BUILDERS = {
     "singleton": build_singleton,
     "upstream": build_upstream,
+    "cohort_qc": build_cohort_qc,
     "cohort_call": build_cohort_call,
     "downstream": build_downstream,
     "cohort_merge": build_cohort_merge,

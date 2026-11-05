@@ -46,11 +46,24 @@ _COHORT: dict[str, Source] = {
     "sample_ids": (DRIVER, "frozen cohort, in its order"),
 }
 _REGISTRY: dict[str, Source] = {"ugc_wgw_container_registry": (CONFIG, "ugc_wgw_container_registry")}
+_SEX: dict[str, Source] = {"declared_sex": (DRIVER, "sample sheet sex (MALE/FEMALE, normalised); omitted when blank")}
 _MEMBER_VCFS = "singleton (standalone) or downstream (joint) outputs of the members"
+_PER_SAMPLE = "singleton (standalone) or upstream (joint) outputs of the members"
 
 SOURCES: dict[str, dict[str, Source]] = {
-    "singleton": {**_COMMON, **_SAMPLE, **_DEEPVARIANT},
-    "upstream": {**_COMMON, **_SAMPLE, **_DEEPVARIANT},
+    "singleton": {**_COMMON, **_SAMPLE, **_DEEPVARIANT, **_SEX, **_REGISTRY},
+    "upstream": {**_COMMON, **_SAMPLE, **_DEEPVARIANT, **_SEX, **_REGISTRY},
+    "cohort_qc": {
+        **_COMMON, **_COHORT, **_REGISTRY,
+        "somalier_files": (DRIVER, _PER_SAMPLE + " (somalier_extract; null for a member whose run predates it)"),
+        "aligned_bams": (DRIVER, _PER_SAMPLE + " (the aligned BAM of a member without an extract, null otherwise; only when one lacks it)"),
+        "aligned_bam_indices": (DRIVER, _PER_SAMPLE + " (as aligned_bams)"),
+        "sample_sexes": (DRIVER, "the resolved sex of each member's run (declared, else coverage, else somalier), as XX/XY"),
+        "sample_sex_sources": (DRIVER, "declared, coverage, somalier or empty, per member"),
+        "father_ids": (DRIVER, "sample sheet, empty where none"),
+        "mother_ids": (DRIVER, "sample sheet, empty where none"),
+        "run_ancestry": (FREE, "switch: the driver sets true when the reference map names an installed somalier_1kg_tar"),
+    },
     "cohort_call": {
         **_COMMON, **_COHORT,
         "gvcfs": (DRIVER, "upstream outputs of the members"),
@@ -63,7 +76,7 @@ SOURCES: dict[str, dict[str, Source]] = {
     "downstream": {
         **_COMMON,
         "sample_id": (DRIVER, "sample sheet"),
-        "sex": (DRIVER, "upstream outputs (inferred_sex)"),
+        "sex": (DRIVER, "upstream outputs (resolved_sex; inferred_sex for an upstream run from before 0.14.0)"),
         "aligned_hifi_reads": (DRIVER, "upstream outputs"),
         "aligned_hifi_reads_index": (DRIVER, "upstream outputs"),
         "aligned_fail_reads": (DRIVER, "upstream outputs, when the sample has fail reads"),
@@ -95,8 +108,8 @@ SOURCES: dict[str, dict[str, Source]] = {
         "sv_vcf_index": (DRIVER, "cohort_merge outputs"),
         "small_variant_vcf": (DRIVER, "cohort_call (joint) or cohort_merge (standalone, when it ran GLnexus) outputs"),
         "small_variant_vcf_index": (DRIVER, "cohort_call (joint) or cohort_merge (standalone, when it ran GLnexus) outputs"),
-        "sample_sexes": (DRIVER, "sample sheet, else upstream's inferred_sex, else empty"),
-        "sample_sex_sources": (DRIVER, "sheet, inferred or empty, per member"),
+        "sample_sexes": (DRIVER, "the resolved sex of each member's run (declared, else coverage, else somalier), as XX/XY"),
+        "sample_sex_sources": (DRIVER, "declared, coverage, somalier or empty, per member"),
     },
     "assembly": {
         **_COMMON, **_REGISTRY,

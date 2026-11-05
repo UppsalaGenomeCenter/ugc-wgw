@@ -65,6 +65,7 @@ class SourcesTest(unittest.TestCase):
         # joint chain
         for sid in MEMBERS:
             self.seed("upstream", "sample", sid, "joint", inferred_sex="MALE", fail_reads=["/x"] if sid == "S1" else None)
+        self.gen("cohort_qc", "cohort", "C1", "joint")   # every member has an extract: no aligned BAMs
         self.gen("cohort_call", "cohort", "C1", "joint")
         self.gen("cohort_call", "cohort", "C1", "joint", run_sawfish_joint_call=True)
         self.seed("cohort_call", "cohort", "C1", "joint")
@@ -78,6 +79,9 @@ class SourcesTest(unittest.TestCase):
         # standalone chain
         for sid in MEMBERS:
             self.seed("singleton", "sample", sid, inferred_sex="MALE")
+        self.gen("cohort_qc", "cohort", "C1")
+        self.seed("singleton", "sample", "S2", attempt=2, inferred_sex="MALE", legacy=True)   # a run from before 0.14.0: no extract
+        self.gen("cohort_qc", "cohort", "C1")                                                  # ... so its aligned BAM travels
         self.gen("cohort_merge", "cohort", "C1")
         self.gen("cohort_merge", "cohort", "C1", merge_phased_small_variants=True)
         self.seed("cohort_merge", "cohort", "C1", attempt=2, run_glnexus=True)
@@ -165,7 +169,7 @@ class ListingTest(unittest.TestCase):
 
     def test_stage_and_mode_filters_and_the_table(self):
         rows, _ = self.rows("--mode", "standalone")
-        self.assertEqual(sorted(set(r["stage"] for r in rows)), ["cohort_freq", "cohort_merge", "singleton"])
+        self.assertEqual(sorted(set(r["stage"] for r in rows)), ["cohort_freq", "cohort_merge", "cohort_qc", "singleton"])
         rows, _ = self.rows("--stage", "assembly")
         self.assertEqual(set(r["stage"] for r in rows), {"assembly"})
         self.assertIn("hifiasm_threads", [r["input"] for r in rows])

@@ -75,7 +75,9 @@ touched. Every id is checked before anything is deleted.
 ### `ugc-wgw cohort freeze <cohort_id> --samples <file>`
 
 Freezes the ordered ID list in the file; every ID must be registered. No
-flags besides `--samples`.
+flags besides `--samples`. Warns (and freezes anyway) when a `cohort_qc`
+run of the project reported two of the IDs as the same individual
+(relatedness at or above `duplicate_relatedness_min`).
 
 ### `ugc-wgw submit` and `ugc-wgw retry`
 
@@ -158,12 +160,36 @@ the workflow log.
 | `--any-version` | current | Runs of every ugc-wgw version. |
 | `--out-dir DIR` | `<results>/reports/summary` | Where `<id>.summary.html` and `<id>.summary.json` go. |
 | `--force` | off | Rebuild the per-sample digests even when their runs are unchanged. |
-| `--threshold KEY=VALUE` | config or defaults | QC threshold override; repeatable. Keys: `depth_mean_min`, `mapped_read_percent_min`, `read_quality_median_min`; assembly: `asm_flagger_err_pct_max` (10), `asm_hap_length_min` (2.5e9), `asm_hap_length_max` (3.5e9), `asm_reliable_fraction_min` (0.5), `asm_het_loss_max` (0.2), `asm_switch_error_max` (0.05), `asm_genotype_concordance_min` (0.90; a sample swap scores 0.5–0.7); pangenome: `pg_member_call_rate_min` (0.90; lists members on the cohort page, no sample flag); placeholders until the per-sample pilot sets them. |
-| `--pass-list FILE` | none | Also write the IDs whose assembly QC has no `fail` flag (the `asm_*` flags), in sample-sheet order: the input of `cohort freeze` for a pangenome cohort (chapter 06). |
+| `--threshold KEY=VALUE` | config or defaults | QC threshold override; repeatable. Keys: `depth_mean_min`, `mapped_read_percent_min`, `read_quality_median_min`; `sex_unknown_fails` (1: a sample no source could sex fails `sex_not_inferred`; 0: it warns); assembly: `asm_flagger_err_pct_max` (10), `asm_hap_length_min` (2.5e9), `asm_hap_length_max` (3.5e9), `asm_reliable_fraction_min` (0.5), `asm_het_loss_max` (0.2), `asm_switch_error_max` (0.05), `asm_genotype_concordance_min` (0.90; a sample swap scores 0.5–0.7); pangenome: `pg_member_call_rate_min` (0.90; lists members on the cohort page, no sample flag); placeholders until the per-sample pilot sets them; mitochondria: `mito_unexplained_max` (0.02, mitorsaw's own passing criterion); identity (`cohort_qc`, somalier relatedness): `duplicate_relatedness_min` (0.9), `pedigree_relatedness_min` (0.35), `pedigree_relatedness_max` (0.65), `related_relatedness_max` (0.2), `het_ratio_mad_max` (3). |
+| `--pass-list FILE` | none | Also write the IDs that pass `--pass-on`, in sample-sheet order: the input of `cohort freeze` (chapter 06). |
+| `--pass-on assembly\|identity\|all` | `assembly` | What the pass list gates on: `assembly` = no `fail` among the `asm_*` flags (a pangenome cohort); `identity` = no identity failure in the cohort's `cohort_qc` run (`duplicate`, `pedigree_mismatch`, `sex_not_inferred`) and no related or duplicate partner earlier in the sheet (the later member of each pair at or above `related_relatedness_max` is dropped, each exclusion printed with its partner); needs `--cohort` and exits 1 without a `cohort_qc` run; `all` = both. |
 | `--jobs N` | `1` | Build digests in N processes. |
 
 Exit 1 when nothing could be written (no sample has a successful run of the
 mode), on an unknown sample, cohort or threshold key.
+
+### `ugc-wgw export --cohort ID`
+
+The cohort's tables as TSV files, one per domain, from the members' digests
+and the cohort stages' outputs (chapter 07, "Cohort tables").
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--cohort ID` | required | The frozen cohort. |
+| `--domains D[,D...]` | all | `members`, `coverage`, `variants`, `phasing`, `cn`, `pgx`, `hla`, `mito`, `identity`, `tr`, `methyl`, `assembly`; repeatable. |
+| `--mode M` | `standalone` | Which runs the digests come from, as for `summary`. |
+| `--any-version` | current | Runs of every ugc-wgw version. |
+| `--out DIR` | `<results>/cohorts/<ID>/<version>/export` | Output directory; refused when it holds files but no `export_manifest.json`, unless `--force`. |
+| `--summary-dir DIR` | `<results>/reports/summary` | Where the per-sample digests live (shared with `summary`). |
+| `--strata none\|sex\|ancestry\|all` | `all` | Frequency strata besides `ALL`: sex groups, `cohort_qc`'s ancestry projection, both or none; a missing ancestry table is a note, not an error. |
+| `--force` | off | Rebuild the digests even when current; write into a non-empty `--out`; remove the cohort's stale tables the export does not write. |
+| `--threshold KEY=VALUE` | config or defaults | QC threshold override, as for `summary`. |
+| `--jobs N` | `1` | Build digests in N processes. |
+| `--json` | off | Print `export_manifest.json` instead of the file paths. |
+
+Prints the files written, one per line; skipped domains (a cohort stage
+that has not run, no member with an assembly) and notes on stderr. Exit 1
+when nothing could be written, on an unknown cohort or domain.
 
 ### `ugc-wgw resources`
 
@@ -232,7 +258,7 @@ SIGINT or SIGTERM.
 | `venv_dir` | `null` | Engine venv. |
 | `results_dir` | project dir | Results root. |
 | `ref_map_file` | | Every stage. |
-| `ugc_wgw_container_registry` | `ghcr.io/uppsalagenomecenter` | `cohort_merge`, `assembly`, `assembly_call`. |
+| `ugc_wgw_container_registry` | `ghcr.io/uppsalagenomecenter` | `singleton`, `upstream`, `cohort_qc`, `cohort_merge`, `assembly`, `assembly_call`. |
 | `backend` | `"HPC"` | Every stage. |
 | `preemptible` | `true` | Every stage; no effect on the HPC. |
 | `max_inflight` | `4` | |
@@ -263,7 +289,8 @@ SIGINT or SIGTERM.
 
 Tab-separated, header row required. Columns `sample_id` (required,
 `[A-Za-z0-9._-]+`), `hifi_reads` (required, comma-separated uBAM paths),
-`sex` (`MALE`, `FEMALE`, blank), `fail_reads`, `father_id`, `mother_id`;
+`sex` (`MALE`/`FEMALE`, `M`/`F`, `XX`/`XY`, `1`/`2`, or blank; stored as
+`MALE`/`FEMALE`), `fail_reads`, `father_id`, `mother_id`;
 other columns are kept as metadata. Example: `examples/samples.tsv`.
 `scripts/manifest-to-samples.py` writes one from a per-file delivery
 manifest with a PLINK-style pedigree (chapter 05).
@@ -362,6 +389,9 @@ miniwdl log lines the report reads: `runtime.cpu adjusted to host limit`
 | `waiting for <stage> of <ids> (+N more)` | An earlier sample stage has not succeeded for these samples. |
 | `waiting for <stage> of cohort <id>` | An earlier cohort stage has not succeeded. |
 | `<stage> needs --cohort <id>` | A cohort stage was selected without a cohort. |
+
+`cohort_qc` never appears in a later stage's reason: it is the one stage the
+rule skips (chapter 02).
 
 ## Environment assumptions
 

@@ -11,7 +11,7 @@ from ugc_wgw import summary_parsers as sp
 from ugc_wgw import summary_svg as sv
 from ugc_wgw.db import DB
 
-from .helpers import HtmlChecker, make_project, run_cli, seed_success, write_ids, write_tsv
+from .helpers import HtmlChecker, make_project, run_cli, seed_files, seed_success, write_ids, write_tsv
 
 BCFTOOLS_STATS = """# This file was produced by bcftools stats (1.23.1+htslib-1.23.1)
 # SN\t[2]id\t[3]key\t[4]value
@@ -277,6 +277,36 @@ class ParserTest(unittest.TestCase):
                                       "gene_details": {"A": {"diplotypes": [{"diplotype": "*1/*1"}]},
                                                        "B": {"diplotypes": [{"diplotype": "NO_READS/NO_READS"}]}}})
         self.assertEqual((sj["version"], sj["n_genes"], sj["n_called"], sj["database"]), ("2.2.0", 2, 1, {"cpic_version": "x"}))
+
+    def test_paraphase_gene_fields(self):
+        from .fixtures import PARAPHASE
+        p = sp.parse_paraphase(PARAPHASE)
+        by = {r["region"]: r for r in p["regions"]}
+        self.assertEqual((p["n_regions"], p["n_failed"], p["n_with_cn"], p["n_with_gene_cn"]), (3, 1, 2, 1))
+        c = by["CYP2D6"]
+        self.assertEqual((c["gene_cn"], c["fusions"], c["depth_p80"], c["genome_depth"], c["sample_sex"]), (2, ["CYP2D6-CYP2D7"], 33.0, 30.1, "male"))
+        self.assertEqual(c["haplotypes_by_gene"], {"CYP2D6": 2, "CYP2D7": 2})
+        self.assertEqual(c["phase_region"], "38:chr22:42126000-42145000")
+        r = by["RCCX"]
+        self.assertEqual((r["n_haplotypes"], r["two_copy"], r["haplotypes_by_gene"]), (3, 1, {"CYP21A2": 2, "TNXB": 2}))
+        s = by["smn1"]
+        self.assertEqual((s["gene_cn"], s["fusions"], s["haplotypes_by_gene"], s["failed"]), (None, [], {}, True))
+        # the older orientation (name -> encoded haplotype) and a top-level gene_cn are read the same way
+        p2 = sp.parse_paraphase({"smn1": {"final_haplotypes": {"smn1hap1": "ATC", "smn2hap1": "ATG"}, "gene_cn": 1, "two_copy_haplotypes": ["smn1hap1"]}})
+        self.assertEqual((p2["regions"][0]["haplotypes_by_gene"], p2["regions"][0]["gene_cn"]), ({"smn1": 2, "smn2": 1}, 1))
+
+    def test_starphase_genes(self):
+        from .fixtures import STARPHASE_JSON
+        sj = sp.parse_starphase_json(STARPHASE_JSON)
+        g = sj["genes"]
+        self.assertEqual((sj["n_genes"], sj["n_called"], sj["n_hla"], sj["n_hla_called"]), (7, 5, 2, 1))
+        self.assertEqual((g["CYP2D6"]["hap1"], g["CYP2D6"]["hap2"], g["CYP2D6"]["simple_diplotype"], g["CYP2D6"]["hla"]), ("*1", "*4", "*1/*4", False))
+        self.assertTrue(g["HLA-A"]["hla"] and g["HLA-A"]["called"])
+        self.assertFalse(g["HLA-DRB3"]["called"])
+        self.assertFalse(g["TPMT"]["called"])
+        self.assertTrue(sp.starphase_called("*1", "*17"))
+        for bad in ("NO_READS", "NO_MATCH", ".", "Multiple", ""):
+            self.assertFalse(sp.starphase_called("*1", bad))
         k = sp.parse_kivvi({"allele_cn": "NA", "depth_summary": {"genome_depth": None}, "complete_alleles": [],
                             "additional": {"call_status": "failed_due_to_no_reads"}})
         self.assertEqual((k["allele_cn"], k["call_status"], k["n_complete_alleles"]), ("NA", "failed_due_to_no_reads", 0))
@@ -445,6 +475,8 @@ class SvgTest(unittest.TestCase):
         self.assertIn("records", s)
         self.assertIn(">40<", s)
         self.check(sv.hist([(f"bin{i}", i) for i in range(20)]))
+        s = self.check(sv.hist([("0.05", 1), ("0.50", 2)]))          # a few counts: one tick per integer, none repeated
+        self.assertEqual([s.count(f">{t}</text>") for t in (0, 1, 2)], [1, 1, 1])
         self.assertIn("No data", sv.hist([("a", 0)]))
         s = self.check(sv.stacked([("chr1", {"DEL": 3, "INS": 5}), ("chr2", {"DEL": 1, "DUP": 2})], ["DEL", "INS", "DUP"]))
         self.assertIn('class="m3"', s)
@@ -518,7 +550,38 @@ class QcTest(unittest.TestCase):
         d["messages"] = []
         self.assertEqual(summary.qc_flags(d, dict(summary.DEFAULT_THRESHOLDS)), {"status": "pass", "flags": [], "thresholds": summary.DEFAULT_THRESHOLDS})
         d["stats"]["inferred_sex"] = ""
-        self.assertEqual([f["code"] for f in summary.qc_flags(d, dict(summary.DEFAULT_THRESHOLDS))["flags"]], ["sex_not_inferred"])
+        self.assertEqual([(f["code"], f["severity"]) for f in summary.qc_flags(d, dict(summary.DEFAULT_THRESHOLDS))["flags"]], [("sex_not_inferred", "warn")])
+        # three sources (0.14.0): somalier's chrX call joins; the flag names every disagreeing source and what the run used
+        d["stats"]["inferred_sex"] = "FEMALE"
+        d["identity"] = {"declared": "MALE", "coverage": "FEMALE", "somalier": "MALE", "resolved": "MALE", "source": "declared", "legacy": False}
+        f = summary.qc_flags(d, dict(summary.DEFAULT_THRESHOLDS))["flags"]
+        self.assertEqual([(x["code"], x["severity"]) for x in f], [("sex_mismatch", "warn")])
+        self.assertIn("the sheet MALE (XY), coverage FEMALE (XX), somalier MALE (XY); the run used MALE (declared)", f[0]["message"])
+        self.assertEqual(f[0]["value"], "sheet MALE, coverage FEMALE, somalier MALE")
+        # nothing could sex the sample: a failure by default, a warning with sex_unknown_fails 0
+        d["sample"]["sex_sheet"] = None
+        d["stats"]["inferred_sex"] = ""
+        d["identity"] = {"declared": "", "coverage": "", "somalier": "", "resolved": "", "source": "none", "legacy": False}
+        f = summary.qc_flags(d, dict(summary.DEFAULT_THRESHOLDS))["flags"]
+        self.assertEqual([(x["code"], x["severity"]) for x in f], [("sex_not_inferred", "fail")])
+        self.assertIn("no source could sex the sample", f[0]["message"])
+        self.assertIn("XX default", f[0]["message"])
+        self.assertEqual([(x["code"], x["severity"]) for x in summary.qc_flags(d, dict(summary.DEFAULT_THRESHOLDS, sex_unknown_fails=0))["flags"]],
+                         [("sex_not_inferred", "warn")])
+        d["identity"]["legacy"] = True
+        self.assertIn("predates the somalier extract", summary.qc_flags(d, dict(summary.DEFAULT_THRESHOLDS))["flags"][0]["message"])
+        # somalier alone sexed it: a warning that names the source the run used
+        d["identity"] = {"declared": "", "coverage": "", "somalier": "FEMALE", "resolved": "FEMALE", "source": "somalier", "legacy": False}
+        f = summary.qc_flags(d, dict(summary.DEFAULT_THRESHOLDS))["flags"]
+        self.assertEqual([(x["code"], x["severity"]) for x in f], [("sex_not_inferred", "warn")])
+        self.assertIn("the run used FEMALE (somalier)", f[0]["message"])
+        d["identity"]["somalier"] = "MALE"
+        d["sample"]["sex_sheet"] = "MALE"
+        d["stats"]["inferred_sex"] = "MALE"
+        self.assertEqual(summary.qc_flags(d, dict(summary.DEFAULT_THRESHOLDS))["flags"], [])   # three sources that agree
+        d["sample"]["sex_sheet"] = "MALE"
+        d["stats"]["inferred_sex"] = ""
+        d["identity"] = {}
         # an assembly-only sample has an empty coverage block and no read stage: no sex to infer, so no warning
         asm_only = {"stats": {}, "sample": {"sex_sheet": "MALE"}, "coverage": {"mean": None, "inferred_sex": ""},
                     "runs": {"assembly": {"attempt": 1}, "assembly_call": {"attempt": 1}}, "targeted": {}, "messages": [], "warnings": []}
@@ -528,9 +591,228 @@ class QcTest(unittest.TestCase):
         self.assertTrue(summary._has_read_data(asm_only))
         self.assertEqual([f["code"] for f in summary.qc_flags(asm_only, dict(summary.DEFAULT_THRESHOLDS))["flags"]], ["sex_not_inferred"])
 
+    def test_mito_flag(self):
+        def flags(uf, thr=None):
+            d = {"stats": {"depth_mean": "31", "mapped_read_percent": "99.9", "read_quality_median": "31", "inferred_sex": "MALE"},
+                 "sample": {"sex_sheet": "MALE"}, "coverage": {"mean": 31.0}, "messages": [], "warnings": [],
+                 "targeted": {"mitorsaw": {"haplotypes": [{"label": "hap_0"}], "fingerprint": {"passing_explanation": uf is None or uf <= 0.02, "unexplained_fraction": uf}}}}
+            t = dict(summary.DEFAULT_THRESHOLDS)
+            t.update(thr or {})
+            return summary.qc_flags(d, t)["flags"]
+        f = flags(0.05)
+        self.assertEqual([(x["code"], x["severity"], x["value"], x["threshold"]) for x in f], [("mito_unexplained_high", "warn", 0.05, 0.02)])
+        self.assertIn("5.0%", f[0]["message"])
+        self.assertEqual(flags(0.02), [])
+        self.assertEqual(flags(None), [])
+        self.assertEqual(flags(0.05, {"mito_unexplained_max": 0.1}), [])
+
+
+class IdentityTest(unittest.TestCase):
+    """cohort_qc's tables -> parsers, the cohort-level flags and the identity pass list (bin/ugc_wgw/summary_cohort.py)."""
+
+    def test_parsers(self):
+        from fixtures import SOMALIER_PAIRS_HEADER, fixture_bytes
+        sex = sp.parse_sex_tsv(fixture_bytes("somalier_sex_tsv", "S1", "singleton", sex={"declared": "", "coverage": "", "somalier": "MALE", "resolved": "MALE",
+                                                                                          "source": "somalier"}).decode().splitlines())
+        self.assertEqual((sex["declared"], sex["coverage"], sex["somalier"], sex["resolved"], sex["source"], sex["x_n"], sex["x_het"], sex["x_hom_alt"]),
+                         ("", "", "MALE", "MALE", "somalier", 300, 5, 150))
+        self.assertAlmostEqual(sex["x_het_ratio"], 5 / 150, places=4)
+        self.assertEqual(sp.parse_sex_tsv([]), {})
+        pairs = sp.parse_somalier_pairs((SOMALIER_PAIRS_HEADER + "A\tB\t0.980\t0\t396\t0.9\t190\t190\t180\t176\t110\t110\t100\t300\t0\t0\t-1.0\n"
+                                         "A\tC\t0.500\t0\t300\t0.9\t190\t190\t180\t90\t110\t110\t100\t300\t0\t0\t0.5\n").splitlines())
+        self.assertEqual([(p["sample_a"], p["sample_b"], p["relatedness"], p["ibs0"], p["expected"]) for p in pairs], [("A", "B", 0.98, 0, None), ("A", "C", 0.5, 0, 0.5)])
+        related = sp.parse_somalier_pairs(fixture_bytes("qc_related_pairs", "C1", "cohort_qc", members=["A", "B", "C"], pedigree={"C": {"A"}}).decode().splitlines())
+        self.assertEqual([(p["sample_a"], p["sample_b"], p["expected"]) for p in related], [("A", "C", 0.5)])   # the declared pair, kept at 0.01
+        summ = sp.parse_qc_summary(fixture_bytes("qc_summary", "C1", "cohort_qc", members=["A", "B", "C"]).decode().splitlines())
+        self.assertEqual((summ["pairs"]["n"]["total"], summ["members"]["n"]["total"], summ["pairs"]["hist"]["0.00"]), (3, 3, 3))
+        members = sp.parse_qc_members(fixture_bytes("qc_members", "C1", "cohort_qc", members=["A", "B", "C"], pedigree={"C": {"A"}}).decode().splitlines())
+        self.assertEqual([m["sample_id"] for m in members], ["A", "B", "C"])
+        self.assertEqual((members[0]["somalier_sex"], members[0]["x_n"], members[0]["het_ratio"], members[0]["closest_relative"], members[0]["closest_expected"]),
+                         ("MALE", 300, 0.63, "B", None))
+        self.assertEqual(members[2]["closest_expected"], 0.5)
+        anc = sp.parse_ancestry(fixture_bytes("qc_ancestry", "C1", "cohort_qc", members=["A", "B"]).decode().splitlines())
+        self.assertEqual([(r["sample_id"], r["predicted"], r["given"]) for r in anc], [("HG00096", "EUR", "EUR"), ("HG00403", "EAS", "EAS"), ("A", "EUR", ""), ("B", "AFR", "")])
+        self.assertEqual(anc[0]["probs"], {"EAS": 0.0, "AFR": 0.0, "AMR": 0.1, "SAS": 0.0, "EUR": 0.9})
+        self.assertEqual(anc[0]["pcs"], [0.5, 2.0, 0.1, 0.2, 0.3])
+
+    def test_scatter(self):
+        c = _Checker()
+        s = sv.scatter([("EUR", 0.5, 2.0), ("EAS", 2.6, -7.1), ("AFR", -3.0, 1.0)], [("S1", 0.4, 2.0, "EUR"), ("S2", -2.9, 1.1, "AFR")])
+        c.feed(s)
+        self.assertEqual((c.errors, c.stack), ([], []))
+        self.assertEqual(s.count("<circle"), 5)
+        self.assertIn("<title>S2: AFR</title>", s)
+        self.assertIn("PC1", s)
+        self.assertIn('class="legend"', s)   # the superpopulations' colours
+        self.assertEqual(s.count("<rect"), 4)   # the plot frame and the legend's three swatches
+        self.assertIn("No data", sv.scatter([], []))
+        self.assertIn("<circle", sv.scatter([], [("S1", 0.0, 0.0, "")]))   # one point: a degenerate range is widened
+
+    def test_flags_and_pass(self):
+        from ugc_wgw import summary_cohort as sc
+        thr = dict(summary.DEFAULT_THRESHOLDS)
+        pairs = [{"sample_a": "A", "sample_b": "B", "relatedness": 0.98, "ibs0": 0, "expected": None},
+                 {"sample_a": "A", "sample_b": "C", "relatedness": 0.5, "ibs0": 0, "expected": 0.5},
+                 {"sample_a": "B", "sample_b": "D", "relatedness": 0.45, "ibs0": 0, "expected": None},
+                 {"sample_a": "C", "sample_b": "E", "relatedness": 0.02, "ibs0": 40, "expected": 0.5},
+                 {"sample_a": "D", "sample_b": "E", "relatedness": 0.01, "ibs0": 40, "expected": None}]
+        members = [{"sample_id": s, "het_ratio": h, "somalier_sex": sx} for s, h, sx in
+                   (("A", 0.63, "MALE"), ("B", 0.64, "MALE"), ("C", 0.62, "FEMALE"), ("D", 0.63, "FEMALE"), ("E", 0.90, "MALE"), ("F", 0.63, "FEMALE"))]
+        digests = {s: {"sample": {"id": s, "sex_sheet": "MALE" if s in ("A", "B", "E", "F") else "FEMALE", "father_id": None, "mother_id": None},
+                       "coverage": {"inferred_sex": ""}, "identity": {"legacy": s == "F", "somalier": "" if s == "F" else "x"}}
+                   for s in "ABCDEF"}
+        digests["C"]["sample"]["father_id"] = "A"
+        digests["E"]["sample"]["father_id"] = "C"      # declared, but unrelated: a mismatch
+        digests["E"]["sample"]["mother_id"] = "OUTSIDE"   # a parent outside the cohort is not checked
+        flags = sc.identity_flags(pairs, members, digests, list("ABCDEF"), thr)
+        codes = {sid: sorted((f["code"], f["severity"]) for f in fl) for sid, fl in flags.items()}
+        self.assertEqual(codes["A"], [("duplicate", "fail")])
+        self.assertEqual(codes["B"], [("duplicate", "fail"), ("related", "warn")])
+        self.assertEqual(codes["C"], [("pedigree_mismatch", "fail")])
+        self.assertEqual(codes["D"], [("related", "warn")])
+        self.assertEqual(codes["E"], [("het_outlier", "warn"), ("pedigree_mismatch", "fail")])
+        self.assertEqual(codes["F"], [("sex_mismatch", "warn")])   # a legacy member: somalier's call from cohort_qc against the sheet
+        self.assertIn("same individual as B (relatedness 0.980", flags["A"][0]["message"])
+        self.assertIn("declared father C but relatedness 0.020 is below the parent-child range 0.35–0.65", [f["message"] for f in flags["E"] if f["code"] == "pedigree_mismatch"][0])
+        self.assertIn("declared father of E", flags["C"][0]["message"])
+        self.assertIn("somalier's chrX call in cohort_qc is FEMALE (XX) but the sheet says MALE (XY)", flags["F"][0]["message"])
+        self.assertIn("0.900 is beyond the cohort's median 0.630", [f["message"] for f in flags["E"] if f["code"] == "het_outlier"][0])
+        # a declared pair missing from the table warns; stricter thresholds move the undeclared pair to duplicate
+        digests["D"]["sample"]["mother_id"] = "F"
+        self.assertEqual([f["severity"] for f in sc.identity_flags(pairs, members, digests, list("ABCDEF"), thr)["D"] if f["code"] == "pedigree_mismatch"], ["warn"])
+        strict = sc.identity_flags(pairs, members, digests, list("ABCDEF"), dict(thr, duplicate_relatedness_min=0.4))
+        self.assertEqual(sorted(f["code"] for f in strict["D"]), ["duplicate", "pedigree_mismatch"])
+        # the pass list: failures out, then the later member of each pair at or above related_relatedness_max
+        rows = [{"id": s, "present": True, "identity_status": "fail" if any(f["severity"] == "fail" for f in flags[s]) else "pass"} for s in "ABCDEF"]
+        d = {"members": rows, "identity": {"available": True, "flags": flags, "pairs": pairs}, "thresholds": thr}
+        passed, excluded = sc.identity_pass(d, {s: i for i, s in enumerate("ABCDEF")})
+        self.assertEqual(passed, ["D", "F"])
+        self.assertEqual([sid for sid, _why in excluded], ["A", "B", "C", "E"])
+        self.assertIn("same individual as B", dict(excluded)["A"])
+        # sheet order decides which relative stays: with D first, B's partner D is kept and B goes for the pair, not only for the duplicate
+        rows2 = [dict(r, identity_status="pass") for r in rows]
+        passed2, excluded2 = sc.identity_pass({"members": rows2, "identity": {"available": True, "flags": {}, "pairs": pairs}, "thresholds": thr},
+                                              {"D": 0, "B": 1, "A": 2, "C": 3, "E": 4, "F": 5})
+        self.assertEqual(passed2, ["D", "A", "E", "F"])
+        self.assertEqual(dict(excluded2)["B"], "related to D (relatedness 0.450), which comes first in the sheet")
+        self.assertIn("related to A (relatedness 0.500)", dict(excluded2)["C"])
+
+
+class IdentityEndToEnd(unittest.TestCase):
+    """A four-member cohort through the fake: a declared parent-child pair, a duplicate pair, a member only somalier
+    could sex, a sex alias in the sheet; the pages, the pass list, the manifest and the freeze warning."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.cfg = make_project(self.tmp)
+        self.proj = str(self.cfg.project_dir)
+        tsv = write_tsv(self.tmp, [{"sample_id": "S1", "sex": "MALE", "hifi_reads": "s1.bam"},
+                                   {"sample_id": "S2", "sex": "FEMALE", "hifi_reads": "s2.bam", "father_id": "S1"},
+                                   {"sample_id": "S3", "sex": "", "hifi_reads": "s3.bam"},
+                                   {"sample_id": "S4", "sex": "M", "hifi_reads": "s4.bam"}])
+        self.assertEqual(run_cli(["--project", self.proj, "samples", "add", str(tsv)])[0], 0)
+        self.assertEqual(run_cli(["--project", self.proj, "cohort", "freeze", "C1", "--samples", str(write_ids(self.tmp, ["S1", "S2", "S3", "S4"]))])[0], 0)
+        code, out, err = run_cli(["--project", self.proj, "submit", "--mode", "standalone", "--cohort", "C1"],
+                                 env={"UGC_WGW_FAKE_INFERRED_SEX": "S1=FEMALE,S2=FEMALE,S4=MALE", "UGC_WGW_FAKE_RELATEDNESS": "S1:S2=0.52,S3:S4=0.97",
+                                      "UGC_WGW_FAKE_SOMALIER_SEX": "S3=MALE"})
+        self.assertEqual(code, 0, err)
+        self.out_dir = self.cfg.results_dir / "reports" / "summary"
+
+    def test_pages_pass_list_manifest_and_freeze(self):
+        code, out, err = run_cli(["--project", self.proj, "summary", "--cohort", "C1", "--pass-list", str(self.tmp / "id.txt"), "--pass-on", "identity"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual((self.tmp / "id.txt").read_text().split(), ["S1"])
+        self.assertIn("S2 excluded: related to S1 (relatedness 0.520), which comes first in the sheet", err)
+        self.assertIn("S3 excluded: same individual as S4", err)
+        self.assertIn("pass list (identity): 1 of 4", err)
+        cd = json.loads((self.out_dir / "C1.summary.json").read_text())
+        self.assertEqual(cd["identity"]["counts"], {"duplicate": 2})   # the declared parent-child pair at 0.52 is no `related`
+        self.assertEqual({r["id"]: r["identity_status"] for r in cd["members"]}, {"S1": "warn", "S2": "pass", "S3": "fail", "S4": "fail"})
+        self.assertEqual({r["id"]: (r["sex_used"], r["sex_source"]) for r in cd["members"]},
+                         {"S1": ("MALE", "declared"), "S2": ("FEMALE", "declared"), "S3": ("MALE", "somalier"), "S4": ("MALE", "declared")})
+        self.assertEqual(cd["sex"]["mismatches"], ["S1"])          # sheet MALE, coverage FEMALE
+        self.assertEqual(cd["sex"]["sources"], {"declared": 3, "somalier": 1})
+        self.assertEqual(cd["identity"]["pairs"][0]["expected"], 0.5)
+        text = (self.out_dir / "C1.summary.html").read_text()
+        self.assertIn("same individual as S4", text)
+        self.assertIn("duplicate", text)
+        s3 = (self.out_dir / "S3.summary.html").read_text()
+        self.assertIn("Identity in cohort C1", s3)
+        self.assertIn("same individual as S4", s3)
+        d3 = json.loads((self.out_dir / "S3.summary.json").read_text())
+        self.assertEqual((d3["identity"]["resolved"], d3["identity"]["source"], d3["identity"]["somalier"], d3["identity"]["legacy"]), ("MALE", "somalier", "MALE", False))
+        self.assertEqual(d3["identity"]["detail"]["x_n"], 300)
+        self.assertEqual([(f["code"], f["severity"]) for f in d3["qc"]["flags"] if f["code"].startswith("sex")], [("sex_not_inferred", "warn")])
+        d4 = json.loads((self.out_dir / "S4.summary.json").read_text())
+        self.assertEqual(d4["sample"]["sex_sheet"], "MALE")        # the sheet's M
+        self.assertNotIn("duplicate", {f["code"] for f in d4["qc"]["flags"]})   # cohort-level flags stay on the cohort page
+        # --pass-on all needs an assembly too; identity needs a cohort with a cohort_qc run
+        code, _, err = run_cli(["--project", self.proj, "summary", "--cohort", "C1", "--pass-list", str(self.tmp / "all.txt"), "--pass-on", "all"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual((self.tmp / "all.txt").read_text(), "")
+        code, _, err = run_cli(["--project", self.proj, "summary", "--samples", "S1", "--pass-list", str(self.tmp / "x.txt"), "--pass-on", "identity"])
+        self.assertEqual(code, 1)
+        self.assertIn("needs --cohort", err)
+        self.assertEqual(run_cli(["--project", self.proj, "cohort", "freeze", "C2", "--samples", str(write_ids(self.tmp, ["S1", "S2"], "c2.txt"))])[0], 0)
+        code, _, err = run_cli(["--project", self.proj, "summary", "--cohort", "C2", "--pass-list", str(self.tmp / "y.txt"), "--pass-on", "identity"])
+        self.assertEqual(code, 1)
+        self.assertIn("no successful cohort_qc run", err)
+        code, _, err = run_cli(["--project", self.proj, "summary", "--cohort", "C2", "--pass-list", str(self.tmp / "z.txt")])
+        self.assertEqual(code, 0, err)                                   # the assembly gate needs no cohort_qc
+        self.assertIn("cohort_qc has not run for this cohort", (self.out_dir / "C2.summary.html").read_text())
+        # the run manifest's sex block
+        db = DB(self.cfg.db_path)
+        try:
+            m3 = json.loads((db.latest_run("sample", "S3", "singleton", None).run_path / "run_manifest.json").read_text())
+            m4 = json.loads((db.latest_run("sample", "S4", "singleton", None).run_path / "run_manifest.json").read_text())
+        finally:
+            db.close()
+        self.assertEqual(m3["sex"], {"declared": None, "coverage": "", "somalier": "MALE", "resolved": "MALE", "source": "somalier"})
+        self.assertEqual((m4["sex"]["declared"], m4["sex"]["resolved"], m4["sex"]["source"]), ("MALE", "MALE", "declared"))
+        # freezing a cohort that holds a known duplicate pair warns but succeeds
+        code, _, err = run_cli(["--project", self.proj, "cohort", "freeze", "C3", "--samples", str(write_ids(self.tmp, ["S3", "S4"], "c3.txt"))])
+        self.assertEqual(code, 0, err)
+        self.assertIn("S3 and S4 look like the same individual (relatedness 0.970 in cohort_qc of C1)", err)
+        code, _, err = run_cli(["--project", self.proj, "cohort", "freeze", "C4", "--samples", str(write_ids(self.tmp, ["S1", "S3"], "c4.txt"))])
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("same individual", err)
+
+    def test_legacy_member_and_ancestry(self):
+        """A member whose run predates the extract (seed `legacy`) is extracted by cohort_qc; an ancestry table gives
+        strata and the projection on the page; somalier's call for the legacy member comes from cohort_qc's table."""
+        db = DB(self.cfg.db_path)
+        try:
+            seed_success(self.cfg, db, "singleton", "sample", "S5", {"sample_id": "S5", "hifi_reads": ["/dev/null"], "inferred_sex": "FEMALE", "legacy": True})
+        finally:
+            db.close()
+        self.assertEqual(run_cli(["--project", self.proj, "samples", "add", str(write_tsv(self.tmp, [{"sample_id": "S5", "sex": "MALE", "hifi_reads": "s5.bam"}], "s5.tsv"))])[0], 0)
+        self.assertEqual(run_cli(["--project", self.proj, "cohort", "freeze", "C5", "--samples", str(write_ids(self.tmp, ["S1", "S5"], "c5.txt"))])[0], 0)
+        # the 1000 Genomes set "installed": the driver turns run_ancestry on by itself
+        with open(self.cfg.ref_map_file, "a") as fh:
+            fh.write(f"somalier_1kg_tar\t{self.cfg.ref_map_file}\nsomalier_1kg_labels\t{self.cfg.ref_map_file}\n")
+        code, out, err = run_cli(["--project", self.proj, "submit", "--mode", "standalone", "--cohort", "C5", "--stage", "cohort_qc"],
+                                 env={"UGC_WGW_FAKE_INFERRED_SEX": "S1=FEMALE,S5=FEMALE"})
+        self.assertEqual(code, 0, err)
+        self.assertIn("S5", err)   # the warning names the legacy member
+        code, out, err = run_cli(["--project", self.proj, "summary", "--cohort", "C5"])
+        self.assertEqual(code, 0, err)
+        cd = json.loads((self.out_dir / "C5.summary.json").read_text())
+        self.assertEqual(cd["callsets"]["cohort_qc"]["ancestry"], {"S1": "EUR", "S5": "AFR"})
+        self.assertEqual(len(cd["callsets"]["cohort_qc"]["ancestry_background"]), 2)
+        self.assertEqual(cd["targeted"]["strata"], ["ALL", "ancestry", "sex"])
+        s5 = [r for r in cd["members"] if r["id"] == "S5"][0]
+        self.assertTrue(s5["sex_legacy"])
+        self.assertEqual((s5["sex_somalier"], s5["sex_used"], s5["sex_source"]), ("FEMALE", "MALE", "declared"))   # somalier's call from cohort_qc's table (fixture: FEMALE for odd members)
+        self.assertIn("sex_mismatch", s5["flags"])
+        text = (self.out_dir / "C5.summary.html").read_text()
+        for needle in ("Ancestry (projection onto the 1000 Genomes superpopulations)", "<title>S5: AFR</title>", "somalier&#x27;s chrX call in cohort_qc is FEMALE (XX)"):
+            self.assertIn(needle, text, needle)
+        d5 = json.loads((self.out_dir / "S5.summary.json").read_text())
+        self.assertEqual((d5["identity"]["legacy"], d5["identity"]["resolved"], d5["identity"]["source"], d5["identity"]["somalier"]), (True, "MALE", "declared", ""))
+
 
 DIGEST_KEYS = {"schema", "generated_at", "mode", "sample", "runs", "warnings", "stats", "reads", "coverage", "small_variants", "sv",
-               "phasing", "tandem_repeats", "methylation", "targeted", "messages", "files", "assembly", "provenance", "qc"}
+               "phasing", "tandem_repeats", "methylation", "targeted", "identity", "messages", "files", "assembly", "provenance", "qc"}
 
 
 class SummaryEndToEnd(unittest.TestCase):
@@ -591,7 +873,9 @@ class SummaryEndToEnd(unittest.TestCase):
         self.assertEqual(digest["tandem_repeats"]["dropouts"]["by_class"]["FullDropout"], 2)
         self.assertEqual(digest["targeted"]["kivvi"]["d4z4"]["allele_cn"], 38.0)
         self.assertEqual(digest["targeted"]["paraphase"]["n_failed"], 1)
-        self.assertEqual(len(digest["targeted"]["starphase"]), 4)
+        self.assertEqual(len(digest["targeted"]["starphase"]), 7)
+        self.assertEqual(digest["targeted"]["starphase_meta"]["genes"]["CYP2C19"]["simple_diplotype"], "*1/*17")
+        self.assertEqual(digest["targeted"]["paraphase"]["n_with_gene_cn"], 1)
         self.assertEqual(digest["methylation"]["profile"]["labels"]["Methylated"], 1)
         self.assertEqual(digest["provenance"]["ugc_wgw"]["version"], config.read_version(self.cfg.code_dir))
         self.assertIn("hifi-human-wgs-wdl", digest["provenance"]["upstream"])
@@ -655,7 +939,7 @@ class SummaryEndToEnd(unittest.TestCase):
         self.assertIn("het loss", s1)
         self.assertIn("contigs with the most switches", s1)
         self.assertIn("Concordance with the read-based SNVs", s1)
-        self.assertEqual(d1["schema"], 2)
+        self.assertEqual(d1["schema"], summary.DIGEST_SCHEMA)
         self.assertEqual(d1["assembly"]["parents"], {"hap1": "F", "hap2": "M"})
         self.assertEqual(d1["assembly"]["haplotypes"][0]["trio_eval"]["n_contigs"], 1)
         self.assertEqual(d1["assembly"]["haplotypes"][0]["trio_eval"]["contigs"][0]["switches"], 13 + 13)   # c1 + c2 of the fixture's S line
@@ -673,7 +957,7 @@ class SummaryEndToEnd(unittest.TestCase):
         old = json.loads((out / "S2.summary.json").read_text()); old["schema"] = 1; old["assembly"] = {}
         (out / "S2.summary.json").write_text(json.dumps(old))
         self.assertEqual(run_cli(["--project", self.proj, "summary", "--samples", "S2", "--out-dir", str(out)])[0], 0)
-        self.assertEqual(json.loads((out / "S2.summary.json").read_text())["schema"], 2)
+        self.assertEqual(json.loads((out / "S2.summary.json").read_text())["schema"], summary.DIGEST_SCHEMA)
         self.assertEqual(json.loads((out / "S2.summary.json").read_text())["assembly"]["flagger"]["hap_pct"], 95.99)
         # the concordance gate: a strict minimum fails the trio sample (0.9865 in the fixture), the assembly-only sample has no concordance
         code, _, err = run_cli(["--project", self.proj, "summary", "--samples", "S1", "S2", "--out-dir", str(out), "--pass-list", str(out / "pass4.txt"),
@@ -781,12 +1065,33 @@ class SummaryEndToEnd(unittest.TestCase):
         text = self.check_html(self.out_dir / "C1.summary.html")
         for needle in ('id="sec-members"', 'id="sec-distributions"', 'id="sec-sex"', 'id="sec-callsets"', 'id="sec-freq"', 'id="sec-software"',
                        'href="S1.summary.html"', "sex_mismatch", "Merged structural variants", "trgt-lps", "Allele-frequency bins",
-                       "C1 cohort summary", "hiphase", "<svg", 'class="iqr"'):
+                       "C1 cohort summary", "hiphase", "<svg", 'class="iqr"', 'id="sec-targeted"', "Targeted callers", "CYP2D6",
+                       "Pharmacogenomics (StarPhase)", "HLA (StarPhase)", "mitorsaw unexplained fraction"):
             self.assertIn(needle, text, needle)
         cd = json.loads((self.out_dir / "C1.summary.json").read_text())
+        # the page's frequency tables are the export's
+        from ugc_wgw import export
+        members = {sid: json.loads((self.out_dir / f"{sid}.summary.json").read_text()) for sid in ("S1", "S2")}
+        self.assertEqual(cd["targeted"]["pgx"]["freq"], export.freq_table(export.pgx_rows(members), "simple_diplotype",
+                                                                          export.strata_of(members, ("sex",)), by=("gene",)))
+        self.assertEqual(cd["targeted"]["strata"], ["ALL", "sex"])
+        self.assertEqual(cd["targeted"]["paraphase"]["regions"][0]["region"], "CYP2D6")
+        self.assertEqual(cd["distributions"]["mito_unexplained"]["threshold"], 0.02)
         self.assertEqual([r["id"] for r in cd["members"]], ["S1", "S2"])
         self.assertEqual(cd["missing_members"], [])
-        self.assertEqual(set(cd["runs"]), {"cohort_merge", "cohort_freq"})
+        self.assertEqual(set(cd["runs"]), {"cohort_qc", "cohort_merge", "cohort_freq"})
+        # identity: cohort_qc's tables read, no flag for two unrelated members without a pedigree; the section and the member pages
+        self.assertTrue(cd["identity"]["available"])
+        self.assertEqual((cd["identity"]["counts"], cd["identity"]["n_fail"]), ({}, 0))
+        self.assertEqual(cd["identity"]["members"]["S1"]["closest_relative"], "S2")
+        self.assertEqual(cd["callsets"]["cohort_qc"]["summary"]["members"]["n"]["total"], 2)
+        self.assertEqual([r["sex_used"] for r in cd["members"]], ["MALE", "FEMALE"])
+        self.assertEqual(cd["sex"]["sources"], {"declared": 2})
+        for needle in ('id="sec-identity"', "Identity (cohort_qc)", "Pairs worth a look", "somalier (chrX)", "used by the run", "Relatedness of every pair"):
+            self.assertIn(needle, text, needle)
+        s1 = self.check_html(self.out_dir / "S1.summary.html")
+        self.assertIn("Identity in cohort C1", s1)
+        self.assertIn("No identity flag", s1)
         self.assertEqual(cd["callsets"]["cohort_merge"]["sv"]["counts"], {"DEL": 2, "INS": 1, "BND": 1, "DUP": 1})
         self.assertEqual(cd["callsets"]["cohort_merge"]["sv"]["samples"], ["S1", "S2"])
         self.assertEqual((cd["callsets"]["cohort_merge"]["trgt_lps"]["loci"], cd["callsets"]["cohort_merge"]["trgt_lps"]["samples"]), (5, ["S1", "S2"]))

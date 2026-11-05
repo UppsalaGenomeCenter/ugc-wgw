@@ -63,6 +63,7 @@ ugc-wgw samples add samples.tsv
 ugc-wgw cohort freeze C1 --samples cohort.txt
 ugc-wgw -v submit --mode standalone --cohort C1 --max-inflight 40
 ugc-wgw summary --cohort C1
+ugc-wgw export --cohort C1
 ```
 
 Building the bundle happens on a machine with network access, Docker or
@@ -74,8 +75,8 @@ python3 -m venv .venv && .venv/bin/pip install -r bundle/requirements.txt
 scripts/make-bundle.sh --version vX.Y.Z --out bundle/out --python-version 3.12
 ```
 
-The four images this repository builds itself (hifiasm, minimap2, svx,
-trgt-lps) are published on GHCR under `ghcr.io/uppsalagenomecenter/`;
+The five images this repository builds itself (hifiasm, minimap2, somalier,
+svx, trgt-lps) are published on GHCR under `ghcr.io/uppsalagenomecenter/`;
 `image_manifest.ugc-wgw.txt` pins them by digest, together with the published
 images of the assembly stages (dipcall, HMM-Flagger, secphase, PAV 3,
 Minigraph-Cactus, Truvari), and `containers/` holds the Dockerfiles of ours.

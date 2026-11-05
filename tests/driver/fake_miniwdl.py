@@ -27,6 +27,11 @@ Environment knobs:
   UGC_WGW_FAKE_IGNORE_TERM=1  with UGC_WGW_FAKE_HANG: ignore SIGTERM so the driver has to SIGKILL
   UGC_WGW_FAKE_INFERRED_SEX=S1=MALE,S2=FEMALE   inferred_sex per sample for singleton/upstream (default ""); a seed
                           may also carry a non-WDL "inferred_sex" key (tests/driver/helpers.py seed_success)
+  UGC_WGW_FAKE_SOMALIER_SEX=S1=MALE             somalier's chrX call per sample (default ""); seed key "somalier_sex";
+                          seed key "legacy" (true) omits the 0.14.0 sex outputs and the extract (a run from before them)
+  UGC_WGW_FAKE_RELATEDNESS=S1:S2=0.98,S1:S3=0.5 relatedness of pairs in cohort_qc's tables (default 0.01 per pair); a pair the
+                          cohort_qc inputs declare as parent-child gets expected 0.5 in the tables
+  UGC_WGW_FAKE_FAIL_STAGES=cohort_qc   stages that fail (every subject), on top of UGC_WGW_FAKE_FAIL
 """
 from __future__ import annotations
 
@@ -57,6 +62,23 @@ def _trace(line: str) -> None:
     if env_log and line.startswith("start "):   # what the driver put in the engine's environment
         with open(env_log, "a") as fh:
             fh.write(f"{line.split()[1]} MINIWDL__UGC_WGW__GPU_TYPE={os.environ.get('MINIWDL__UGC_WGW__GPU_TYPE', '-')!r}\n")
+
+
+def _sex_outputs(sid: str, v: dict[str, object], inferred: str, files: dict[str, object], strings: dict[str, object]) -> None:
+    """The 0.14.0 outputs of upstream/singleton (the extract, somalier's call, the resolved sex), unless the seed says
+    `legacy` (a run from before them). somalier's call: the seed's `somalier_sex`, else UGC_WGW_FAKE_SOMALIER_SEX."""
+    if v.get("legacy"):
+        return
+    if "somalier_sex" in v:
+        somalier = str(v["somalier_sex"] or "")
+    else:
+        table = dict(item.split("=", 1) for item in os.environ.get("UGC_WGW_FAKE_SOMALIER_SEX", "").split(",") if "=" in item)
+        somalier = table.get(sid, "")
+    declared = str(v.get("declared_sex") or "").upper()
+    resolved, source = (declared, "declared") if declared else (inferred, "coverage") if inferred else (somalier, "somalier") if somalier else ("", "none")
+    files["somalier_extract"] = f"{sid}.somalier"
+    files["somalier_sex_tsv"] = f"{sid}.sex.tsv"
+    strings.update({"somalier_sex": somalier, "resolved_sex": resolved, "resolved_sex_source": source})
 
 
 def _inferred_sex(sid: str, v: dict[str, object]) -> str:
@@ -112,6 +134,7 @@ def make_outputs(stage: str, inputs: dict[str, object], run_dir: pathlib.Path,
         strings.update({"inferred_sex": inferred, "msg": []})
         strings.update({"stat_" + k: val for k, val in stats_values(sid, inferred).items() if k not in ("sample_id", "inferred_sex")})
         strings["stat_depth_mean"] = "30.1"
+        _sex_outputs(sid, v, inferred, files, strings)
     elif stage == "upstream":
         f("aligned_hifi_reads", f"{sid}.{REF}.hifi_reads.bam")
         if v.get("fail_reads"):
@@ -130,6 +153,7 @@ def make_outputs(stage: str, inputs: dict[str, object], run_dir: pathlib.Path,
             files[name] = fname
         inferred = _inferred_sex(sid, v)
         strings.update({"inferred_sex": inferred, "stat_depth_mean": "30.1", "msg": [f"{sid}: fake upstream message"]})
+        _sex_outputs(sid, v, inferred, files, strings)
     elif stage == "cohort_call":
         members = list(v.get("sample_ids", []))  # type: ignore[arg-type]
         f("cohort_small_variant_vcf", f"{sid}.joint.{REF}.small_variants.vcf.gz")
@@ -242,6 +266,16 @@ def make_outputs(stage: str, inputs: dict[str, object], run_dir: pathlib.Path,
         f("sv_freq_vcf", f"{sid}.freq.{REF}.structural_variants.vcf.gz")
         files["freq_summary"] = f"{sid}.freq.{REF}.summary.tsv"
         files["freq_samples"] = f"{sid}.freq.{REF}.samples.tsv"
+    elif stage == "cohort_qc":
+        members = [str(m) for m in v.get("sample_ids", [])]  # type: ignore[union-attr]
+        for name in ("qc_pairs", "qc_samples", "qc_groups", "qc_summary", "qc_members", "qc_related_pairs"):
+            files[name] = f"{sid}.qc.{REF}.{name[3:]}.tsv"
+        files["qc_html"] = f"{sid}.qc.{REF}.html"
+        files["qc_ped"] = f"{sid}.qc.ped"
+        if v.get("run_ancestry"):
+            files["qc_ancestry"] = f"{sid}.qc.{REF}.somalier-ancestry.tsv"
+            files["qc_ancestry_html"] = f"{sid}.qc.{REF}.somalier-ancestry.html"
+        files["somalier_extracts"] = [f"{m}.somalier" for m in members]
     else:
         raise SystemExit(f"fake miniwdl: unknown stage {stage}")
 
@@ -251,9 +285,17 @@ def make_outputs(stage: str, inputs: dict[str, object], run_dir: pathlib.Path,
     outputs: dict[str, object] = {}
     members_of = [str(m) for m in v.get("sample_ids", [])] if isinstance(v.get("sample_ids"), list) else []  # type: ignore[union-attr]
     inferred_for_fixture = str(strings.get("inferred_sex") or "")
+    pedigree: dict[str, set[str]] = {}   # child -> declared parents in the cohort (cohort_qc's father_ids/mother_ids)
+    for key in ("father_ids", "mother_ids"):
+        parents = v.get(key) if isinstance(v.get(key), list) else []
+        for child, parent in zip(members_of, parents):  # type: ignore[arg-type]
+            if parent and str(parent) in members_of:
+                pedigree.setdefault(child, set()).add(str(parent))
+    sex_info = {"declared": str(v.get("declared_sex") or "").upper(), "coverage": inferred_for_fixture, "somalier": str(strings.get("somalier_sex") or ""),
+                "resolved": str(strings.get("resolved_sex") or ""), "source": str(strings.get("resolved_sex_source") or "")}
 
     def write_fixture(p: pathlib.Path, name: str, index: int, placeholder: str) -> None:
-        content = fixture_bytes(name, sid, stage, inferred_for_fixture, index=index, members=members_of)
+        content = fixture_bytes(name, sid, stage, inferred_for_fixture, index=index, members=members_of, pedigree=pedigree, sex=sex_info)
         if content is None:
             p.write_text(placeholder)
         elif p.name.endswith(".gz"):
@@ -378,9 +420,10 @@ def main(argv: list[str] | None = None) -> int:
 
     time.sleep(float(os.environ.get("UGC_WGW_FAKE_SLEEP", "0")))
     failing = set(filter(None, os.environ.get("UGC_WGW_FAKE_FAIL", "").split(",")))
+    failing_stages = set(filter(None, os.environ.get("UGC_WGW_FAKE_FAIL_STAGES", "").split(",")))
     attempt_no = run_dir.name.split("-")[-1]
     attempts = set(filter(None, os.environ.get("UGC_WGW_FAKE_FAIL_ATTEMPTS", "").split(",")))
-    if (sid.endswith("_FAIL") or sid in failing) and (not attempts or attempt_no in attempts):
+    if (sid.endswith("_FAIL") or sid in failing or stage in failing_stages) and (not attempts or attempt_no in attempts):
         resource = os.environ.get("UGC_WGW_FAKE_FAIL_RESOURCE", "")
         if resource in ("memory", "time"):
             esc = json.loads(os.environ.get("MINIWDL__UGC_WGW__ESCALATIONS") or "{}").get("fake_task", {})

@@ -49,7 +49,7 @@ Reading the tables:
 
 ## ugc_wgw_singleton
 
-28 tasks, in first-call order.
+31 tasks, in first-call order.
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
@@ -59,6 +59,9 @@ Reading the tables:
 | `pbmm2_align_wgs` | 32 | 64G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:269` |
 | `pbsamoa_merge` | 32 | 32G | cpu from input default; memory from input default; command uses threads; command uses mem | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/pbsamoa.wdl:5` |
 | `mosdepth` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/mosdepth.wdl:5` |
+| `ugc_wgw_somalier_extract` | 1 | 2G | memory from input default; memory from workflow input default; memory input: extract_mem_gb | `workflows/ugc_wgw/qc/somalier.wdl:9` |
+| `ugc_wgw_somalier_relate_one` | 1 | 1G | - | `workflows/ugc_wgw/qc/somalier.wdl:100` |
+| `ugc_wgw_resolve_sex` | 1 | 1G | - | `workflows/ugc_wgw/qc/somalier.wdl:176` |
 | `run_parabricks_deepvariant` | 48 | 192G | cpu from input default; memory from input default; command uses threads; gpu | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/parabricks/parabricks_deepvariant.wdl:94` |
 | `deepvariant_make_examples` | 8 | 32G | cpu from call site; cpu from input default; memory from call site; memory from input default; command uses threads; command uses mem | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:160` |
 | `deepvariant_call_variants_cpu` | 64 | 28G | cpu from workflow input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:330` |
@@ -84,7 +87,7 @@ Reading the tables:
 
 ## ugc_wgw_upstream
 
-19 tasks, in first-call order.
+22 tasks, in first-call order.
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
@@ -94,6 +97,9 @@ Reading the tables:
 | `pbmm2_align_wgs` | 32 | 64G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:269` |
 | `pbsamoa_merge` | 32 | 32G | cpu from input default; memory from input default; command uses threads; command uses mem | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/pbsamoa.wdl:5` |
 | `mosdepth` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/mosdepth.wdl:5` |
+| `ugc_wgw_somalier_extract` | 1 | 2G | memory from input default; memory from workflow input default; memory input: extract_mem_gb | `workflows/ugc_wgw/qc/somalier.wdl:9` |
+| `ugc_wgw_somalier_relate_one` | 1 | 1G | - | `workflows/ugc_wgw/qc/somalier.wdl:100` |
+| `ugc_wgw_resolve_sex` | 1 | 1G | - | `workflows/ugc_wgw/qc/somalier.wdl:176` |
 | `run_parabricks_deepvariant` | 48 | 192G | cpu from input default; memory from input default; command uses threads; gpu | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/parabricks/parabricks_deepvariant.wdl:94` |
 | `deepvariant_make_examples` | 8 | 32G | cpu from call site; cpu from input default; memory from call site; memory from input default; command uses threads; command uses mem | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:160` |
 | `deepvariant_call_variants_cpu` | 64 | 28G | cpu from workflow input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:330` |
@@ -107,6 +113,19 @@ Reading the tables:
 | `kivvi_d4z4` | 2 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/kivvi.wdl:119` |
 | `sawfish_call` | 16 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/sawfish.wdl:139` |
 | `ugc_wgw_manifest_write` | 1 | 1G | - | `workflows/ugc_wgw/provenance.wdl:9` |
+
+## ugc_wgw_cohort_qc
+
+6 tasks, in first-call order.
+
+| task | cpu | memory | notes | source |
+|---|---|---|---|---|
+| `ugc_wgw_somalier_extract` | 1 | 2G | memory from input default; memory from workflow input default; memory input: extract_mem_gb | `workflows/ugc_wgw/qc/somalier.wdl:9` |
+| `ugc_wgw_manifest_write` | 1 | 1G | - | `workflows/ugc_wgw/provenance.wdl:9` |
+| `ugc_wgw_somalier_ped` | 1 | 1G | - | `workflows/ugc_wgw/qc/somalier.wdl:320` |
+| `ugc_wgw_somalier_relate` | 2 | 4G | cpu from workflow input default; cpu input: relate_threads; memory from workflow input default; memory input: relate_mem_gb | `workflows/ugc_wgw/qc/somalier.wdl:406` |
+| `ugc_wgw_somalier_ancestry` | 2 | 8G | memory from workflow input default; memory input: ancestry_mem_gb | `workflows/ugc_wgw/qc/somalier.wdl:516` |
+| `ugc_wgw_qc_summary` | 1 | 2G | - | `workflows/ugc_wgw/qc/somalier.wdl:609` |
 
 ## ugc_wgw_cohort_call
 

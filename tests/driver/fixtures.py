@@ -167,10 +167,11 @@ PARAPHASE = {
              "final_haplotypes": {}, "two_copy_haplotypes": [], "region_specific_info": {}},
     "CYP2D6": {"region_name": "CYP2D6", "phase_region": "38:chr22:42126000-42145000", "genes_in_region": "CYP2D6,CYP2D7", "sample_sex": "male",
                "genome_depth": 30.1, "region_depth": {"median": 29.0, "percentile80": 33.0}, "failed_for_coverage": False, "total_cn": 4,
-               "final_haplotypes": {"CYP2D6_hap1": "x", "CYP2D6_hap2": "y", "CYP2D7_hap1": "z", "CYP2D7_hap2": "w"}, "two_copy_haplotypes": [], "region_specific_info": {}},
+               "final_haplotypes": {"x": "CYP2D6_hap1", "y": "CYP2D6_hap2", "z": "CYP2D7_hap1", "w": "CYP2D7_hap2"}, "two_copy_haplotypes": [],
+               "region_specific_info": {"gene_cn": 2, "fusions_called": ["CYP2D6-CYP2D7"]}},
     "RCCX": {"region_name": "rccx", "phase_region": "38:chr6:32000000-32100000", "genes_in_region": "CYP21A2,TNXB", "sample_sex": "male",
              "genome_depth": 30.1, "region_depth": {"median": 31.0, "percentile80": 35.0}, "failed_for_coverage": False, "total_cn": 4,
-             "final_haplotypes": {"a": 1, "b": 2, "c": 3, "d": 4}, "two_copy_haplotypes": [], "region_specific_info": {}},
+             "final_haplotypes": {"s1": "CYP21A2_hap1", "s2": "TNXB_hap1", "s3": "TNXB_hap2"}, "two_copy_haplotypes": ["s1"], "region_specific_info": {}},
 }
 
 MITORSAW = {"haplotypes": [{"label": "hap_0", "seq_len": 16569, "fingerprint_alleles": [], "num_ref_variants": 38, "estimated_abundance": 0.97},
@@ -178,14 +179,19 @@ MITORSAW = {"haplotypes": [{"label": "hap_0", "seq_len": 16569, "fingerprint_all
             "fingerprint_stats": {"fingerprint_counts": {}, "unexplained_fingerprints": [], "max_unexplained_cost": 0, "unexplained_cost": 0,
                                   "unexplained_fraction": 0.0, "passing_explanation": True}}
 
-STARPHASE_TSV = "#gene\tdiplotype\nABCG2\trs2231142 reference (G)/rs2231142 reference (G)\nCYP2C19\t*1/*17\nCYP2D6\t*1/*4\nMT-RNR1\tReference\n"
+STARPHASE_TSV = ("#gene\tdiplotype\nABCG2\trs2231142 reference (G)/rs2231142 reference (G)\nCYP2C19\t*1/*17\nCYP2D6\t*1/*4\nMT-RNR1\tReference\n"
+                 "TPMT\tNO_READS/NO_READS\nHLA-A\t*02:01:01:01/*03:01:01:01\nHLA-DRB3\t./.\n")
 STARPHASE_JSON = {"pbstarphase_version": "2.2.0-5bf32fc",
                   "database_metadata": {"pbstarphase_version": "2.2.0-c56b9ba", "cpic_version": "API-2026-07-24", "hla_version": "v3.65.0-alpha",
                                         "pharmvar_version": "6.2.27", "build_time": "2026-07-24T12:44:47Z"},
                   "gene_details": {"ABCG2": {"diplotypes": [{"hap1": "ref", "hap2": "ref", "diplotype": "ref/ref"}]},
                                    "CYP2C19": {"diplotypes": [{"hap1": "*1", "hap2": "*17", "diplotype": "*1/*17"}]},
                                    "CYP2D6": {"diplotypes": [{"hap1": "*1", "hap2": "*4", "diplotype": "*1/*4"}]},
-                                   "MT-RNR1": {"diplotypes": [{"hap1": "Reference", "hap2": "Reference", "diplotype": "Reference"}]}}}
+                                   "MT-RNR1": {"diplotypes": [{"hap1": "Reference", "hap2": "Reference", "diplotype": "Reference"}]},
+                                   "TPMT": {"diplotypes": [{"hap1": "NO_READS", "hap2": "NO_READS", "diplotype": "NO_READS/NO_READS"}]},
+                                   "HLA-A": {"diplotypes": [{"hap1": "*02:01:01:01", "hap2": "*03:01:01:01", "diplotype": "*02:01:01:01/*03:01:01:01"}],
+                                             "simple_diplotypes": None, "mapping_details": {}},
+                                   "HLA-DRB3": {"diplotypes": [{"hap1": ".", "hap2": ".", "diplotype": "./."}], "simple_diplotypes": None}}}
 KIVVI_NA = {"allele_cn": "NA", "depth_summary": {"genome_depth": None, "repeat_depth": None}, "complete_alleles": [], "partial_alleles": [],
             "supporting_reads": {}, "allele_info": [], "complete_allele_variants": {}, "other_unit_variants": [], "methylation": {}, "read_info": {},
             "additional": {"call_status": "failed_due_to_no_reads"}}
@@ -332,9 +338,57 @@ KARYOTYPE_JSON = {"karyotype": "unknown", "reason": "non-PAR chrX bases aligned 
                   "thresholds": {"min_mapq": 5, "chrx_min_fraction": 0.5, "chry_min_fraction": 0.1}, "regrouped": False, "moved_contigs": 0}
 
 
+SOMALIER_SAMPLES_HEADER = ("#family_id\tsample_id\tpaternal_id\tmaternal_id\tsex\tphenotype\toriginal_pedigree_sex\tgt_depth_mean\tgt_depth_sd\t"
+                           "depth_mean\tdepth_sd\tab_mean\tab_std\tn_hom_ref\tn_het\tn_hom_alt\tn_unknown\tp_middling_ab\tcontamination_charr\t"
+                           "contamination_charr_n_sites\tX_depth_mean\tX_n\tX_hom_ref\tX_het\tX_hom_alt\tY_depth_mean\tY_n\n")
+SOMALIER_PAIRS_HEADER = ("#sample_a\tsample_b\trelatedness\tibs0\tibs2\tconcordance\thets_a\thets_b\thets_ab\tshared_hets\thom_alts_a\thom_alts_b\t"
+                         "shared_hom_alts\tn\tx_ibs0\tx_ibs2\texpected_relatedness\n")
+
+
+def _relatedness_table() -> dict[tuple[str, str], float]:
+    """UGC_WGW_FAKE_RELATEDNESS=S1:S2=0.98,S1:S3=0.5 -> {("S1","S2"): 0.98, ...}."""
+    import os
+    out: dict[tuple[str, str], float] = {}
+    for item in os.environ.get("UGC_WGW_FAKE_RELATEDNESS", "").split(","):
+        if "=" in item and ":" in item:
+            pair, value = item.split("=", 1)
+            a, b = pair.split(":", 1)
+            try:
+                out[(a, b)] = float(value)
+            except ValueError:
+                pass
+    return out
+
+
+def _declared(a: str, b: str, pedigree: dict[str, set[str]] | None) -> bool:
+    return bool(pedigree) and (b in pedigree.get(a, set()) or a in pedigree.get(b, set()))  # type: ignore[union-attr]
+
+
+def _qc_pairs(members: list[str], *, related_only: bool, pedigree: dict[str, set[str]] | None = None) -> str:
+    """somalier's pairs table (or cohort_qc's related_pairs: the pairs at or above 0.1 or with an expectation, plus the
+    `expected` column): relatedness from UGC_WGW_FAKE_RELATEDNESS, expected 0.5 for a declared parent-child pair."""
+    rel = _relatedness_table()
+    rows = []
+    for i, a in enumerate(members):
+        for b in members[i + 1:]:
+            r = rel.get((a, b), rel.get((b, a), 0.01))
+            declared = _declared(a, b, pedigree)
+            if related_only and r < 0.1 and not declared:
+                continue
+            ibs0 = 0 if r >= 0.4 else 40
+            expected = "0.5" if declared else "-1.0"
+            rows.append(f"{a}\t{b}\t{r:.3f}\t{ibs0}\t{int(200 * r + 200)}\t0.9\t190\t190\t180\t{int(180 * r)}\t110\t110\t100\t300\t0\t0\t{expected}"
+                        + (("\t" + ("0.5" if declared else "")) if related_only else "") + "\n")
+    header = SOMALIER_PAIRS_HEADER.rstrip("\n") + ("\texpected\n" if related_only else "\n")
+    return header + "".join(rows)
+
+
 def fixture_bytes(name: str, sid: str, stage: str, inferred_sex: str = "", index: int = 0,
-                  members: list[str] | None = None) -> bytes | None:
-    """The content of output `name` for sample/cohort `sid`, or None for outputs that stay placeholders."""
+                  members: list[str] | None = None, pedigree: dict[str, set[str]] | None = None,
+                  sex: dict[str, str] | None = None) -> bytes | None:
+    """The content of output `name` for sample/cohort `sid`, or None for outputs that stay placeholders. `pedigree`
+    (child -> parents in the cohort) shapes cohort_qc's expectations; `sex` (declared, coverage, somalier, resolved,
+    source) the sex resolution table of a per-sample run."""
     text: str | None = None
     doc: object = None
     if name == "stats_file":
@@ -396,7 +450,49 @@ def fixture_bytes(name: str, sid: str, stage: str, inferred_sex: str = "", index
     elif name == "freq_samples":
         ms = members or []
         text = "sample_id\tgroup\tsex_source\tin_small_variant_vcf\tin_sv_vcf\n" + "".join(
-            f"{m}\t{'XX' if i % 2 else 'XY'}\tsheet\tyes\tyes\n" for i, m in enumerate(ms))
+            f"{m}\t{'XX' if i % 2 else 'XY'}\tdeclared\tyes\tyes\n" for i, m in enumerate(ms))
+    elif name == "somalier_sex_tsv":
+        sx = sex or {"declared": inferred_sex, "coverage": inferred_sex, "somalier": "", "resolved": inferred_sex, "source": "declared" if inferred_sex else "none"}
+        som = sx.get("somalier") or ""
+        x_n, x_het, x_hom = (300, 5, 150) if som.upper() == "MALE" else (300, 120, 80) if som.upper() == "FEMALE" else (0, 0, 0)
+        ratio = x_het / x_hom if x_hom else 0.0
+        reason = ("somalier: X het/hom-alt ratio {:.4f} at {} sites".format(ratio, x_n) if som else "somalier: 0 chrX sites genotyped, below 50")
+        text = ("sample_id\tdeclared\tcoverage\tsomalier\tresolved\tsource\tx_n\tx_het\tx_hom_alt\tx_het_ratio\tx_depth_mean\ty_depth_norm\treason\n"
+                f"{sid}\t{sx.get('declared', '')}\t{sx.get('coverage', '')}\t{som}\t{sx.get('resolved', '')}\t{sx.get('source', '')}\t{x_n}\t{x_het}\t{x_hom}\t{ratio:.4f}\t"
+                f"{15.0 if x_n else 0.0:.2f}\t{0.5 if som.upper() == 'MALE' else 0.0:.3f}\t{reason}\n")
+    elif name in ("qc_pairs", "qc_related_pairs"):
+        text = _qc_pairs(members or [], related_only=name == "qc_related_pairs", pedigree=pedigree)
+    elif name == "qc_samples":
+        ms = members or []
+        text = SOMALIER_SAMPLES_HEADER + "".join(
+            f"C\t{m}\t-9\t-9\t{1 if i % 2 == 0 else 2}\t-9\t-9\t30.0\t5.0\t1.0\t5.0\t0.5\t0.4\t170\t{190 + i}\t{110 + i}\t16900\t0.000\t0.01\t300\t15.0\t300\t100\t{5 if i % 2 == 0 else 120}\t{150 if i % 2 == 0 else 80}\t{8.0 if i % 2 == 0 else 0.0}\t10\n"
+            for i, m in enumerate(ms))
+    elif name == "qc_groups":
+        text = ""
+    elif name == "qc_ped":
+        ms = members or []
+        text = "".join(f"C\t{m}\t-9\t-9\t{1 if i % 2 == 0 else 2}\t-9\n" for i, m in enumerate(ms))
+    elif name == "qc_members":
+        ms = members or []
+        rel = _relatedness_table()
+        rows = []
+        for i, m in enumerate(ms):
+            best = max(((o, rel.get((m, o), rel.get((o, m), 0.01))) for o in ms if o != m), key=lambda t: t[1], default=("", 0.0))
+            expected = "0.50" if best[0] and _declared(m, best[0], pedigree) else ""
+            rows.append(f"{m}\t{'XY' if i % 2 == 0 else 'XX'}\tdeclared\t{'MALE' if i % 2 == 0 else 'FEMALE'}\t300\t{0.03 if i % 2 == 0 else 1.5}\t"
+                        f"{0.63 + 0.01 * i:.4f}\t30.0\t{best[0]}\t{best[1]:.3f}\t{40 if best[1] < 0.2 else 0}\t{expected}\t{'EUR' if i % 2 == 0 else 'AFR'}\t0.9\tno\n")
+        text = ("sample_id\tsex_group\tsex_source\tsomalier_sex\tx_n\tx_het_ratio\thet_ratio\tdepth_mean\tclosest_relative\tclosest_relatedness\t"
+                "closest_ibs0\tclosest_expected\tancestry\tancestry_prob\textracted_here\n" + "".join(rows))
+    elif name == "qc_summary":
+        ms = members or []
+        n = len(ms) * (len(ms) - 1) // 2
+        text = f"section\tmetric\tkey\tvalue\npairs\tn\ttotal\t{n}\npairs\tn\tkept\t0\npairs\thist\t0.00\t{n}\nmembers\tn\ttotal\t{len(ms)}\nmembers\tn\textracted_here\t0\nmembers\tn\twith_ancestry\t{len(ms)}\n"
+    elif name == "qc_ancestry":
+        ms = members or []
+        text = ("#sample_id\tpredicted_ancestry\tgiven_ancestry\tEAS_prob\tAFR_prob\tAMR_prob\tSAS_prob\tEUR_prob\tPC1\tPC2\tPC3\tPC4\tPC5\n"
+                "HG00096\tEUR\tEUR\t0.0\t0.0\t0.1\t0.0\t0.9\t0.5\t2.0\t0.1\t0.2\t0.3\nHG00403\tEAS\tEAS\t1.0\t0.0\t0.0\t0.0\t0.0\t2.6\t-7.1\t0.1\t0.2\t0.3\n"
+                + "".join(f"{m}\t{'EUR' if i % 2 == 0 else 'AFR'}\t\t0.0\t{0.0 if i % 2 == 0 else 0.9}\t0.1\t0.0\t{0.9 if i % 2 == 0 else 0.0}\t{0.4 + i * 0.1:.1f}\t{2.0 - i:.1f}\t0.1\t0.2\t0.3\n"
+                          for i, m in enumerate(ms)))
     elif name == "chrom_graph_stats":
         chrom = PANGENOME_CHROMS[index] if index < len(PANGENOME_CHROMS) else f"chr{index}"
         text = GRAPH_STATS.format(chrom=chrom, nodes=500_000 + index * 1000, edges=700_000 + index * 1000, length=60_000_000 + index * 1_000_000)

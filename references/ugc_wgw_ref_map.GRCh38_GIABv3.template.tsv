@@ -5,7 +5,9 @@
 # as singleton.wdl reads them from unpack_container_manifest) plus, from ugc-wgw-extras, scatter_regions (shipped)
 # and pbmm2_index (the reference's pbmm2 index, built by the installer with the bundled pbmm2 and verified by md5), and,
 # from ugc-wgw-asm, the assembly stages' decoy-free reference (asm_fasta, asm_fasta_index: built by the installer with
-# the bundled pb_wdl_base and verified by md5), asm_par_bed and asm_graph_chromosomes (shipped).
+# the bundled pb_wdl_base and verified by md5), asm_par_bed and asm_graph_chromosomes (shipped), and, from ugc-wgw-qc,
+# somalier's sites (shipped), the 1000 Genomes labels (shipped) and the 1000 Genomes extracts as one tar (fetched by
+# make-bundle.sh unless --without-ancestry; absent from the install then, and cohort_qc runs without the ancestry step).
 name	GRCh38_GIABv3
 fasta	<local_path_prefix>/hifi-wdl-resources-v4.0.0-GRCh38_GIABv3/GRCh38_GIABv3/human_GRCh38_GIABv3_no_alt_analysis_set_maskedGRC_decoys_MAP2K3_KMT2C_KCNJ18.fasta
 fasta_index	<local_path_prefix>/hifi-wdl-resources-v4.0.0-GRCh38_GIABv3/GRCh38_GIABv3/human_GRCh38_GIABv3_no_alt_analysis_set_maskedGRC_decoys_MAP2K3_KMT2C_KCNJ18.fasta.fai
@@ -24,3 +26,6 @@ asm_fasta	<local_path_prefix>/ugc-wgw-asm-0.1.0/human_GRCh38_GIABv3_asm.fasta
 asm_fasta_index	<local_path_prefix>/ugc-wgw-asm-0.1.0/human_GRCh38_GIABv3_asm.fasta.fai
 asm_par_bed	<local_path_prefix>/ugc-wgw-asm-0.1.0/asm_par.GRCh38.bed
 asm_graph_chromosomes	<local_path_prefix>/ugc-wgw-asm-0.1.0/asm_graph_chromosomes.GRCh38.txt
+somalier_sites_vcf	<local_path_prefix>/ugc-wgw-qc-0.1.0/somalier_sites.hg38.vcf.gz
+somalier_1kg_labels	<local_path_prefix>/ugc-wgw-qc-0.1.0/somalier_ancestry_labels_1kg.tsv
+somalier_1kg_tar	<local_path_prefix>/ugc-wgw-qc-0.1.0/1kg.somalier.tar.gz

@@ -8,7 +8,9 @@
 # Usage: scripts/populate-sif-cache.sh --dir <sif-cache> [--no-https-host <host[:port]>]... [--list <out.tsv>]
 #                                      <image_manifest.txt>...
 # Manifest lines: "<registry>/<name>@sha256:<digest>" or "<name>:<tag>"; '#' and blank lines ignored.
-# Existing SIFs are kept (incremental). --list writes "<image>\t<sif filename>" per image.
+# Existing SIFs are kept (incremental); apptainer is needed only when something has to be pulled. A pulled SIF
+# gets a `<name>.sif.sha256` sidecar (sha256sum format) that make-bundle.sh reads instead of hashing the
+# file again. --list writes "<image>\t<sif filename>" per image.
 set -euo pipefail
 
 sif_dir=""
@@ -27,7 +29,6 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$sif_dir" ] || { echo "--dir is required" >&2; exit 2; }
 [ ${#manifests[@]} -gt 0 ] || { echo "at least one manifest file is required" >&2; exit 2; }
-command -v apptainer >/dev/null || { echo "apptainer not found" >&2; exit 1; }
 mkdir -p "$sif_dir"
 [ -z "$list_out" ] || : > "$list_out"
 
@@ -51,8 +52,10 @@ while read -r image; do
     echo "[sif] exists: $name" >&2
   else
     echo "[sif] pulling $image" >&2
+    command -v apptainer >/dev/null || { echo "[sif] apptainer not found (needed to pull $image)" >&2; exit 1; }
     if apptainer pull "${opts[@]+"${opts[@]}"}" "$target.partial" "docker://$image" >&2; then
       mv "$target.partial" "$target"
+      (cd "$sif_dir" && sha256sum "$name" > "$name.sha256")
     else
       echo "[sif] FAILED: $image" >&2
       rm -f "$target.partial"

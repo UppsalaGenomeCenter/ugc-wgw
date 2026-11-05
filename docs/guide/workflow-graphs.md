@@ -3,7 +3,7 @@
 
 # Workflow call graphs
 
-Exact call graphs of the nine entrypoints, rendered from the miniwdl AST by
+Exact call graphs of the ten entrypoints, rendered from the miniwdl AST by
 `scripts/wdl-graph.py`. A workflow called directly by an entrypoint is inlined
 as a box; a workflow it calls in turn is one node. Simplified diagrams with
 the switches and resources explained are in `08-stages.md`.
@@ -24,7 +24,7 @@ Legend:
 
 ## ugc_wgw_singleton
 
-Source `workflows/ugc_wgw_singleton.wdl`, depth 1, Mermaid source 2430 characters.
+Source `workflows/ugc_wgw_singleton.wdl`, depth 1, Mermaid source 2589 characters.
 
 Inlined workflows:
 
@@ -56,52 +56,55 @@ flowchart TD
     end
     n5(["aligned_bam_data, aligned_bam_index"])
     n6["mosdepth"]
+    n7["ugc_wgw_somalier_extract"]
+    n8["ugc_wgw_somalier_relate_one"]
+    n9["ugc_wgw_resolve_sex"]
     subgraph s6["if use_gpu #38;#38; use_parabricks_deepvariant"]
-      n7[["parabricks_deepvariant"]]
+      n10[["parabricks_deepvariant"]]
     end
     subgraph s7["if !use_parabricks_deepvariant || (!use_gp…"]
-      n8[["deepvariant"]]
+      n11[["deepvariant"]]
     end
-    n9["sawfish_discover"]
+    n12["sawfish_discover"]
     subgraph s8["if defined(fail_reads) #38;#38; length(select_fi…"]
       subgraph s9["scatter fail_read_bam in select_first([ fail_reads ])"]
-        n10["bait_fail_reads"]
+        n13["bait_fail_reads"]
         subgraph s10["if !defined(pbmm2_index)"]
-          n11["create_pbmm2_index"]
+          n14["create_pbmm2_index"]
         end
-        n12["align_captured_fail_reads"]
-        n13["subset_bam"]
+        n15["align_captured_fail_reads"]
+        n16["subset_bam"]
       end
       subgraph s11["if length(subset_bam.bam) #gt; 1"]
-        n14["merge_fail_reads"]
+        n17["merge_fail_reads"]
       end
     end
-    n15["paraphase"]
-    n16["mitorsaw"]
-    n17["kivvi_kiv2"]
-    n18["kivvi_d4z4"]
+    n18["paraphase"]
+    n19["mitorsaw"]
+    n20["kivvi_kiv2"]
+    n21["kivvi_d4z4"]
     subgraph s12["if single_sample"]
-      n19["sawfish_call"]
+      n22["sawfish_call"]
     end
   end
   subgraph s13["downstream (downstream.wdl)"]
-    n20["hiphase"]
-    n21["trgt_genotype"]
-    n22["pbjam_bam_stats"]
-    n23["bcftools_stats_roh_small_variants"]
-    n24["sv_stats"]
-    n25["methbat_pileup"]
+    n23["hiphase"]
+    n24["trgt_genotype"]
+    n25["pbjam_bam_stats"]
+    n26["bcftools_stats_roh_small_variants"]
+    n27["sv_stats"]
+    n28["methbat_pileup"]
     subgraph s14["if defined(methbat_pileup.cpg_pileup_bed)"]
-      n26["methbat_profile_task"]
+      n29["methbat_profile_task"]
     end
     subgraph s15["if run_starphase"]
-      n27["pbstarphase_diplotype"]
+      n30["pbstarphase_diplotype"]
     end
   end
-  n28(["stats"])
-  n29[["filter_messages"]]
-  n30["consolidate_stats"]
-  n31["ugc_wgw_manifest_write"]
+  n31(["stats"])
+  n32[["filter_messages"]]
+  n33["consolidate_stats"]
+  n34["ugc_wgw_manifest_write"]
   n1 --> n2
   n1 -.-> s2
   n3 --> n4
@@ -110,46 +113,50 @@ flowchart TD
   n4 --> n5
   n5 --> n6
   n5 --> n7
-  n5 --> n8
-  n5 --> n9
-  n5 --> n15
-  n5 --> n16
-  n5 --> n17
+  n5 --> n10
+  n5 --> n11
+  n5 --> n12
   n5 --> n18
   n5 --> n19
+  n5 --> n20
+  n5 --> n21
+  n5 --> n22
   n6 --> n9
-  n9 --> n19
-  n10 --> n12
-  n11 --> n12
-  n12 --> n13
-  n13 --> n14
-  n13 -.-> s11
-  n20 --> n21
-  n20 --> n22
-  n20 --> n23
-  n20 --> n24
-  n20 --> n25
-  n20 --> n27
-  n25 --> n26
-  n25 -.-> s14
-  n28 --> n30
-  n29 --> n30
-  s1 --> n10
+  n7 --> n8
+  n8 --> n9
+  n9 --> n12
+  n12 --> n22
+  n13 --> n15
+  n14 --> n15
+  n15 --> n16
+  n16 --> n17
+  n16 -.-> s11
+  n23 --> n24
+  n23 --> n25
+  n23 --> n26
+  n23 --> n27
+  n23 --> n28
+  n23 --> n30
+  n28 --> n29
+  n28 -.-> s14
+  n31 --> n33
+  n32 --> n33
   s1 --> n13
-  s1 --> n21
-  s1 --> n29
+  s1 --> n16
+  s1 --> n24
+  s1 --> n32
   s1 -.-> s8
-  s3 --> n20
-  s3 --> n21
-  s3 --> n28
-  s3 --> n29
-  s13 --> n28
-  s13 --> n29
+  s3 --> n23
+  s3 --> n24
+  s3 --> n31
+  s3 --> n32
+  s13 --> n31
+  s13 --> n32
 ```
 
 ## ugc_wgw_upstream
 
-Source `workflows/ugc_wgw_upstream.wdl`, depth 1, Mermaid source 1767 characters.
+Source `workflows/ugc_wgw_upstream.wdl`, depth 1, Mermaid source 1926 characters.
 
 Inlined workflows:
 
@@ -180,36 +187,39 @@ flowchart TD
     end
     n5(["aligned_bam_data, aligned_bam_index"])
     n6["mosdepth"]
+    n7["ugc_wgw_somalier_extract"]
+    n8["ugc_wgw_somalier_relate_one"]
+    n9["ugc_wgw_resolve_sex"]
     subgraph s6["if use_gpu #38;#38; use_parabricks_deepvariant"]
-      n7[["parabricks_deepvariant"]]
+      n10[["parabricks_deepvariant"]]
     end
     subgraph s7["if !use_parabricks_deepvariant || (!use_gp…"]
-      n8[["deepvariant"]]
+      n11[["deepvariant"]]
     end
-    n9["sawfish_discover"]
+    n12["sawfish_discover"]
     subgraph s8["if defined(fail_reads) #38;#38; length(select_fi…"]
       subgraph s9["scatter fail_read_bam in select_first([ fail_reads ])"]
-        n10["bait_fail_reads"]
+        n13["bait_fail_reads"]
         subgraph s10["if !defined(pbmm2_index)"]
-          n11["create_pbmm2_index"]
+          n14["create_pbmm2_index"]
         end
-        n12["align_captured_fail_reads"]
-        n13["subset_bam"]
+        n15["align_captured_fail_reads"]
+        n16["subset_bam"]
       end
       subgraph s11["if length(subset_bam.bam) #gt; 1"]
-        n14["merge_fail_reads"]
+        n17["merge_fail_reads"]
       end
     end
-    n15["paraphase"]
-    n16["mitorsaw"]
-    n17["kivvi_kiv2"]
-    n18["kivvi_d4z4"]
+    n18["paraphase"]
+    n19["mitorsaw"]
+    n20["kivvi_kiv2"]
+    n21["kivvi_d4z4"]
     subgraph s12["if single_sample"]
-      n19["sawfish_call"]
+      n22["sawfish_call"]
     end
   end
-  n20[["filter_messages"]]
-  n21["ugc_wgw_manifest_write"]
+  n23[["filter_messages"]]
+  n24["ugc_wgw_manifest_write"]
   n1 --> n2
   n1 -.-> s2
   n3 --> n4
@@ -218,25 +228,58 @@ flowchart TD
   n4 --> n5
   n5 --> n6
   n5 --> n7
-  n5 --> n8
-  n5 --> n9
-  n5 --> n15
-  n5 --> n16
-  n5 --> n17
+  n5 --> n10
+  n5 --> n11
+  n5 --> n12
   n5 --> n18
   n5 --> n19
+  n5 --> n20
+  n5 --> n21
+  n5 --> n22
   n6 --> n9
-  n9 --> n19
-  n10 --> n12
-  n11 --> n12
-  n12 --> n13
-  n13 --> n14
-  n13 -.-> s11
-  s1 --> n10
+  n7 --> n8
+  n8 --> n9
+  n9 --> n12
+  n12 --> n22
+  n13 --> n15
+  n14 --> n15
+  n15 --> n16
+  n16 --> n17
+  n16 -.-> s11
   s1 --> n13
-  s1 --> n20
+  s1 --> n16
+  s1 --> n23
   s1 -.-> s8
-  s3 --> n20
+  s3 --> n23
+```
+
+## ugc_wgw_cohort_qc
+
+Source `workflows/ugc_wgw_cohort_qc.wdl`, depth 1, Mermaid source 424 characters.
+
+Inlined workflows: none.
+
+Workflow nodes (not expanded here): none.
+
+```mermaid
+flowchart TD
+  subgraph s1["scatter i in range(length(sample_ids))"]
+    subgraph s2["if !defined(somalier_files[i])"]
+      n1["ugc_wgw_somalier_extract"]
+    end
+  end
+  n2["ugc_wgw_somalier_ped"]
+  n3["ugc_wgw_somalier_relate"]
+  subgraph s3["if run_ancestry"]
+    n4["ugc_wgw_somalier_ancestry"]
+  end
+  n5["ugc_wgw_qc_summary"]
+  n6["ugc_wgw_manifest_write"]
+  n1 --> n3
+  n1 --> n4
+  n2 --> n3
+  n3 --> n5
+  n4 --> n5
 ```
 
 ## ugc_wgw_cohort_call

@@ -38,6 +38,20 @@ class CohortsTest(unittest.TestCase):
         example = Path(__file__).resolve().parents[2] / "docs" / "guide" / "examples" / "cohort.txt"
         self.assertEqual(cohorts.read_ids(example), ["HG002", "HG003", "HG004", "NA12878"])
 
+    def test_freeze_warns_about_known_duplicates(self):
+        from .helpers import seed_files
+        cohorts.freeze(self.db, self.events, "C1", write_ids(self.tmp, ["S1", "S2", "S3"]))
+        pairs = ("#sample_a\tsample_b\trelatedness\tibs0\tibs2\texpected_relatedness\texpected\nS1\tS2\t0.995\t0\t400\t-1.0\t\nS2\tS3\t0.45\t0\t300\t-1.0\t\n")
+        seed_files(self.cfg, self.db, "cohort_qc", "cohort", "C1", {"qc_related_pairs": pairs, "qc_members": "sample_id\n", "qc_summary": "section\n"})
+        self.assertEqual(cohorts.duplicate_warnings(self.db, ["S1", "S2", "S3"], 0.9), ["S1 and S2 look like the same individual (relatedness 0.995 in cohort_qc of C1)"])
+        self.assertEqual(cohorts.duplicate_warnings(self.db, ["S1", "S3"], 0.9), [])
+        self.assertEqual(len(cohorts.duplicate_warnings(self.db, ["S1", "S2", "S3"], 0.4)), 2)
+        cohort = cohorts.freeze(self.db, self.events, "C2", write_ids(self.tmp, ["S2", "S1"], "c2.txt"), duplicate_threshold=0.9)
+        self.assertEqual(cohort.members, ["S2", "S1"])
+        warnings = [e for e in (self.cfg.logs_dir / "events.jsonl").read_text().splitlines() if '"cohort.warning"' in e]
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("same individual", warnings[0])
+
     def test_unknown_and_duplicate_ids(self):
         with self.assertRaises(UgcError):
             cohorts.freeze(self.db, self.events, "C2", write_ids(self.tmp, ["S1", "NOPE"]))

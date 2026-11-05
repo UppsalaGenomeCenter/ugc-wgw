@@ -15,4 +15,6 @@ kivvi_kiv2_json/*.kivvi.kiv2.json
 kivvi_kiv2_vcf/*.kivvi.kiv2.vcf.gz
 kivvi_d4z4_json/*.kivvi.d4z4.json
 kivvi_d4z4_vcf/*.kivvi.d4z4.vcf.gz
+somalier_extract/*.somalier
+somalier_sex_tsv/*.sex.tsv
 ugc_wgw_manifest/*.upstream.ugc_wgw_manifest.json

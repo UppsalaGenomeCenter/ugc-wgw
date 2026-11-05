@@ -84,6 +84,8 @@ def prerequisites(db: DB, mode: str, stage: str, subject_type: str, subject_id: 
         if earlier == stage:
             break
         espec = stage_spec(earlier)
+        if espec.optional:   # cohort_qc never gates: a cohort stage after it runs whether it ran or not
+            continue
         if espec.subject_type == "sample":
             members = [subject_id] if subject_type == "sample" else (cohort.members if cohort else [])
             missing = [m for m in members if db.latest_success("sample", m, earlier, version) is None]

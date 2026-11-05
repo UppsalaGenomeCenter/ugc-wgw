@@ -92,15 +92,24 @@ which per-sample outputs of `cohort_call` are sliced for `downstream`. A
 checksum of the list is stored with the cohort. To change membership, freeze a
 new cohort ID.
 
-## Reported and inferred sex
+## Declared, inferred and resolved sex
 
-The sample sheet's `sex` column never reaches the workflows: upstream infers
-the karyotype from chromosome coverage in `upstream` (or inside `singleton`),
-and the **inferred** sex is what drives sawfish and TRGT and what the driver
-passes as the required `sex` input of `downstream`. An inferred value can be
-the empty string; the driver preserves it. The sheet's column is used once,
-by `cohort_freq`, to put a member into the XX or XY stratum ahead of the
-inferred value (chapter 08).
+Three sources can say what sex a sample is, and the run keeps all three.
+The **declared** sex is the sample sheet's column (`MALE`/`FEMALE`, also
+`M`/`F`, `XX`/`XY`, PLINK's `1`/`2`). The **coverage** inference is
+mosdepth's, from the chrX and chrY depth, inside `upstream` or `singleton`;
+it can be empty. The **somalier** call is from chrX heterozygosity at
+somalier's sites (a sample with few heterozygous chrX genotypes is XY), made
+in the same run from a 200 KB genotype sketch. Right after mosdepth the run
+**resolves** the sex it will use: the declared one when the sheet has it,
+else the coverage inference, else somalier's call, else none. That resolved
+value drives sawfish and TRGT, is what the driver passes as the required
+`sex` input of `downstream`, and puts the member into the XX or XY stratum
+of `cohort_freq` (chapter 08). A disagreement between sources is the QC flag
+`sex_mismatch`; a sample no source could sex is `sex_not_inferred`, a
+failure, because sawfish and TRGT then ran with the XX default (chapter 07).
+Runs from before 0.14 have only the first two sources; the driver treats
+their coverage inference as the resolved value.
 
 ## The call cache
 
@@ -151,5 +160,9 @@ A stage is runnable for a subject when every earlier stage of the mode
 succeeded for it, for a cohort meaning for every frozen member, at the current
 ugc-wgw version (or at any version with `--any-version`). A failed or cancelled
 run blocks its subject until `ugc-wgw retry` starts a new attempt. Terminal runs
-are never modified. Chapter 06 shows how the driver turns this rule into
+are never modified. One stage is exempt: `cohort_qc`, the identity check,
+never gates the stages after it, so `cohort_call` and `cohort_merge` start
+when the members are done whether `cohort_qc` ran, failed or was skipped;
+its findings reach you through the cohort page and the identity pass list
+(chapter 06). Chapter 06 shows how the driver turns this rule into
 "runnable", "blocked", "active" and "done".

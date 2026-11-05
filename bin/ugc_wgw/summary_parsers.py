@@ -551,8 +551,28 @@ def parse_methbat_profile(lines: Iterable[str]) -> dict[str, object]:
             "hist": [[f"{i * 10}-{i * 10 + 10}", hist[i]] for i in range(10)]}
 
 
+PARAPHASE_HAP_RE = re.compile(r"[_-]?hap\d+$", re.IGNORECASE)   # "smn1hap1", "CYP2D6_hap2" -> the gene
+
+
+def _paraphase_hap_names(haps: object, two_copy: object) -> list[str]:
+    """Haplotype names of a Paraphase region: `final_haplotypes` maps the encoded haplotype to its name (older
+    files map the other way round); a haplotype in `two_copy_haplotypes` is present twice and counted twice."""
+    names: list[str] = []
+    by_key: dict[str, str] = {}
+    if isinstance(haps, dict):
+        for k, v in haps.items():
+            name = str(v) if PARAPHASE_HAP_RE.search(str(v)) else (str(k) if PARAPHASE_HAP_RE.search(str(k)) else str(v))
+            by_key[str(k)] = name
+            names.append(name)
+    elif isinstance(haps, list):
+        names = [str(v) for v in haps]
+    for x in (two_copy if isinstance(two_copy, list) else list(two_copy) if isinstance(two_copy, dict) else []):
+        names.append(by_key.get(str(x), str(x)))
+    return names
+
+
 def parse_paraphase(doc: object) -> dict[str, object]:
-    """Paraphase summary: one row per region (copy number, haplotypes, coverage failure)."""
+    """Paraphase summary: one row per region (copy number, haplotypes per gene, fusions, coverage failure)."""
     regions: list[dict[str, object]] = []
     if isinstance(doc, dict):
         for name in sorted(doc, key=lambda s: str(s).upper()):
@@ -561,13 +581,28 @@ def parse_paraphase(doc: object) -> dict[str, object]:
                 continue
             depth = d.get("region_depth") if isinstance(d.get("region_depth"), dict) else {}
             haps = d.get("final_haplotypes")
+            rsi = d.get("region_specific_info") if isinstance(d.get("region_specific_info"), dict) else {}
+            two_copy = d.get("two_copy_haplotypes")
+            gene_cn = rsi.get("gene_cn", d.get("gene_cn"))
+            by_gene: Counter[str] = Counter(PARAPHASE_HAP_RE.sub("", n) for n in _paraphase_hap_names(haps, two_copy))
+            fusions_raw = rsi.get("fusions_called")
+            fusions = [str(x) for x in fusions_raw] if isinstance(fusions_raw, (list, tuple)) else ([str(fusions_raw)] if fusions_raw else [])
             regions.append({"region": str(name), "genes": str(d.get("genes_in_region") or ""),
+                            "phase_region": str(d.get("phase_region") or ""),
                             "depth_median": _float(depth.get("median")) if depth else None,
+                            "depth_p80": _float(depth.get("percentile80")) if depth else None,
+                            "genome_depth": _float(d.get("genome_depth")),
+                            "sample_sex": str(d.get("sample_sex") or ""),
                             "total_cn": _int(d.get("total_cn")) if d.get("total_cn") is not None else None,
+                            "gene_cn": _int(gene_cn) if gene_cn is not None else None,
                             "n_haplotypes": len(haps) if isinstance(haps, (dict, list)) else 0,
+                            "two_copy": len(two_copy) if isinstance(two_copy, (list, dict)) else 0,
+                            "haplotypes_by_gene": dict(sorted(by_gene.items())),
+                            "fusions": fusions,
                             "failed": bool(d.get("failed_for_coverage"))})
     return {"n_regions": len(regions), "n_failed": sum(1 for r in regions if r["failed"]),
-            "n_with_cn": sum(1 for r in regions if r["total_cn"] is not None), "regions": regions}
+            "n_with_cn": sum(1 for r in regions if r["total_cn"] is not None),
+            "n_with_gene_cn": sum(1 for r in regions if r["gene_cn"] is not None), "regions": regions}
 
 
 def parse_mitorsaw(doc: object) -> dict[str, object]:
@@ -593,19 +628,46 @@ def parse_starphase_tsv(lines: Iterable[str]) -> list[dict[str, str]]:
     return [{"gene": r.get("gene", ""), "diplotype": r.get("diplotype", "")} for r in rows if r.get("gene")]
 
 
+STARPHASE_UNCALLED = ("NO_READS", "NO_MATCH", ".", "Multiple")   # a haplotype StarPhase could not type
+
+
+def starphase_called(hap1: object, hap2: object) -> bool:
+    """Both haplotypes typed: neither empty nor one of StarPhase's no-call forms."""
+    def ok(h: object) -> bool:
+        s = str(h or "")
+        return bool(s) and s not in STARPHASE_UNCALLED and not s.startswith("NO_")
+    return ok(hap1) and ok(hap2)
+
+
 def parse_starphase_json(doc: object) -> dict[str, object]:
-    """StarPhase JSON: the tool and database versions, and how many genes have a diplotype."""
+    """StarPhase JSON: the tool and database versions, and one row per gene (the first diplotype's haplotype
+    pair, the core-allele form, ambiguity, whether it was called; HLA genes are those named `HLA-*`)."""
     if not isinstance(doc, dict):
         return {}
-    genes = doc.get("gene_details") if isinstance(doc.get("gene_details"), dict) else {}
-    n_called = 0
-    for d in genes.values():
-        dips = d.get("diplotypes") if isinstance(d, dict) else None
-        if dips and all("NO_READS" not in str(x.get("diplotype", "")) for x in dips if isinstance(x, dict)):
-            n_called += 1
+    details = doc.get("gene_details") if isinstance(doc.get("gene_details"), dict) else {}
+    genes: dict[str, dict[str, object]] = {}
+    for gene in sorted(details, key=str):
+        d = details[gene]
+        if not isinstance(d, dict):
+            continue
+        dips = [x for x in (d.get("diplotypes") or []) if isinstance(x, dict)] if isinstance(d.get("diplotypes"), list) else []
+        first = dips[0] if dips else {}
+        simple = [x for x in (d.get("simple_diplotypes") or []) if isinstance(x, dict)] if isinstance(d.get("simple_diplotypes"), list) else []
+        hap1, hap2 = str(first.get("hap1") or ""), str(first.get("hap2") or "")
+        diplotype = str(first.get("diplotype") or (f"{hap1}/{hap2}" if hap1 or hap2 else ""))
+        if not (hap1 or hap2) and "/" in diplotype:   # older records carry the diplotype string only
+            hap1, hap2 = (diplotype.split("/", 1) + [""])[:2]
+        genes[str(gene)] = {"hap1": hap1, "hap2": hap2, "diplotype": diplotype,
+                            "simple_diplotype": str(simple[0].get("diplotype") or diplotype) if simple else diplotype,
+                            "n_diplotypes": len(dips),
+                            "inexact": bool(d.get("inexact_diplotypes")),
+                            "called": bool(dips) and starphase_called(hap1, hap2),
+                            "hla": str(gene).upper().startswith("HLA-")}
     meta = doc.get("database_metadata") if isinstance(doc.get("database_metadata"), dict) else {}
     return {"version": doc.get("pbstarphase_version"), "database": {k: str(v) for k, v in meta.items()},
-            "n_genes": len(genes), "n_called": n_called}
+            "n_genes": len(genes), "n_called": sum(1 for g in genes.values() if g["called"]),
+            "n_hla": sum(1 for g in genes.values() if g["hla"]),
+            "n_hla_called": sum(1 for g in genes.values() if g["hla"] and g["called"]), "genes": genes}
 
 
 def parse_kivvi(doc: object) -> dict[str, object]:
@@ -1022,3 +1084,69 @@ def parse_refgaps(lines: Iterable[bytes]) -> dict[str, dict[str, int]]:
         g["bp"] += end - start
     return out
 
+
+# ---- identity (cohort_qc, the sex resolution) --------------------------------------------------
+
+
+def parse_sex_tsv(lines: Iterable[str]) -> dict[str, object]:
+    """ugc_wgw_resolve_sex's table (one row): every source, the resolved value and its reason, the X/Y statistics."""
+    cols, rows = table(lines)
+    if not rows:
+        return {}
+    r = rows[0]
+    return {"declared": r.get("declared", ""), "coverage": r.get("coverage", ""), "somalier": r.get("somalier", ""),
+            "resolved": r.get("resolved", ""), "source": r.get("source", ""), "x_n": _int(r.get("x_n")),
+            "x_het": _int(r.get("x_het")), "x_hom_alt": _int(r.get("x_hom_alt")), "x_het_ratio": _float(r.get("x_het_ratio")),
+            "x_depth_mean": _float(r.get("x_depth_mean")), "y_depth_norm": _float(r.get("y_depth_norm")), "reason": r.get("reason", "")}
+
+
+def parse_qc_summary(lines: Iterable[str]) -> dict[str, dict[str, dict[str, object]]]:
+    """cohort_qc's long-format summary (section, metric, key, value) as nested dicts; numbers converted."""
+    out: dict[str, dict[str, dict[str, object]]] = {}
+    for p in _rows(lines):
+        if len(p) < 4 or p[0] == "section":
+            continue
+        out.setdefault(p[0], {}).setdefault(p[1], {})[p[2]] = _num(p[3])
+    return out
+
+
+def parse_qc_members(lines: Iterable[str]) -> list[dict[str, object]]:
+    """cohort_qc's members table: one row per member, numbers converted."""
+    cols, rows = table(lines)
+    numeric = ("x_n", "x_het_ratio", "het_ratio", "depth_mean", "closest_relatedness", "closest_ibs0", "closest_expected", "ancestry_prob")
+    out = []
+    for r in rows:
+        d: dict[str, object] = dict(r)
+        for k in numeric:
+            if k in d:
+                d[k] = _num(str(d[k])) if str(d[k]) != "" else None
+        out.append(d)
+    return out
+
+
+def parse_somalier_pairs(lines: Iterable[str]) -> list[dict[str, object]]:
+    """somalier's pairs table (or cohort_qc's related_pairs): sample_a, sample_b, relatedness, ibs0, ibs2 and the
+    pedigree's expectation (`expected`, else `expected_relatedness`; None when the pedigree said nothing)."""
+    cols, rows = table(lines)
+    out = []
+    for r in rows:
+        exp_raw = r.get("expected", r.get("expected_relatedness", ""))
+        exp = _float(exp_raw) if exp_raw not in ("", None) else None
+        if exp is not None and exp < 0:
+            exp = None
+        out.append({"sample_a": r.get("sample_a", ""), "sample_b": r.get("sample_b", ""), "relatedness": _float(r.get("relatedness")),
+                    "ibs0": _int(r.get("ibs0")), "ibs2": _int(r.get("ibs2")), "expected": exp})
+    return out
+
+
+def parse_ancestry(lines: Iterable[str]) -> list[dict[str, object]]:
+    """somalier ancestry's table: sample_id, predicted_ancestry, given_ancestry (empty for a query sample), the
+    superpopulation probabilities as `probs`, and the principal components as `pcs`."""
+    cols, rows = table(lines)
+    out = []
+    for r in rows:
+        probs = {k[:-5]: _float(v) for k, v in r.items() if k.endswith("_prob")}
+        pcs = [_float(r[k]) for k in cols if k.startswith("PC") and k[2:].isdigit()]
+        out.append({"sample_id": r.get("sample_id", ""), "predicted": r.get("predicted_ancestry", ""),
+                    "given": r.get("given_ancestry", ""), "probs": probs, "pcs": pcs})
+    return out

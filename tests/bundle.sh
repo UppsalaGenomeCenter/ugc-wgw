@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Bundle round-trip: make-bundle.sh (--images data when the dev machine's SIF cache already holds the
 # reference data container, so the installer's copy-and-verify step runs; --images none otherwise)
-# -> install-bundle.sh --verify-only and a real install into a scratch prefix, then `ugc-wgw init --install`.
+# -> install-bundle.sh --verify-only and a real install into a scratch prefix, then `ugc-wgw init --install`;
+# then, with fake SIFs and no Apptainer, a full bundle A, a delta bundle B against A's manifest, their installs
+# into one prefix (the SIF store: hardlinks, adoption from an older layout, --dedupe-sif, the refusal of a delta
+# on a site without its images).
 # Needs network for pip download (dev machine or CI). Usage: tests/bundle.sh [<scratch dir>]
 # UGC_WGW_BUNDLE_IMAGES=none|data|install forces the images mode (CI has no SIF cache and no Apptainer: `none`).
 # A scratch dir it made itself (about 8 GB) is removed after a passing run and kept, with its path printed, after
@@ -37,7 +40,8 @@ case "${UGC_WGW_BUNDLE_IMAGES:-}" in
   *) echo "UGC_WGW_BUNDLE_IMAGES must be none, data or install" >&2; exit 2 ;;
 esac
 echo "== images mode $images"
-tarball=$(scripts/make-bundle.sh --version HEAD --out "$scratch/out" --images "$images" "${bundle_args[@]}")
+# --without-ancestry: the 1000 Genomes somalier set (83 MB from Zenodo) stays out of the test bundles
+tarball=$(scripts/make-bundle.sh --version HEAD --out "$scratch/out" --images "$images" --without-ancestry "${bundle_args[@]}")
 [ -f "$tarball" ] && [ -f "$tarball.sha256" ]
 scripts/install-bundle.sh --bundle "$tarball" --prefix "$scratch/prefix" --verify-only 2>&1 | tee "$scratch/verify.log" >&2
 grep -q 'plugin: ugc-wgw-miniwdl' "$scratch/verify.log"
@@ -69,6 +73,28 @@ grep -q '^scratch_env = TMPDIR$' "$install_dir/miniwdl.cfg"
 grep -q '^scratch_mount = /mnt/scratch$' "$install_dir/miniwdl.cfg"
 [ -f "$scratch/prefix/resources.tsv" ] && grep -q '^task	cpu	memory	time	partition	constraint$' "$scratch/prefix/resources.tsv"
 echo "$report" | grep -q '^plugin=ugc-wgw-miniwdl '
+echo "$report" | grep -q "^sif_store=$scratch/prefix/sif$"
+# manifest schema 2: every image carries `shipped` and is in files[] exactly when shipped; no base for a full bundle
+python3 - "$install_dir/manifest.json" <<'PYEOF'
+import json, sys
+m = json.load(open(sys.argv[1]))
+assert m["schema"] == 2, m["schema"]
+assert m["base"] is None and m["images_total"] == len(m["images"]) and m["images_shipped"] == len(m["images"])
+paths = {f["path"] for f in m["files"]}
+for i in m["images"]:
+    assert isinstance(i["shipped"], bool) and len(i["sha256"]) == 64 and isinstance(i["size"], int), i
+    assert i["shipped"] == (("sif/" + i["sif"]) in paths), i["sif"]
+PYEOF
+# every SIF of the version is a hardlink into the content-addressed store
+for f in "$install_dir"/sif/*.sif; do
+  [ -f "$f" ] || continue
+  sha=$(sha256sum "$f" | cut -d' ' -f1)
+  [ "$(stat -c %i "$f")" = "$(stat -c %i "$scratch/prefix/sif/$sha.sif")" ] || { echo "$f is not linked into the store" >&2; exit 1; }
+  [ "$(stat -c %h "$f")" -ge 2 ]
+done
+if ls "$install_dir"/sif/*.sif >/dev/null 2>&1; then
+  [ "$(grep -vc '^#' "$scratch/prefix/sif/INDEX.tsv")" -ge 1 ]
+fi
 # an invalid scratch variable name is refused before anything is installed
 # shellcheck disable=SC2016  # a literal dollar on purpose: variable names are not expanded by the installer
 echo 'TASK_SCRATCH_ENV=$TMPDIR' > "$scratch/bad-scratch.cfg"
@@ -126,6 +152,14 @@ mmi=$scratch/prefix/references/ugc-wgw-extras-0.3.0/human_GRCh38_GIABv3_no_alt_a
 grep -q "^pbmm2_index	$mmi$" "$ref_map"
 grep -q "^run_starphase	true$" "$ref_map"
 [ -f "$scratch/prefix/references/ugc-wgw-extras-0.3.0/scatter_regions.GRCh38_GIABv3.tsv" ]
+# the identity references (references.lock ugc-wgw-qc): the two shipped files installed, the fetched set left out and said so
+qc=$scratch/prefix/references/ugc-wgw-qc-0.1.0
+grep -q "^somalier_sites_vcf	$qc/somalier_sites.hg38.vcf.gz$" "$ref_map"
+grep -q "^somalier_1kg_labels	$qc/somalier_ancestry_labels_1kg.tsv$" "$ref_map"
+grep -q "^somalier_1kg_tar	$qc/1kg.somalier.tar.gz$" "$ref_map"
+[ "$(sha256sum "$qc/somalier_sites.hg38.vcf.gz" | cut -d' ' -f1)" = d1a853b8bb2e5f1a520bc67c8303be699543d225d785bce51e8335a2420489b5 ]
+[ -f "$qc/somalier_ancestry_labels_1kg.tsv" ] && [ ! -f "$qc/1kg.somalier.tar.gz" ]
+grep -q '1kg.somalier.tar.gz not in the bundle (make-bundle.sh --without-ancestry' "$scratch/install.log"
 # the assembly stages' references (references.lock ugc-wgw-asm): three shipped files, the derived fasta and its index built
 asm=$scratch/prefix/references/ugc-wgw-asm-0.1.0
 grep -q "^asm_fasta	$asm/human_GRCh38_GIABv3_asm.fasta$" "$ref_map"
@@ -149,15 +183,17 @@ if [ "$images" = data ] || [ "$images" = install ]; then
     [ "$(md5sum "$asm/human_GRCh38_GIABv3_asm.fasta.fai" | cut -d' ' -f1)" = 374a75f82ff6f6ae919649aa0322cc20 ]
     [ "$(wc -l < "$asm/human_GRCh38_GIABv3_asm.fasta.fai")" -eq 194 ]
     grep -q 'human_GRCh38_GIABv3_asm.fasta built and verified' "$scratch/install.log"
-    while read -r f; do [ -f "$f" ] || { echo "map names a missing file: $f" >&2; exit 1; }; done < <(cut -f2 "$ref_map" | grep '^/')
+    # every path the map names exists, except the optional 1000 Genomes set left out by --without-ancestry (asserted absent above)
+    while read -r f; do [ -f "$f" ] || { echo "map names a missing file: $f" >&2; exit 1; }; done < <(cut -f2 "$ref_map" | grep '^/' | grep -v '/1kg.somalier.tar.gz$')
   else
     [ ! -f "$mmi" ] && [ ! -f "$asm/human_GRCh38_GIABv3_asm.fasta" ]   # no build images in the bundle: the installer says how to build them and the map still names them
     grep -q 'not built: the bundle carries no quay.io/pacbio/pbmm2' "$scratch/install.log"
   fi
-  # a second install must reuse the tree (no copy), verify it and keep the index
+  # a second install must reuse the tree (no copy), verify it, keep the index, and link every SIF from the store (0 added)
   scripts/install-bundle.sh --bundle "$tarball" --prefix "$scratch/prefix" --site "$scratch/site.cfg" --force > "$scratch/reinstall.log" 2>&1
   grep -q 'reference tree present' "$scratch/reinstall.log"
   grep -q 'profile kept' "$scratch/reinstall.log"
+  grep -q 'SIF store .*: 0 added' "$scratch/reinstall.log"
   if [ "$images" = install ]; then grep -q '\.mmi present and verified' "$scratch/reinstall.log" && grep -q 'asm.fasta present and verified' "$scratch/reinstall.log"; else grep -q '\.mmi not built' "$scratch/reinstall.log"; fi
 fi
 if grep -rq 'v3p1p0\|tertiary' "$install_dir/references" "$install_dir/inputs"; then echo "v3 map names survive in the install" >&2; exit 1; fi
@@ -171,4 +207,78 @@ grep -q '"miniwdl_cfg"' "$scratch/proj/.ugc-wgw/config.json"
 for f in $(grep -ho '"[^"]*/references/[^"]*"' "$install_dir"/inputs/*.json | tr -d '"' | sort -u); do
   [ -f "$f" ] || { echo "rendered template points at a missing file: $f" >&2; exit 1; }
 done
-echo "== bundle test passed ($(du -h "$tarball" | cut -f1) bundle)"
+
+# ---- delta bundles and the SIF store, with fake SIFs (no Apptainer needed: the ugc-wgw image set has no built[]
+# image and no data container, every reference is digest-form, and a cache that holds every SIF pulls nothing)
+echo "== delta bundles"
+fake=$scratch/fake-sif
+mkdir -p "$fake"
+while read -r image; do
+  [ -n "$image" ] || continue
+  uri="docker://$image"; uri="${uri//\//_}"; uri="${uri//:/_}"
+  printf 'fake sif of %s\n' "$image" > "$fake/$uri.sif"
+done < <(sed 's/#.*//' image_manifest.ugc-wgw.txt | awk 'NF { print $1 }' | sort -u)
+n_fake=$(find "$fake" -maxdepth 1 -name '*.sif' | wc -l)
+[ "$n_fake" -ge 4 ]
+tarA=$(scripts/make-bundle.sh --version HEAD --out "$scratch/outA" --images ugc-wgw --without-ancestry --sif-cache "$fake")
+first_fake=$(find "$fake" -maxdepth 1 -name '*.sif' | sort | head -1)
+[ -f "$first_fake.sha256" ]   # the builder wrote the sidecars
+manA="${tarA%.tar}.manifest.json"
+[ -f "$manA" ]
+scripts/install-bundle.sh --bundle "$tarA" --prefix "$scratch/pfxA" > "$scratch/installA.log" 2>&1
+[ "$(find "$scratch/pfxA/sif" -maxdepth 1 -name '*.sif' | wc -l)" -eq "$n_fake" ]
+[ "$(grep -vc '^#' "$scratch/pfxA/sif/INDEX.tsv")" -eq "$n_fake" ]
+grep -q "SIF store $scratch/pfxA/sif: $n_fake added" "$scratch/installA.log"
+# one image changes; the delta against A ships only that one
+changed=$(find "$fake" -maxdepth 1 -name '*hifiasm*.sif' | head -1)
+printf 'fake sif of hifiasm, rebuilt\n' > "$changed"
+tarB=$(scripts/make-bundle.sh --version HEAD --out "$scratch/outB" --images ugc-wgw --base "$manA" --without-ancestry --sif-cache "$fake")
+case "$tarB" in *-delta.tar) ;; *) echo "delta tar not named -delta: $tarB" >&2; exit 1 ;; esac
+tar -tf "$tarB" > "$scratch/tarB.list"   # (not piped into grep -q: tar would die of SIGPIPE under pipefail)
+grep -q '/DELTA-BUNDLE$' "$scratch/tarB.list"
+python3 - "${tarB%.tar}.manifest.json" "$manA" "$n_fake" <<'PYEOF'
+import json, sys
+m = json.load(open(sys.argv[1])); a = json.load(open(sys.argv[2])); n = int(sys.argv[3])
+assert m["schema"] == 2 and m["images_total"] == n and m["images_shipped"] == 1, (m["images_total"], m["images_shipped"])
+assert m["base"]["name"] == a["name"] and m["base"]["images"] == n, m["base"]
+assert sum(1 for f in m["files"] if f["path"].startswith("sif/")) == 1
+assert [i["sif"] for i in m["images"] if i["shipped"]][0].find("hifiasm") >= 0
+PYEOF
+[ "$(stat -c %s "$tarB")" -lt 20000000 ]
+# verify-only: fine against the prefix that holds A, refused against a fresh one, fine with --sif-source
+scripts/install-bundle.sh --bundle "$tarB" --prefix "$scratch/pfxA" --verify-only > "$scratch/verifyB.log" 2>&1
+grep -q "images: $n_fake required; 1 shipped; $((n_fake - 1)) in the SIF store" "$scratch/verifyB.log"
+if scripts/install-bundle.sh --bundle "$tarB" --prefix "$scratch/pfxFresh" --verify-only > "$scratch/verifyB-fresh.log" 2>&1; then
+  echo "verify-only accepted a delta bundle on a site without its images" >&2; exit 1
+fi
+grep -q "$((n_fake - 1)) missing" "$scratch/verifyB-fresh.log"
+[ ! -d "$scratch/pfxFresh/versions" ] && [ ! -d "$scratch/pfxFresh/sif" ]
+scripts/install-bundle.sh --bundle "$tarB" --prefix "$scratch/pfxFresh" --verify-only --sif-source "$fake" > "$scratch/verifyB-src.log" 2>&1
+grep -q "$((n_fake - 1)) adoptable" "$scratch/verifyB-src.log"
+# install B over A: one SIF added, the rest linked from the store; the old hifiasm content is now an orphan
+scripts/install-bundle.sh --bundle "$tarB" --prefix "$scratch/pfxA" --force > "$scratch/installB.log" 2>&1
+grep -q "SIF store $scratch/pfxA/sif: 1 added .*, $((n_fake - 1)) linked from the store" "$scratch/installB.log"
+[ "$(find "$scratch/pfxA/sif" -maxdepth 1 -name '*.sif' | wc -l)" -eq $((n_fake + 1)) ]
+[ "$(find "$scratch/pfxA/sif" -maxdepth 1 -name '*.sif' -links 1 | wc -l)" -eq 1 ]
+[ "$(find "$scratch/pfxA/versions/$(cat VERSION)/sif" -maxdepth 1 -name '*.sif' | wc -l)" -eq "$n_fake" ]
+cmp -s "$changed" "$scratch/pfxA/versions/$(cat VERSION)/sif/$(basename "$changed")"
+# a delta on a site that never installed the full bundle is refused before anything is placed
+if scripts/install-bundle.sh --bundle "$tarB" --prefix "$scratch/pfxMissing" > "$scratch/installB-missing.log" 2>&1; then
+  echo "installer accepted a delta bundle on a site without its images" >&2; exit 1
+fi
+grep -q 'Install the full bundle' "$scratch/installB-missing.log"
+[ ! -d "$scratch/pfxMissing/versions" ] && [ ! -d "$scratch/pfxMissing/sif" ]
+# the old layout (no store, every version its own copy): the first delta install adopts from versions/<v>/sif,
+# and --dedupe-sif later replaces copies by hardlinks
+scripts/install-bundle.sh --bundle "$tarA" --prefix "$scratch/pfxOld" > /dev/null 2>&1
+rm -rf "$scratch/pfxOld/sif"
+for f in "$scratch/pfxOld/versions/$(cat VERSION)/sif"/*.sif; do cp -p "$f" "$f.tmp" && mv -f "$f.tmp" "$f"; done
+[ "$(stat -c %h "$changed")" -ge 1 ]
+scripts/install-bundle.sh --bundle "$tarB" --prefix "$scratch/pfxOld" --force > "$scratch/installB-old.log" 2>&1
+grep -q "$((n_fake - 1)) adopted from the installed versions" "$scratch/installB-old.log"
+[ "$(find "$scratch/pfxOld/sif" -maxdepth 1 -name '*.sif' | wc -l)" -eq "$n_fake" ]
+for f in "$scratch/pfxOld/versions/$(cat VERSION)/sif"/*.sif; do cp -p "$f" "$f.tmp" && mv -f "$f.tmp" "$f"; done
+scripts/install-bundle.sh --prefix "$scratch/pfxOld" --dedupe-sif > "$scratch/dedupe.log" 2>&1
+grep -q "dedupe: $n_fake file(s) replaced by store hardlinks" "$scratch/dedupe.log"
+for f in "$scratch/pfxOld/versions/$(cat VERSION)/sif"/*.sif; do [ "$(stat -c %h "$f")" -ge 2 ]; done
+echo "== bundle test passed ($(du -h "$tarball" | cut -f1) bundle; delta $(du -h "$tarB" | cut -f1))"

@@ -162,7 +162,7 @@ class InputsTest(unittest.TestCase):
         d = self.check_doc("cohort_freq", doc)
         self.assertEqual(d["sample_ids"], ["S2", "S1", "S3"])
         self.assertEqual(d["sample_sexes"], ["XX", "XY", "XX"])          # S1: sheet wins over the inferred FEMALE
-        self.assertEqual(d["sample_sex_sources"], ["inferred", "sheet", "sheet"])
+        self.assertEqual(d["sample_sex_sources"], ["coverage", "declared", "declared"])
         self.assertTrue(d["sv_vcf"].endswith("C1.merged.GRCh38_GIABv3.structural_variants.vcf.gz"))
         self.assertTrue(d["small_variant_vcf"].endswith("C1.merged.GRCh38_GIABv3.small_variants.vcf.gz"))
         self.assertEqual({(m.get("sample_id") or m.get("cohort_id"), m["stage"]) for m in members},
@@ -183,7 +183,7 @@ class InputsTest(unittest.TestCase):
         d = self.check_doc("cohort_freq", inputs.generate(self.ctx("cohort", "C1", "joint"), "cohort_freq")[0])
         self.assertTrue(d["small_variant_vcf"].endswith("C1.joint.GRCh38_GIABv3.small_variants.vcf.gz"))
         self.assertEqual(d["sample_sexes"], ["XY", "XY", "XX"])
-        self.assertEqual(d["sample_sex_sources"], ["inferred", "sheet", "sheet"])
+        self.assertEqual(d["sample_sex_sources"], ["coverage", "declared", "declared"])
 
     def test_missing_prior_output_names_the_member(self):
         seed_success(self.cfg, self.db, "singleton", "sample", "S1", {"sample_id": "S1"})

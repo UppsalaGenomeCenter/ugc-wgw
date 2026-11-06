@@ -1150,3 +1150,77 @@ def parse_ancestry(lines: Iterable[str]) -> list[dict[str, object]]:
         out.append({"sample_id": r.get("sample_id", ""), "predicted": r.get("predicted_ancestry", ""),
                     "given": r.get("given_ancestry", ""), "probs": probs, "pcs": pcs})
     return out
+
+
+# ---- mitochondria (ugc_wgw_mito_collapse, ugc_wgw_haplogrep, cohort_merge's mt sets) -------------------------
+
+
+def parse_mt_summary(lines: Iterable[str]) -> dict[str, object]:
+    """ugc_wgw_mito_collapse's one-row summary: counts as ints, VAF statistics as floats, the major haplotype."""
+    cols, rows = table(lines)
+    if not rows:
+        return {}
+    r = rows[0]
+    return {"haplotypes": _int(r.get("haplotypes")), "records": _int(r.get("records")), "homoplasmic": _int(r.get("homoplasmic")),
+            "heteroplasmic": _int(r.get("heteroplasmic")), "svs": _int(r.get("svs")), "het_vaf_mean": _float(r.get("het_vaf_mean")),
+            "het_vaf_max": _float(r.get("het_vaf_max")), "major_haplotype": r.get("major_haplotype", ""),
+            "major_abundance": _float(r.get("major_abundance"))}
+
+
+def parse_haplogroups(lines: Iterable[str]) -> list[dict[str, object]]:
+    """ugc_wgw_haplogrep's table (or cohort_merge's gathered one, with sample_id and made_in_stage): one row per haplotype."""
+    cols, rows = table(lines)
+    out = []
+    for r in rows:
+        d: dict[str, object] = dict(r)
+        d["abundance"] = _float(r.get("abundance"))
+        d["quality"] = _float(r.get("quality"))
+        out.append(d)
+    return out
+
+
+def parse_mt_vcf(lines: Iterable[bytes]) -> dict[str, object]:
+    """A collapsed (or merged) chrM VCF: records, the members, and per member the homoplasmic (a/a) and
+    heteroplasmic (0/a or a/b) genotypes with the VAF of the heteroplasmic ones (FORMAT/VAF, the ALT's index)."""
+    samples: list[str] = []
+    records = 0
+    hom: dict[str, int] = {}
+    het: dict[str, int] = {}
+    vafs: dict[str, list[float]] = {}
+    for line in lines:
+        if line.startswith(b"#"):
+            if line.startswith(b"#CHROM"):
+                samples = [c.decode("ascii", "replace") for c in line.rstrip(b"\n").split(b"\t")[9:]]
+                for sid in samples:
+                    hom[sid], het[sid], vafs[sid] = 0, 0, []
+            continue
+        f = line.rstrip(b"\n").split(b"\t")
+        if len(f) < 10:
+            continue
+        records += 1
+        keys = f[8].split(b":")
+        gt_i = keys.index(b"GT") if b"GT" in keys else None
+        vaf_i = keys.index(b"VAF") if b"VAF" in keys else None
+        if gt_i is None:
+            continue
+        for sid, col in zip(samples, f[9:]):
+            vals = col.split(b":")
+            if gt_i >= len(vals):
+                continue
+            alleles = vals[gt_i].replace(b"|", b"/").split(b"/")
+            if len(alleles) != 2 or b"." in alleles:
+                continue
+            a, b = alleles
+            if a == b and a != b"0":
+                hom[sid] += 1
+            elif a != b:
+                het[sid] += 1
+                k = b if a == b"0" else a
+                if vaf_i is not None and vaf_i < len(vals) and k.isdigit() and int(k) >= 1:
+                    parts = vals[vaf_i].split(b",")
+                    v = _float(parts[int(k) - 1]) if int(k) - 1 < len(parts) else None
+                    if v is not None:
+                        vafs[sid].append(v)
+    return {"records": records, "samples": samples,
+            "members": {sid: {"homoplasmic": hom[sid], "heteroplasmic": het[sid],
+                              "het_vaf_max": max(vafs[sid]) if vafs[sid] else None} for sid in samples}}

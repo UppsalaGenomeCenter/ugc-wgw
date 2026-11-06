@@ -47,3 +47,17 @@ map template or to the references (a new `references.lock` entry), run
 kept), or the stages that read the new keys fail at their first task with
 "Map key not found".
 
+## Evaluation profiles
+
+`run.sh eval sawfish23` initialises a second project on the same data,
+references, call cache and SIF cache (`project-sawfish23/`,
+`results-sawfish23/`; `UGC_WGW_SMOKE_VARIANT` names it) with the
+`eval-sawfish23` profile, runs the standalone phase there (the cache
+replays everything up to sawfish), and writes to `logs/eval-sawfish23-<stamp>/`
+a per-member truvari comparison of the phased SV VCFs against the
+production project's (`sv.tsv`: TP, FP, FN, precision, recall, F1,
+genotype concordance) and the sawfish tasks' resources of both projects
+(`sawfish.tsv`). Paste both tables into the run entry below; `eval
+sawfish23 compare` repeats the comparison alone on the finished runs.
+`init --profile NAME` applies any shipped profile to the smoke project.
+

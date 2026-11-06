@@ -141,7 +141,7 @@ class ExportEndToEnd(unittest.TestCase):
         self.assertTrue(all(p.parent == self.export_dir for p in paths), out)
         names = {p.name for p in paths}
         for n in ("C1.members.tsv", "C1.coverage.tsv", "C1.variants.tsv", "C1.phasing.tsv", "C1.cn.tsv", "C1.cn.freq.tsv",
-                  "C1.pgx.tsv", "C1.pgx.freq.tsv", "C1.hla.tsv", "C1.hla.freq.tsv", "C1.mito.tsv"):
+                  "C1.pgx.tsv", "C1.pgx.freq.tsv", "C1.hla.tsv", "C1.hla.freq.tsv", "C1.mito.tsv", "C1.mito.freq.tsv"):
             self.assertIn(n, names)
         self.assertIn("tr: cohort_tr has not run", err)
         self.assertIn("assembly: no member has an assembly", err)
@@ -260,7 +260,7 @@ class ExportEndToEnd(unittest.TestCase):
         self.assertEqual(code, 0, err)
         man = json.loads(out)
         self.assertEqual(man["thresholds"]["mito_unexplained_max"], 0.5)
-        self.assertEqual(man["domains"]["mito"]["files"], ["C1.mito.tsv"])
+        self.assertEqual(man["domains"]["mito"]["files"], ["C1.mito.tsv", "C1.mito.freq.tsv"])
 
 
 class DocsTest(unittest.TestCase):

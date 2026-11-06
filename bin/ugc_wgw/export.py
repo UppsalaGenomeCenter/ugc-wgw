@@ -356,20 +356,55 @@ def hla_allele_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     return out
 
 
-def mito_rows(digests: dict[str, dict[str, object]]) -> list[dict[str, object]]:
+def mito_rows(digests: dict[str, dict[str, object]], cohort_haplogroups: list[dict[str, object]] | None = None) -> list[dict[str, object]]:
+    """One row per member and mitorsaw haplotype, with the haplogroup from the member's own run or, for a member whose run
+    predates it, from cohort_merge's gathered table (`haplogroup_source` = run or cohort_merge)."""
+    gathered: dict[tuple[str, str], dict[str, object]] = {}
+    for r in cohort_haplogroups or []:
+        gathered[(str(r.get("sample_id")), str(r.get("haplotype")))] = r
     rows = []
     for sid, m in digests.items():
         mito: dict[str, object] = _dig(m, "targeted", "mitorsaw") or {}  # type: ignore[assignment]
         haps = mito.get("haplotypes") if isinstance(mito.get("haplotypes"), list) else []
         fp: dict[str, object] = mito.get("fingerprint") or {}  # type: ignore[assignment]
+        collapsed: dict[str, object] = mito.get("collapsed") or {}  # type: ignore[assignment]
         flagged = any(f.get("code") == "mito_unexplained_high" for f in (_dig(m, "qc", "flags") or []) if isinstance(f, dict))  # type: ignore[union-attr]
         for h in haps:
-            if isinstance(h, dict):
-                rows.append({"sample_id": sid, "haplotype": h.get("label"), "n_haplotypes": len(haps), "seq_len": h.get("seq_len"),
-                             "num_ref_variants": h.get("num_ref_variants"), "estimated_abundance": h.get("estimated_abundance"),
-                             "unexplained_fraction": fp.get("unexplained_fraction"), "passing_explanation": fp.get("passing_explanation"),
-                             "mito_unexplained_high": flagged, "haplogroup": "", "haplogroup_quality": ""})
+            if not isinstance(h, dict):
+                continue
+            hg, hq, source = h.get("haplogroup") or "", h.get("haplogroup_quality"), "run"
+            if not hg:
+                g = gathered.get((sid, str(h.get("label"))))
+                if g:
+                    hg, hq, source = str(g.get("haplogroup") or ""), g.get("quality"), "cohort_merge"
+            rows.append({"sample_id": sid, "haplotype": h.get("label"), "n_haplotypes": len(haps), "seq_len": h.get("seq_len"),
+                         "num_ref_variants": h.get("num_ref_variants"), "estimated_abundance": h.get("estimated_abundance"),
+                         "unexplained_fraction": fp.get("unexplained_fraction"), "passing_explanation": fp.get("passing_explanation"),
+                         "mito_unexplained_high": flagged, "haplogroup": hg, "haplogroup_quality": hq if hg else "",
+                         "haplogroup_source": source if hg else "", "major_haplotype": str(h.get("label")) == str(collapsed.get("major_haplotype") or ""),
+                         "homoplasmic_sites": collapsed.get("homoplasmic"), "heteroplasmic_sites": collapsed.get("heteroplasmic"),
+                         "het_vaf_max": collapsed.get("het_vaf_max")})
     return rows
+
+
+def mito_freq_rows(hg_major: list[dict[str, object]], strata: dict[str, dict[str, str]]) -> list[dict[str, object]]:
+    """The haplogroup frequencies: one row per (kind, value, stratum), kind = haplogroup (the major haplotype's) or
+    macro_haplogroup (its first letter)."""
+    out: list[dict[str, object]] = []
+    for kind in ("haplogroup", "macro_haplogroup"):
+        for r in freq_table(hg_major, kind, strata, by=()):
+            out.append({"kind": kind, "value": r[kind], **{k: v for k, v in r.items() if k != kind}})
+    return out
+
+
+def haplogroup_rows(mito: list[dict[str, object]]) -> list[dict[str, object]]:
+    """One row per member: the major haplotype's haplogroup and its macro-haplogroup (the first letter), for freq_table."""
+    out = []
+    for r in mito:
+        if r.get("major_haplotype") and r.get("haplogroup"):
+            hg = str(r["haplogroup"])
+            out.append({"sample_id": r["sample_id"], "haplogroup": hg, "macro_haplogroup": hg[:1], "called": True})
+    return out
 
 
 def assembly_rows(digests: dict[str, dict[str, object]]) -> list[dict[str, object]]:
@@ -389,7 +424,8 @@ def assembly_rows(digests: dict[str, dict[str, object]]) -> list[dict[str, objec
 # ---- the targeted callers across the cohort (shared with the cohort page) ------------------------
 
 
-def targeted_summary(members: dict[str, dict[str, object]], strata: dict[str, dict[str, str]], *, top_regions: int = 12) -> dict[str, object]:
+def targeted_summary(members: dict[str, dict[str, object]], strata: dict[str, dict[str, str]], *, top_regions: int = 12,
+                     cohort_haplogroups: list[dict[str, object]] | None = None) -> dict[str, object]:
     """Copy-number counts per Paraphase region, StarPhase diplotype and HLA allele frequencies, the mitorsaw fingerprint
     per member: what the cohort page draws and the export writes, from one computation."""
     cn = cn_rows(members)
@@ -436,7 +472,11 @@ def targeted_summary(members: dict[str, dict[str, object]], strata: dict[str, di
         g = hla_genes.setdefault(str(r["gene"]), {"gene": r["gene"], "n_members": 0, "n_called": 0})
         g["n_members"] += 1  # type: ignore[operator]
         g["n_called"] += int(bool(r.get("called")))  # type: ignore[operator]
-    mito = mito_rows(members)
+    mito = mito_rows(members, cohort_haplogroups)
+    hg_major = haplogroup_rows(mito)
+    hg_counts: dict[str, int] = {}
+    for r in hg_major:
+        hg_counts[str(r["haplogroup"])] = hg_counts.get(str(r["haplogroup"]), 0) + 1
     unexplained = {str(r["sample_id"]): _num(r.get("unexplained_fraction")) for r in mito if r.get("haplotype") is not None}
     multi = sorted({str(r["sample_id"]) for r in mito if (r.get("n_haplotypes") or 0) > 1})  # type: ignore[operator]
     minor = [float(r["estimated_abundance"]) for r in mito if r["sample_id"] in multi and _num(r.get("estimated_abundance")) is not None  # type: ignore[arg-type]
@@ -451,7 +491,8 @@ def targeted_summary(members: dict[str, dict[str, object]], strata: dict[str, di
             "mito": {"n_members": len({str(r["sample_id"]) for r in mito}), "multi_haplotype": multi,
                      "minor_abundance_median": round(statistics.median(minor), 4) if minor else None,
                      "unexplained": {k: v for k, v in unexplained.items() if v is not None},
-                     "flagged": sorted({str(r["sample_id"]) for r in mito if r.get("mito_unexplained_high")})}}
+                     "flagged": sorted({str(r["sample_id"]) for r in mito if r.get("mito_unexplained_high")}),
+                     "n_haplogrouped": len(hg_major), "haplogroups": hg_counts, "freq": mito_freq_rows(hg_major, strata)}}
 
 
 # ---- copies of the cohort stages' tables --------------------------------------------------------
@@ -519,6 +560,11 @@ def build(cfg: Config, db: DB, code: CodeInfo, *, cohort_id: str, domains: list[
         res.notes.append("ancestry strata: no cohort_qc run with an ancestry table for this cohort; ALL" + (" and sex" if "sex" in kinds else "") + " only")
     st = strata_of(digests, kinds, ancestry=ancestry)
     unlabelled = sorted(sid for sid in digests if "ancestry" in st and sid not in st["ancestry"])
+    cohort_haplogroups: list[dict[str, object]] = []
+    if "cohort_merge" in cruns:
+        p = Outputs.load(cruns["cohort_merge"]).opt("cohort_mt_haplogroups")
+        if isinstance(p, str) and Path(p).exists():
+            cohort_haplogroups = sp.parse_haplogroups(sp.read_lines(Path(p)))
     sex_somalier: dict[str, str] = {}
     if "cohort_qc" in cruns:
         p = Outputs.load(cruns["cohort_qc"]).opt("qc_members")
@@ -587,10 +633,16 @@ def build(cfg: Config, db: DB, code: CodeInfo, *, cohort_id: str, domains: list[
             emit(domain, "hla.freq", hf, ["gene", "allele", "stratum_kind", "stratum", "count", "fraction", "n_alleles", "n_called", "n_members"],
                  "HLA allele counts per gene, both haplotypes pooled (n_alleles = 2 × n_called); " + strata_note)
         elif domain == "mito":
-            rows = mito_rows(digests)
-            emit(domain, "mito", rows, ["sample_id", "haplotype", "n_haplotypes", "seq_len", "num_ref_variants", "estimated_abundance",
-                                        "unexplained_fraction", "passing_explanation", "mito_unexplained_high", "haplogroup", "haplogroup_quality"],
-                 "mitorsaw haplotypes per member; haplogroup columns are empty until haplogrep runs (0.15)")
+            rows = mito_rows(digests, cohort_haplogroups)
+            emit(domain, "mito", rows, ["sample_id", "haplotype", "n_haplotypes", "seq_len", "num_ref_variants", "estimated_abundance", "major_haplotype",
+                                        "haplogroup", "haplogroup_quality", "haplogroup_source", "homoplasmic_sites", "heteroplasmic_sites", "het_vaf_max",
+                                        "unexplained_fraction", "passing_explanation", "mito_unexplained_high"],
+                 "mitorsaw haplotypes per member with haplogrep3's haplogroup per haplotype (from the member's run, or from cohort_merge for a run "
+                 "before 0.15); the collapsed chrM counts are the sample's (major_haplotype marks the most abundant)")
+            hg_major = haplogroup_rows(rows)
+            emit(domain, "mito.freq", mito_freq_rows(hg_major, st),
+                 ["kind", "value", "stratum_kind", "stratum", "count", "fraction", "n_called", "n_members"],
+                 "haplogroup of each member's major haplotype, and its macro-haplogroup (first letter), counted per stratum; " + strata_note)
         elif domain == "assembly":
             rows = assembly_rows(digests)
             if not rows:

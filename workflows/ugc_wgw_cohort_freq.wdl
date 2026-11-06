@@ -12,7 +12,7 @@ import "ugc_wgw/provenance.wdl" as Provenance
 
 workflow ugc_wgw_cohort_freq {
   meta {
-    description: "ugc-pacbio-wgw stage cohort_freq: allele counts and frequencies (AC, AN, AF, NS, AC_Hom, AC_Het, AC_Hemi; overall and per sex group) of the cohort's joint small-variant VCF and merged SV VCF, written as sites-only VCFs with a summary. Scattered over scatter_regions; an SV absent from a sample's call set counts as reference."
+    description: "ugc-pacbio-wgw stage cohort_freq: allele counts and frequencies (AC, AN, AF, NS, AC_Hom, AC_Het, AC_Hemi; overall and per sex group) of the cohort's joint small-variant VCF and merged SV VCF, and of the merged mitochondrial sets (no sex strata: AC_Het counts heteroplasmic members, AC_Hom homoplasmic), written as sites-only VCFs with a summary. Scattered over scatter_regions; an SV absent from a sample's call set counts as reference."
     outputs: {
       small_variant_freq_vcf: {
         description: "Sites-only small-variant frequency VCF (absent when the cohort has no joint small-variant VCF)"
@@ -25,6 +25,18 @@ workflow ugc_wgw_cohort_freq {
       },
       sv_freq_vcf_index: {
         description: "Index for sv_freq_vcf"
+      },
+      mt_small_variant_freq_vcf: {
+        description: "Sites-only frequency VCF of the merged mitochondrial small variants (absent without a cohort mt VCF): AC, AN, AF, NS, AC_Hom (homoplasmic members), AC_Het (heteroplasmic members); no sex strata"
+      },
+      mt_small_variant_freq_vcf_index: {
+        description: "Index for mt_small_variant_freq_vcf"
+      },
+      mt_sv_freq_vcf: {
+        description: "The same over the merged mitochondrial SVs (absent without a cohort mt SV VCF)"
+      },
+      mt_sv_freq_vcf_index: {
+        description: "Index for mt_sv_freq_vcf"
       },
       freq_summary: {
         description: "Long-format summary TSV (records by type, contig class, filter, AF bin; singletons; call rate; strata)"
@@ -65,6 +77,24 @@ workflow ugc_wgw_cohort_freq {
     }
     sv_vcf: {
       description: "Cohort merged SV VCF (cohort_merge)"
+    }
+    mt_small_variant_vcf: {
+      description: "Cohort merged mitochondrial small-variant VCF (cohort_merge cohort_mt_small_variant_vcf); omit when there is none"
+    }
+    mt_small_variant_vcf_index: {
+      description: "Index for mt_small_variant_vcf"
+    }
+    mt_sv_vcf: {
+      description: "Cohort merged mitochondrial SV VCF (cohort_merge cohort_mt_sv_vcf); omit when there is none"
+    }
+    mt_sv_vcf_index: {
+      description: "Index for mt_sv_vcf"
+    }
+    mt_contig: {
+      description: "The mitochondrial contig's name in the reference"
+    }
+    mt_length: {
+      description: "Its length (bp)"
     }
     sv_vcf_index: {
       description: "Index for sv_vcf"
@@ -109,6 +139,12 @@ workflow ugc_wgw_cohort_freq {
     File? small_variant_vcf_index
     File sv_vcf
     File sv_vcf_index
+    File? mt_small_variant_vcf
+    File? mt_small_variant_vcf_index
+    File? mt_sv_vcf
+    File? mt_sv_vcf_index
+    String mt_contig = "chrM"
+    Int mt_length = 16569
 
     Int freq_threads = 2
     Int freq_mem_gb = 4
@@ -224,6 +260,46 @@ workflow ugc_wgw_cohort_freq {
     runtime_attributes = default_runtime_attributes
   }
 
+  # ---- mitochondria (the merged mitorsaw sets of cohort_merge): one contig, no scatter, no sex strata ----
+
+  Array[String] no_sexes = []
+  File mt_bed = write_lines(["~{mt_contig}\t0\t~{mt_length}"])
+  Array[String] header_mt = flatten([header_common, [
+    "##ugc_wgw_cohort_freq_mt=genotypes are mitorsaw's haplotypes collapsed to diploid (0/1 heteroplasmic, 1/1 homoplasmic; AC_Het and AC_Hom count members); a member without the variant in its mitorsaw call set is 0/0; no sex strata"
+  ]])
+
+  if (defined(mt_small_variant_vcf)) {
+    call Freq.ugc_wgw_bcftools_freq as mt_small_shard { input:
+      vcf = select_first([mt_small_variant_vcf]),
+      vcf_index = select_first([mt_small_variant_vcf_index]),
+      regions_bed = mt_bed,
+      sample_ids = sample_ids,
+      sample_sexes = no_sexes,
+      header_lines = flatten([header_mt, ["##ugc_wgw_cohort_freq_source=~{basename(select_first([mt_small_variant_vcf]))}"]]),
+      missing_to_homref = true,
+      out_prefix = "~{out_prefix}.mt_small_variants",
+      threads = freq_threads,
+      mem_gb = freq_mem_gb,
+      runtime_attributes = default_runtime_attributes
+    }
+  }
+
+  if (defined(mt_sv_vcf)) {
+    call Freq.ugc_wgw_bcftools_freq as mt_sv_shard { input:
+      vcf = select_first([mt_sv_vcf]),
+      vcf_index = select_first([mt_sv_vcf_index]),
+      regions_bed = mt_bed,
+      sample_ids = sample_ids,
+      sample_sexes = no_sexes,
+      header_lines = flatten([header_mt, ["##ugc_wgw_cohort_freq_source=~{basename(select_first([mt_sv_vcf]))}"]]),
+      missing_to_homref = true,
+      out_prefix = "~{out_prefix}.mt_svs",
+      threads = freq_threads,
+      mem_gb = freq_mem_gb,
+      runtime_attributes = default_runtime_attributes
+    }
+  }
+
   # ---- summary and provenance ------------------------------------------------
 
   call Freq.ugc_wgw_freq_summary { input:
@@ -231,6 +307,11 @@ workflow ugc_wgw_cohort_freq {
     small_variant_vcf_index = concat_small_variants.vcf_index,
     sv_vcf = concat_svs.vcf,
     sv_vcf_index = concat_svs.vcf_index,
+    mt_small_variant_vcf = mt_small_shard.shard_vcf,
+    mt_small_variant_vcf_index = mt_small_shard.shard_vcf_index,
+    mt_sv_vcf = mt_sv_shard.shard_vcf,
+    mt_sv_vcf_index = mt_sv_shard.shard_vcf_index,
+    mt_samples = mt_small_shard.vcf_samples,
     small_variant_samples = if defined(small_variant_vcf) then select_first([small_variant_shard.vcf_samples])[0] else small_variant_vcf,
     sv_samples = sv_shard.vcf_samples[0],
     sample_ids = sample_ids,
@@ -254,6 +335,10 @@ workflow ugc_wgw_cohort_freq {
     File? small_variant_freq_vcf_index = concat_small_variants.vcf_index
     File sv_freq_vcf = concat_svs.vcf
     File sv_freq_vcf_index = concat_svs.vcf_index
+    File? mt_small_variant_freq_vcf = mt_small_shard.shard_vcf
+    File? mt_small_variant_freq_vcf_index = mt_small_shard.shard_vcf_index
+    File? mt_sv_freq_vcf = mt_sv_shard.shard_vcf
+    File? mt_sv_freq_vcf_index = mt_sv_shard.shard_vcf_index
     File freq_summary = ugc_wgw_freq_summary.summary
     File freq_samples = ugc_wgw_freq_summary.samples
     String ugc_wgw_workflow_version = ugc_wgw_version

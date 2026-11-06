@@ -64,6 +64,7 @@ name comes from the map (`name`). Cohort files are named
 | `pbstarphase_summary` (`pbstarphase_json` in `downstream`), `pbstarphase_tsv` | Pharmacogenomic star alleles (StarPhase) and its PharmCAT-style TSV. |
 | `kivvi_kiv2_*`, `kivvi_d4z4_*` (`singleton`; in `upstream` for joint) | LPA KIV-2 and DUX4 D4Z4 repeat genotypes. The JSON records `call_status` (`failed_due_to_no_reads` when the region is empty); the allele plots exist only when an allele was called; all six are absent, with a `msg` line, when kivvi fails on low coverage. |
 | `paraphase_*`, `mitorsaw_*` (`singleton`; in `upstream` for joint) | Paralog and mitochondrial calls. |
+| `mt_*` (`singleton`; in `upstream` for joint) | mitorsaw's chrM calls collapsed to a diploid genotype, split into small variants and SVs, one haploid column per haplotype, a summary row, haplogrep3's haplogroups (the `upstream` table below lists them). |
 | `phase_stats`, `phase_blocks`, `phase_haplotags` | HiPhase summaries. |
 | `small_variant_stats`, `bcftools_roh_*`, `sv_stats_plot`, the pbjam plots (`read_length_plot`, `read_quality_plot`, `mapq_distribution_plot`, `mg_distribution_plot`) | QC. |
 | `stats_file` | One TSV with every `stat_*` value of the sample: depth, inferred sex, mapped reads, phasing NG50, variant counts, TRGT and methylation numbers. |
@@ -80,6 +81,7 @@ name comes from the map (`name`). Cohort files are named
 | `discover_tar` | sawfish discover directory, for a later multi-sample call. |
 | `inferred_sex`, `stat_depth_mean`, `mosdepth_*` | Coverage and the inferred karyotype the driver passes on. |
 | `paraphase_*`, `mitorsaw_*` | Paralog and mitochondrial calls. |
+| `mt_small_variant_vcf`, `mt_sv_vcf`, `mt_haplotypes_vcf` (+ indices), `mt_haplotypes_tsv`, `mt_summary`, `mt_haplogroups`, `mt_haplogroup` | mitorsaw's chrM calls collapsed to a diploid genotype (`0/1` heteroplasmic, `1/1` homoplasmic, `VAF` the read fraction), split at 50 bp into small variants and SVs; one haploid column per haplotype; a summary row; haplogrep3's haplogroup per haplotype and the sample's (its most abundant haplotype's). |
 
 ### `cohort_call`
 
@@ -98,6 +100,8 @@ name comes from the map (`name`). Cohort files are named
 | `cohort_trgt_lps` | trgt-lps table, `<cohort_id>.merged.GRCh38.trgt.lps.tsv`. |
 | `cohort_small_variant_vcf`, `_index` (optional) | Unphased GLnexus VCF from the gVCFs, `<cohort_id>.merged.GRCh38.small_variants.vcf.gz`, standalone mode by default. |
 | `cohort_phased_small_variant_vcf`, `_index` (optional) | bcftools merge of the phased per-sample small-variant VCFs. |
+| `cohort_mt_small_variant_vcf`, `cohort_mt_sv_vcf` (+ indices) | The members' collapsed mitochondrial sets merged, `<cohort_id>.merged.GRCh38.mt_small_variants.vcf.gz` and `…mt_svs.vcf.gz`; `0/0` = no alternate allele reported by mitorsaw for that member; members whose run predates 0.15 were collapsed in the stage. |
+| `cohort_mt_haplogroups` | `<cohort_id>.merged.GRCh38.mt_haplogroups.tsv`: every member's haplogroup per mitorsaw haplotype, with `made_in_stage`. |
 
 ### `cohort_freq`
 
@@ -105,8 +109,9 @@ name comes from the map (`name`). Cohort files are named
 |---|---|
 | `small_variant_freq_vcf`, `_index` (absent without a joint VCF) | Sites-only allele counts of the cohort's GLnexus VCF, `<cohort_id>.freq.GRCh38.small_variants.vcf.gz`: `AC`, `AN`, `AF`, `NS`, `AC_Hom`, `AC_Het`, `AC_Hemi` overall and `_XX`/`_XY`; no genotypes. |
 | `sv_freq_vcf`, `_index` | The same over the merged SV VCF, `<cohort_id>.freq.GRCh38.structural_variants.vcf.gz`, plus `SUPP` (carrier samples) and `CF` (carrier frequency). |
-| `freq_summary` | `<cohort_id>.freq.GRCh38.summary.tsv`: records by type, contig class, filter and AF bin; singletons; call rate; strata. Long format, `resource metric key value`. |
-| `freq_samples` | `<cohort_id>.freq.GRCh38.samples.tsv`: each member's sex group, where it came from, and presence in each VCF. |
+| `mt_small_variant_freq_vcf`, `mt_sv_freq_vcf` (+ indices; when `cohort_merge` merged the mitochondrial sets) | Sites-only counts of the merged mitochondrial sets, `<cohort_id>.freq.GRCh38.mt_small_variants.vcf.gz` and `…mt_svs.vcf.gz`: `AC`, `AN`, `AF`, `NS`, `AC_Hom` (homoplasmic members), `AC_Het` (heteroplasmic members); no sex strata. |
+| `freq_summary` | `<cohort_id>.freq.GRCh38.summary.tsv`: records by type, contig class, filter and AF bin; singletons; call rate; strata; the `mt_small_variants` and `mt_svs` resources when present. Long format, `resource metric key value`. |
+| `freq_samples` | `<cohort_id>.freq.GRCh38.samples.tsv`: each member's sex group, where it came from, and presence in each VCF (`in_mt_vcf` since 0.15). |
 
 The `##ugc_wgw_cohort_freq_*` header lines of both VCFs say how the counts were
 made (chapter 08).
@@ -356,8 +361,8 @@ adds the cohort page and covers the cohort's members. `--pass-list FILE`
 also writes the IDs that pass `--pass-on`, in sample-sheet order: `assembly`
 (no assembly QC fail flag: the input of `cohort freeze` for a pangenome
 cohort), `identity` (no identity failure in the cohort's `cohort_qc` run and
-no related or duplicate partner earlier in the sheet; needs `--cohort`) or
-`all` (both) (chapter 06). The paths written are printed, one per line.
+no undeclared relative or duplicate earlier in the sheet; a declared pair
+stays; needs `--cohort`) or `all` (both) (chapter 06). The paths written are printed, one per line.
 
 The sample page has a fixed menu on the left and these sections: overview
 with the QC flags and the sex from every source (sheet, coverage, somalier)
@@ -368,7 +373,8 @@ het/hom, substitution spectrum, indel lengths, site quality and depth
 histograms, runs of homozygosity); structural variants by type and size;
 phasing; tandem repeats (coverage dropouts and the catalog's known disease
 loci with their genotypes); methylation; the targeted callers (Paraphase,
-mitorsaw, StarPhase, kivvi); the assembly, when the sample has one; with
+mitorsaw with the collapsed chrM counts and a haplogroup per haplotype,
+StarPhase, kivvi); the assembly, when the sample has one; with
 `--cohort`, the sample's identity in that cohort (closest relative,
 relatedness and expectation, heterozygosity ratio, somalier's chrX call,
 ancestry, its identity flags) from the cohort's `cohort_qc` run; the
@@ -412,7 +418,8 @@ strata), the targeted callers across the cohort (Paraphase copy-number
 histograms of the regions with the most variation and a table of every
 region, StarPhase diplotype frequencies per gene with the called rate,
 HLA allele frequencies, the mitorsaw unexplained fraction with the members
-above its threshold: the same tables `ugc-wgw export` writes), the pangenome graph (`cohort_pangenome`: the chromosomes built
+above its threshold and the members' haplogroups and macro-haplogroups: the
+same tables `ugc-wgw export` writes), the pangenome graph (`cohort_pangenome`: the chromosomes built
 with their nodes, edges and length, the contigs the split assigned to a
 chromosome or left ambiguous per haplotype, the allele frequencies of the
 vcfwave VCF, truvari's recall, precision, F1 and genotype concordance
@@ -473,8 +480,9 @@ Each sample's numbers are also written as `<sample>.summary.json`, a digest
 the cohort page reads instead of the sample's files, so a cohort of a
 thousand samples renders from a thousand small JSON files. A digest is
 reused while the runs it came from are unchanged and its schema is current
-(0.14.0 moved to schema 3 for the per-gene rows of the targeted callers
-and the identity block: every digest rebuilds once) and rebuilt otherwise
+(0.15.0 moved to schema 4 for the collapsed chrM counts and the
+haplogroups in the mitorsaw block; 0.14.0 to schema 3: every digest
+rebuilds once after each) and rebuilt otherwise
 (`--force` rebuilds all). Building one costs
 about 15 s of pure Python per
 sample (the 500 bp mosdepth bed and the TRGT outputs are streamed);
@@ -505,7 +513,8 @@ appended.
 | `C1.pgx.tsv` | one per member × StarPhase gene (HLA excluded) | the diplotype, its core-allele form, both haplotypes, the number of candidate diplotypes, `inexact`, `called` |
 | `C1.pgx.freq.tsv` | one per gene × core diplotype × stratum | `count`, `fraction`, `n_called`, `n_members` |
 | `C1.hla.tsv`, `C1.hla.freq.tsv` | one per member × HLA gene; one per gene × allele × stratum | StarPhase's HLA alleles; the frequency file pools both haplotypes (`n_alleles` = 2 × `n_called`) |
-| `C1.mito.tsv` | one per member × mitorsaw haplotype | abundance, variants against the reference, the unexplained fingerprint fraction and whether `mito_unexplained_high` fired; `haplogroup` columns, empty until haplogrep runs (0.15) |
+| `C1.mito.tsv` | one per member × mitorsaw haplotype | abundance, variants against the reference, whether it is the member's major haplotype, haplogrep3's `haplogroup` with its `quality` and where it came from (`run`, or `cohort_merge` for a member collapsed there), the member's homoplasmic and heteroplasmic site counts and highest heteroplasmic `VAF`, the unexplained fingerprint fraction and whether `mito_unexplained_high` fired |
+| `C1.mito.freq.tsv` | one per `kind` (`haplogroup`, `macro_haplogroup`: its first letter) × value × stratum | `count`, `fraction`, `n_called`, `n_members`, over each member's major haplotype |
 | `C1.assembly.tsv` | one per member with an assembly | the flat assembly summary the cohort page draws (haplotype lengths, NG50, Flagger, reliable fraction, concordance, both callers' counts, karyotype) |
 | `C1.identity.*.tsv`, `C1.tr.*.tsv`, `C1.methyl.*.tsv` | copies | the tables of `cohort_qc`, `cohort_tr` and `cohort_methyl`, when the stage has run for the cohort in this mode; skipped with a message otherwise |
 | `export_manifest.json` | | ugc-wgw version, the cohort's freeze, the mode, the digest schema and thresholds, the strata used, the run ids read per member and per cohort stage, the domains written or skipped, every file with its rows, bytes and sha256 |

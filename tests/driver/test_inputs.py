@@ -146,11 +146,32 @@ class InputsTest(unittest.TestCase):
         self.assertEqual(d["ugc_wgw_container_registry"], config.DEFAULT_REGISTRY)
         self.assertEqual([m["sample_id"] for m in members], ["S2", "S1", "S3"])
         self.assertTrue(all(m["ugc_wgw_version"] == VERSION and m["stage"] == "singleton" for m in members))
+        # the mitochondrial sets: every member has one (0.15 runs), so no mitorsaw inputs travel
+        self.assertTrue(d["merge_mitochondria"])
+        self.assertEqual([Path(p).name for p in d["mt_small_variant_vcfs"]], [f"{s}.GRCh38_GIABv3.mt.small_variants.vcf.gz" for s in ("S2", "S1", "S3")])
+        self.assertEqual(len(d["mt_sv_vcf_indices"]), 3)
+        self.assertTrue(all(Path(p).name.endswith(".mt.haplogroups.tsv") for p in d["mt_haplogroups"]))
+        self.assertNotIn("mitorsaw_vcfs", d)
         # toggles change the key set
         self.cfg.stage_inputs = {"ugc_wgw_cohort_merge": {"run_glnexus": False, "merge_phased_small_variants": True}}
         d = self.check_doc("cohort_merge", inputs.generate(self.ctx("cohort", "C1"), "cohort_merge")[0])
         self.assertNotIn("gvcfs", d)
         self.assertEqual(len(d["phased_small_variant_vcfs"]), 3)
+        # a member whose run predates the collapse: null in the mt arrays, its mitorsaw outputs travel, a warning names it
+        seed_success(self.cfg, self.db, "singleton", "sample", "S1", {"sample_id": "S1", "inferred_sex": "MALE", "legacy": True}, attempt=2)
+        self.cfg.stage_inputs = {}
+        with self.assertLogs("ugc-wgw", level="WARNING") as logs:
+            d = self.check_doc("cohort_merge", inputs.generate(self.ctx("cohort", "C1"), "cohort_merge")[0])
+        self.assertTrue(any("no collapsed mitochondrial set" in m and "S1" in m for m in logs.output), logs.output)
+        self.assertEqual([p is None for p in d["mt_small_variant_vcfs"]], [False, True, False])
+        self.assertEqual([p is None for p in d["mt_haplogroups"]], [False, True, False])
+        self.assertEqual([None if p is None else Path(p).name for p in d["mitorsaw_vcfs"]], [None, "S1.GRCh38_GIABv3.mitorsaw.vcf.gz", None])
+        self.assertEqual([p is None for p in d["mitorsaw_hap_stats"]], [True, False, True])
+        # the off switch leaves the branch out
+        self.cfg.stage_inputs = {"ugc_wgw_cohort_merge": {"merge_mitochondria": False}}
+        d = self.check_doc("cohort_merge", inputs.generate(self.ctx("cohort", "C1"), "cohort_merge")[0])
+        self.assertFalse(d["merge_mitochondria"])
+        self.assertNotIn("mt_small_variant_vcfs", d)
 
     def test_cohort_freq_standalone_and_joint(self):
         # sheet: S1 MALE, S2 (no sex), S3 FEMALE (see setUp); S2's sex comes from the singleton's inferred_sex
@@ -165,6 +186,7 @@ class InputsTest(unittest.TestCase):
         self.assertEqual(d["sample_sex_sources"], ["coverage", "declared", "declared"])
         self.assertTrue(d["sv_vcf"].endswith("C1.merged.GRCh38_GIABv3.structural_variants.vcf.gz"))
         self.assertTrue(d["small_variant_vcf"].endswith("C1.merged.GRCh38_GIABv3.small_variants.vcf.gz"))
+        self.assertNotIn("mt_small_variant_vcf", d)   # that cohort_merge seed merged no mitochondrial set (0.14 shape)
         self.assertEqual({(m.get("sample_id") or m.get("cohort_id"), m["stage"]) for m in members},
                          {("C1", "cohort_merge"), ("S1", "singleton"), ("S2", "singleton"), ("S3", "singleton")})
         # no joint VCF (run_glnexus off): SV frequencies only, the optional inputs are simply absent
@@ -184,6 +206,12 @@ class InputsTest(unittest.TestCase):
         self.assertTrue(d["small_variant_vcf"].endswith("C1.joint.GRCh38_GIABv3.small_variants.vcf.gz"))
         self.assertEqual(d["sample_sexes"], ["XY", "XY", "XX"])
         self.assertEqual(d["sample_sex_sources"], ["coverage", "declared", "declared"])
+        # a cohort_merge that merged the mitochondrial sets (0.15): the mt VCFs travel to the mt branch
+        seed_success(self.cfg, self.db, "cohort_merge", "cohort", "C1", {"cohort_id": "C1", "sample_ids": ["S2", "S1", "S3"], "run_glnexus": True,
+                                                                         "merge_mitochondria": True}, attempt=7)
+        d = self.check_doc("cohort_freq", inputs.generate(self.ctx("cohort", "C1"), "cohort_freq")[0])
+        self.assertTrue(d["mt_small_variant_vcf"].endswith("C1.merged.GRCh38_GIABv3.mt_small_variants.vcf.gz"))
+        self.assertTrue(d["mt_sv_vcf_index"].endswith("C1.merged.GRCh38_GIABv3.mt_svs.vcf.gz.tbi"))
 
     def test_missing_prior_output_names_the_member(self):
         seed_success(self.cfg, self.db, "singleton", "sample", "S1", {"sample_id": "S1"})

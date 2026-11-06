@@ -6,4 +6,7 @@ sv_freq_vcf/*.freq.*.structural_variants.vcf.gz
 sv_freq_vcf_index/*.freq.*.structural_variants.vcf.gz.tbi
 freq_summary/*.freq.*.summary.tsv
 freq_samples/*.freq.*.samples.tsv
+# 0.15.0: the mitochondrial frequencies (present when cohort_merge merged the mt sets)
+mt_small_variant_freq_vcf/*.freq.*.mt_small_variants.vcf.gz
+mt_sv_freq_vcf/*.freq.*.mt_svs.vcf.gz
 ugc_wgw_manifest/*.cohort_freq.ugc_wgw_manifest.json

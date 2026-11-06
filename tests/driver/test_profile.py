@@ -1,6 +1,7 @@
 """Site profiles: `ugc-wgw init --profile` from the shipped examples, an install prefix or a file; flags win over
 the profile; the record in config.json; the listing names the profile as the source of its overrides."""
 import json
+import subprocess
 import os
 import re
 import tempfile
@@ -31,28 +32,43 @@ class ProfileTest(unittest.TestCase):
 
     def test_shipped_profiles_apply_and_their_keys_are_real_inputs(self):
         shipped = sorted(p.stem for p in (REPO / "backends" / "hpc" / "profiles").glob("*.json"))
-        self.assertEqual(shipped, ["assembly", "cpu", "parabricks"])
+        self.assertEqual(shipped, ["assembly", "cpu", "eval-sawfish23", "parabricks"])
         for name in shipped:
             code, err, cfg = self.init("--profile", name)
             self.assertEqual(code, 0, err)
             doc = json.loads((REPO / "backends" / "hpc" / "profiles" / f"{name}.json").read_text())
             self.assertEqual(cfg.stage_inputs, doc["stage_inputs"])
-            self.assertEqual((cfg.max_inflight, cfg.deepvariant), (doc["max_inflight"], doc.get("deepvariant", "cpu")))
+            self.assertEqual((cfg.max_inflight, cfg.deepvariant), (doc.get("max_inflight", 4), doc.get("deepvariant", "cpu")))
             self.assertEqual(cfg.gpu_type, doc.get("gpu_type", ""))
             self.assertEqual(cfg.profile["name"], name)
             self.assertTrue(cfg.profile["path"].endswith(f"backends/hpc/profiles/{name}.json"))
             self.assertRegex(cfg.profile["sha256"], r"^[0-9a-f]{64}$")
             stage, inputs = next(iter(doc["stage_inputs"].items()))
             self.assertIn(f"stage_inputs.{stage}.{next(iter(inputs))}", cfg.profile["applied"])
-            self.assertIn("max_inflight", cfg.profile["applied"])
+            if "max_inflight" in doc:
+                self.assertIn("max_inflight", cfg.profile["applied"])
             self.assertNotIn("description", cfg.profile["applied"])
             self.assertIn(f"profile {name} (", err)
             # every key the profile sets is an input submit would accept: the listing has nothing to warn about
+            first_input = next(iter(inputs))
+            if "." in first_input:
+                # a call-qualified key (eval-sawfish23's sawfish_image): the test project's engine is the fake, so the nested
+                # listing is checked against miniwdl's available inputs of the entrypoint with the repository's venv
+                venv_python = REPO / ".venv" / "bin" / "python"
+                if not venv_python.exists():
+                    continue
+                for stage_x, keys in doc["stage_inputs"].items():
+                    res = subprocess.run([str(venv_python), str(REPO / "bin" / "ugc_wgw" / "wdl_available_inputs.py"), str(REPO / "workflows" / f"ugc_wgw_{stage_x}.wdl")],
+                                         capture_output=True, text=True)
+                    self.assertEqual(res.returncode, 0, res.stderr)
+                    names = {str(item["name"]) for items in json.loads(res.stdout).values() for item in items}
+                    for key in keys:
+                        self.assertIn(key, names, f"{name}: {stage_x}.{key} is not an input miniwdl would accept")
+                continue
             code, out, err = run_cli(["--project", str(cfg.project_dir), "stage-inputs", "--json"])
             self.assertEqual(code, 0, err)
             self.assertEqual(err, "", err)
             rows = {(r["stage"], r["input"]): r for r in json.loads(out)}
-            first_input = next(iter(inputs))
             row = rows[(stage, first_input)]
             self.assertEqual((row["override"], row["override_source"]), (inputs[first_input], f"profile {name}"))
             code, out, _ = run_cli(["--project", str(cfg.project_dir), "stage-inputs", "--stage", stage])

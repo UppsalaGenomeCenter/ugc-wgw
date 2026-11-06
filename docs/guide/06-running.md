@@ -351,15 +351,18 @@ ugc-wgw cohort freeze C1 --samples /proj/ugc/projects/c26/identity.txt
 
 `--pass-on identity` keeps the members without an identity failure
 (`duplicate`, `pedigree_mismatch`, `sex_not_inferred`) and, of every
-related or duplicate pair (relatedness at or above
-`related_relatedness_max`, 0.2: parent and child, siblings, a re-delivered
-sample), the one that comes first in the sample sheet; each exclusion is
-printed with its partner and the relatedness. `--pass-on all` also demands
-an assembly without a QC fail. Read the Identity section of the cohort page
+*undeclared* related pair (relatedness at or above
+`related_relatedness_max`, 0.2, with no pedigree link in the sheet:
+siblings nobody registered, a re-delivered sample under a new ID), the one
+that comes first in the sample sheet; each exclusion is printed with its
+partner and the relatedness. A pair the sheet declares (parent and child)
+stays whole: the pedigree is your statement about the cohort, the surprises
+are the relatives it does not mention. `--pass-on all` also demands an
+assembly without a QC fail. Read the Identity section of the cohort page
 before trusting the list: a `pedigree_mismatch` is as often a sheet error
-as a sample swap, and a declared parent-child pair is kept out of the
-frequency panel on purpose (the list is for unrelated individuals), so
-edit the file where the study needs the family. The members of the 864
+as a sample swap, and a frequency panel that must hold unrelated
+individuals only still needs the declared families thinned by hand. The
+members of the 864
 cohort, whose runs predate the extract, are extracted inside the stage from
 their aligned BAMs; nothing per sample re-runs (chapter 10).
 

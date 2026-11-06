@@ -5,7 +5,7 @@ version 1.0
 # see docs/DESIGN.md §5, §7.2; docs/ENTRYPOINTS.md §6
 
 import "../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/bcftools.wdl" as Bcftools
-import "../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/sawfish.wdl" as Sawfish
+import "overrides/sawfish.wdl" as Sawfish
 import "../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/backend_configuration/backend_configuration.wdl" as BackendConfiguration
 import "ugc_wgw/cohort/glnexus_scatter.wdl" as GlnexusScatter
 import "ugc_wgw/cohort/regions.wdl" as Regions
@@ -86,6 +86,9 @@ workflow ugc_wgw_cohort_call {
     scatter_regions_file: {
       description: "Override for the scatter_regions TSV (default: the ugc-wgw reference map entry); finer shards are allowed here"
     }
+    skip_contigs: {
+      description: "Contigs left out of the GLnexus scatter (default chrM: the cohort's mitochondrial genotypes come from mitorsaw through cohort_merge, not from DeepVariant's diploid calls)"
+    }
     glnexus_mem_gb: {
       description: "Memory (GB) per GLnexus shard; default 32 + 0.1 per sample"
     }
@@ -147,6 +150,7 @@ workflow ugc_wgw_cohort_call {
     Array[File] gvcf_indices
     File ref_map_file
     File? scatter_regions_file
+    Array[String] skip_contigs = ["chrM"]
     Int? glnexus_mem_gb
     Int glnexus_threads = 32
     Boolean split_keep_homref = true
@@ -191,9 +195,10 @@ workflow ugc_wgw_cohort_call {
 
   File scatter_regions = select_first([scatter_regions_file, ref_map["scatter_regions"]])  # !FileCoercion
 
-  # GLnexus scopes by BED, so shards need not be whole contigs here
+  # GLnexus scopes by BED, so shards need not be whole contigs here; chrM is left out (mitorsaw is the chrM caller)
   call Regions.ugc_wgw_regions_prepare { input:
     scatter_regions = scatter_regions,
+    skip_contigs = skip_contigs,
     runtime_attributes = default_runtime_attributes
   }
 

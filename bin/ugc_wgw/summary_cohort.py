@@ -38,6 +38,7 @@ MEMBER_METRICS: list[tuple[str, str, int, str, tuple[str, ...], str | None, str]
     ("chrx_ratio", "chrX / autosomes", 2, "", ("coverage", "ratios", "chrX_ratio"), None, "min"),
     ("chry_ratio", "chrY / autosomes", 3, "", ("coverage", "ratios", "chrY_ratio"), None, "min"),
     ("mito_unexplained", "mitorsaw unexplained fraction", 3, "", ("targeted", "mitorsaw", "fingerprint", "unexplained_fraction"), "mito_unexplained_max", "max"),
+    ("mt_heteroplasmic", "chrM heteroplasmic sites", 0, "", ("targeted", "mitorsaw", "collapsed", "heteroplasmic"), None, "max"),
     ("asm_hap_length_min", "assembly: shorter haplotype (bp)", 0, "", ("assembly", "summary", "hap_length_min"), "asm_hap_length_min", "min"),
     ("asm_hap_length_max", "assembly: longer haplotype (bp)", 0, "", ("assembly", "summary", "hap_length_max"), "asm_hap_length_max", "max"),
     ("asm_ng50_min", "assembly: NG50, smaller haplotype (bp)", 0, "", ("assembly", "summary", "ng50_min"), None, "min"),
@@ -372,8 +373,10 @@ def identity_flags(pairs: list[dict[str, object]], members_tbl: list[dict[str, o
 
 def identity_pass(d: dict[str, object], sheet_order: dict[str, int]) -> tuple[list[str], list[tuple[str, str]]]:
     """The members that pass the identity checks of a cohort digest, in sheet order, and the exclusions with their
-    reason: a member whose identity status is fail is out; of a related or duplicate pair (relatedness at or above
-    related_relatedness_max) the later member in the sheet is out."""
+    reason: a member whose identity status is fail is out; of an undeclared related pair (relatedness at or above
+    related_relatedness_max, no expectation from the sheet's pedigree) the later member in the sheet is out. A pair
+    the sheet declares (parent and child) stays: the pedigree is the analyst's statement, the surprises are the
+    undeclared relatives and the duplicates (2026-11-05, the user's call)."""
     ident: dict[str, object] = d.get("identity", {}) or {}  # type: ignore[assignment]
     flags: dict[str, list[dict[str, object]]] = ident.get("flags", {}) or {}  # type: ignore[assignment]
     rows: list[dict[str, object]] = [r for r in d.get("members", []) if r.get("present")]  # type: ignore[union-attr]
@@ -391,15 +394,15 @@ def identity_pass(d: dict[str, object], sheet_order: dict[str, int]) -> tuple[li
             continue
         partner = None
         for p in pairs:
-            r = p.get("relatedness")
-            if not isinstance(r, (int, float)) or r < rel_max:
-                continue
+            r, exp = p.get("relatedness"), p.get("expected")
+            if not isinstance(r, (int, float)) or r < rel_max or (isinstance(exp, (int, float)) and exp > 0):
+                continue   # below the threshold, or declared in the sheet
             other = p.get("sample_b") if p.get("sample_a") == sid else p.get("sample_a") if p.get("sample_b") == sid else None
             if other is not None and str(other) in kept:
                 partner = (str(other), float(r))
                 break
         if partner:
-            excluded.append((sid, f"related to {partner[0]} (relatedness {partner[1]:.3f}), which comes first in the sheet"))
+            excluded.append((sid, f"related to {partner[0]} (relatedness {partner[1]:.3f}) with no pedigree link in the sheet; {partner[0]} comes first"))
             continue
         kept.append(sid)
     return kept, excluded
@@ -477,6 +480,16 @@ def build_cohort_digest(cohort: Cohort, members: dict[str, dict[str, object]], c
                 p = outs.opt("cohort_small_variant_vcf")
                 if isinstance(p, str) and Path(p).exists():
                     entry["small_variant_vcf"] = {"path": p, "bytes": Path(p).stat().st_size, "samples": sp.vcf_samples(Path(p))}
+                p = outs.opt("cohort_mt_small_variant_vcf")
+                if isinstance(p, str) and Path(p).exists():
+                    entry["mt"] = sp.parse_mt_vcf(sp.read_binary_lines(Path(p)))
+                    entry["mt"]["bytes"] = Path(p).stat().st_size  # type: ignore[index]
+                p = outs.opt("cohort_mt_sv_vcf")
+                if isinstance(p, str) and Path(p).exists():
+                    entry["mt_svs"] = {"bytes": Path(p).stat().st_size, "records": sp.parse_mt_vcf(sp.read_binary_lines(Path(p))).get("records")}
+                p = outs.opt("cohort_mt_haplogroups")
+                if isinstance(p, str) and Path(p).exists():
+                    entry["mt_haplogroups"] = sp.parse_haplogroups(sp.read_lines(Path(p)))
             elif stage == "cohort_pangenome":
                 entry.update(_pangenome_entry(outs, thr))
             elif stage == "cohort_qc":
@@ -509,7 +522,7 @@ def build_cohort_digest(cohort: Cohort, members: dict[str, dict[str, object]], c
                 p = outs.opt("freq_samples")
                 if isinstance(p, str) and Path(p).exists():
                     entry["samples"] = sp.parse_freq_samples(sp.read_lines(Path(p)))
-                for name in ("small_variant_freq_vcf", "sv_freq_vcf"):
+                for name in ("small_variant_freq_vcf", "sv_freq_vcf", "mt_small_variant_freq_vcf", "mt_sv_freq_vcf"):
                     p = outs.opt(name)
                     if isinstance(p, str) and Path(p).exists():
                         entry[name] = {"bytes": Path(p).stat().st_size}
@@ -563,8 +576,10 @@ def build_cohort_digest(cohort: Cohort, members: dict[str, dict[str, object]], c
             sex["karyotype"][k] = sex["karyotype"].get(k, 0) + 1  # type: ignore[index, call-overload]
     ancestry = qc_entry.get("ancestry")
     try:
+        cm_entry: dict[str, object] = callsets.get("cohort_merge") if isinstance(callsets.get("cohort_merge"), dict) else {}  # type: ignore[assignment]
         targeted = export.targeted_summary(present_members, export.strata_of(present_members, ("sex", "ancestry"),
-                                                                             ancestry=ancestry if isinstance(ancestry, dict) else None))
+                                                                             ancestry=ancestry if isinstance(ancestry, dict) else None),
+                                           cohort_haplogroups=cm_entry.get("mt_haplogroups"))  # type: ignore[arg-type]
     except Exception as exc:  # noqa: BLE001 - one bad digest must not sink the page
         warnings.append(f"targeted callers: {type(exc).__name__}: {exc}")
         targeted = {}
@@ -630,7 +645,7 @@ def _identity_html(ident: dict[str, object], cq: dict[str, object], present: lis
     body += "<h3>Identity flags</h3>" + (big_table(["sample", "flag", "severity", "message"], flag_rows, what=f"{len(flag_rows)} identity flags", open_below=40)
                                         if flag_rows else "<p class='muted'>None: no duplicate, no pedigree mismatch, no undeclared relative, no heterozygosity outlier.</p>")
     body += ("<p class='small muted'>duplicate and pedigree_mismatch fail; related and het_outlier warn. <code>ugc-wgw summary --cohort &lt;id&gt; --pass-list FILE --pass-on identity</code> "
-             "writes the members without a failure, keeping the first of each related pair in sheet order.</p>")
+             "writes the members without a failure, keeping the first of each undeclared related pair in sheet order (a pair the sheet declares stays).</p>")
     anc_members: list[dict[str, object]] = cq.get("ancestry_members", []) or []  # type: ignore[assignment]
     if anc_members:
         label_counts: dict[str, int] = {}
@@ -800,14 +815,19 @@ def render_cohort(d: dict[str, object], tools: list[dict[str, object]], *, proje
                          ("XY", sv.fmt((samples_block.get("n") or {}).get("XY"))), ("unknown sex", sv.fmt((samples_block.get("n") or {}).get("unknown"))),
                          ("sex from the sheet", sv.fmt((samples_block.get("n_sex_source") or {}).get("sheet"))),
                          ("sex inferred", sv.fmt((samples_block.get("n_sex_source") or {}).get("inferred")))])
-        for resource in ("small_variants", "structural_variants"):
+        for resource, title in (("small_variants", "small variants"), ("structural_variants", "structural variants"),
+                                ("mt_small_variants", "mitochondrial small variants (mitorsaw; AC_Het heteroplasmic, AC_Hom homoplasmic members; no sex strata)"),
+                                ("mt_svs", "mitochondrial SVs")):
             r = summ.get(resource)
             if r:
-                fbody += _freq_resource_html(resource.replace("_", " "), r)  # type: ignore[arg-type]
+                fbody += _freq_resource_html(title, r)  # type: ignore[arg-type]
         fs: list[dict[str, str]] = cf.get("samples", [])  # type: ignore[assignment]
         if fs:
-            fbody += "<details><summary>members in the frequency VCFs</summary>" + _table(["sample", "group", "sex source", "in small-variant VCF", "in SV VCF"],
-                                                                                          [[link(r.get("sample_id")), r.get("group"), r.get("sex_source"), r.get("in_small_variant_vcf"), r.get("in_sv_vcf")] for r in fs]) + "</details>"
+            has_mt = any(r.get("in_mt_vcf") not in (None, "", "none") for r in fs)
+            fbody += ("<details><summary>members in the frequency VCFs</summary>"
+                      + _table(["sample", "group", "sex source", "in small-variant VCF", "in SV VCF"] + (["in mt VCF"] if has_mt else []),
+                               [[link(r.get("sample_id")), r.get("group"), r.get("sex_source"), r.get("in_small_variant_vcf"), r.get("in_sv_vcf")]
+                                + ([r.get("in_mt_vcf")] if has_mt else []) for r in fs]) + "</details>")
     add("sec-freq", "Allele frequencies (cohort_freq)", fbody or "<p class='muted'>cohort_freq has not run.</p>")
 
     # targeted callers across the cohort (export.targeted_summary: the same tables `ugc-wgw export` writes)
@@ -878,9 +898,20 @@ def render_cohort(d: dict[str, object], tools: list[dict[str, object]], *, proje
         tbody += "<h3>Mitochondria (mitorsaw)</h3>"
         unexplained: dict[str, float] = mito_tg.get("unexplained", {}) or {}  # type: ignore[assignment]
         flagged: list[str] = mito_tg.get("flagged", []) or []  # type: ignore[assignment]
+        hg_counts: dict[str, int] = mito_tg.get("haplogroups", {}) or {}  # type: ignore[assignment]
         tbody += _cards([("members with haplotypes", mito_tg.get("n_members")), ("with two or more", len(mito_tg.get("multi_haplotype", []) or [])),  # type: ignore[arg-type]
                          ("minor haplotype abundance (median)", sv.fmt(mito_tg.get("minor_abundance_median"), 3)),
-                         ("above the unexplained threshold", len(flagged))])
+                         ("above the unexplained threshold", len(flagged)), ("members with a haplogroup", mito_tg.get("n_haplogrouped")),
+                         ("haplogroups", len(hg_counts))])
+        if hg_counts:
+            macro: dict[str, int] = {}
+            for hg, n in hg_counts.items():
+                macro[hg[:1]] = macro.get(hg[:1], 0) + n
+            tbody += ("<p class='small muted'>Haplogroup of each member's major haplotype (haplogrep3; from the member's run, or from cohort_merge for a run "
+                      "before 0.15); the macro-haplogroup is its first letter. The cohort's heteroplasmic sites are in the frequency section and the export.</p>"
+                      '<div class="grid"><div>' + sv.bars_h(sorted(((k, float(v), "") for k, v in macro.items()), key=lambda t: -t[1]), width=300, label_w=60, cls="m3")
+                      + "</div><div>" + sv.bars_h(sorted(((k, float(v), "") for k, v in hg_counts.items()), key=lambda t: -t[1])[:30], width=300, label_w=110, cls="m5")
+                      + "</div></div>")
         if unexplained:
             tbody += sv.strip_or_band([{"label": "unexplained fingerprint fraction", "points": sorted(unexplained.items()), "outliers": [],
                                         "threshold": thr.get("mito_unexplained_max"), "beyond": flagged, "digits": 3, "unit": ""}], width=700)

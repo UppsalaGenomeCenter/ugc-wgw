@@ -100,6 +100,21 @@ replays every task but the three new ones from the call cache; sawfish
 onward recomputes only where the resolved sex differs from the coverage
 inference (none of the 864), and `downstream` then takes the resolved sex.
 
+## Members from before 0.15 in `cohort_merge`
+
+`cohort_merge` merges the collapsed mitochondrial call sets that
+`singleton` and `upstream` make since 0.15. For a member whose latest run
+predates them the driver passes mitorsaw's VCF and JSON instead (every run
+since v4.0.0 has them) and the stage collapses and classifies the member
+itself, seconds per member, naming them in one warning. So a cohort merged
+at 0.15 with `--any-version` gets its mitochondrial VCFs, frequencies and
+haplogroups without any per-sample re-run; the export marks such
+haplogroups `cohort_merge` in `haplogroup_source`. Re-running `singleton`
+or `upstream` for an old member replays every task but the two new ones
+from the call cache. The cohort small-variant VCF loses its chrM records at
+0.15 (GLnexus skips the shard): a result change for anyone who read chrM
+from it.
+
 ## Assemblies across versions
 
 A new version re-gates every stage: `submit` only counts runs of the current

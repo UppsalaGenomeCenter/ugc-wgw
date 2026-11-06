@@ -21,6 +21,11 @@
 #   run.sh report                              ugc-wgw report (HTML) and the analysis summaries into $UGC_WGW_SMOKE_DIR/logs/
 #   run.sh summary                             ugc-wgw summary only (per-sample and cohort analysis pages)
 #   run.sh sacct                               SLURM accounting of every job the runs submitted (HPC only)
+#   run.sh eval sawfish23 [compare]            a second project (project-sawfish23/, results-sawfish23/) initialised with
+#                                              the eval-sawfish23 profile, its standalone phase, then per member truvari
+#                                              bench of its phased SV VCF against the production project's and the sawfish
+#                                              tasks' resources of both (ugc-wgw usage); "compare" repeats the comparison
+#                                              alone on the finished runs; init accepts --profile NAME too
 #
 # Environment:
 #   UGC_WGW_SMOKE_DIR   root with data/ and references/ from prepare.sh (default: $HOME/ugc-smoke);
@@ -36,14 +41,15 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
 smoke=${UGC_WGW_SMOKE_DIR:-$HOME/ugc-smoke}
-project=$smoke/project
-results=$smoke/results
+variant=${UGC_WGW_SMOKE_VARIANT:-}   # a second project on the same data, references, cache and SIFs: project-<v>/, results-<v>/ (run.sh eval)
+project=$smoke/project${variant:+-$variant}
+results=$smoke/results${variant:+-$variant}
 ugc=()
 
 log() { echo "[smoke] $*" >&2; }
 # the teed driver logs are files first: never coloured, whatever UGC_WGW_COLOR or the terminal say
 die() { echo "[smoke] error: $*" >&2; exit 1; }
-usage() { sed -n '2,22p' "$0"; exit "${1:-0}"; }
+usage() { sed -n '2,/^# Environment:/p' "$0" | sed '$d'; exit "${1:-0}"; }   # the header's description and Usage
 
 mode_of_stage() {
   case "$1" in
@@ -66,7 +72,7 @@ set_ugc() {
 # ---- init --------------------------------------------------------------------
 cmd_init() {
   local install="" code="$repo" miniwdl="$repo/.venv/bin/miniwdl" cfg="" sif="$repo/bundle/out/sif-cache" inflight="" force=0
-  local deepvariant=cpu gpu_type="" parabricks_gpus="" hifiasm_threads=""
+  local deepvariant=cpu gpu_type="" parabricks_gpus="" hifiasm_threads="" profile=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --install) install="$2"; shift 2 ;;
@@ -79,6 +85,7 @@ cmd_init() {
       --gpu-type) gpu_type="$2"; shift 2 ;;
       --parabricks-gpus) parabricks_gpus="$2"; shift 2 ;;
       --hifiasm-threads) hifiasm_threads="$2"; shift 2 ;;
+      --profile) profile="$2"; shift 2 ;;
       --force) force=1; shift ;;
       -h|--help) usage ;;
       *) die "init: unknown option $1" ;;
@@ -131,6 +138,7 @@ cmd_init() {
   local -a gpu_args=(--deepvariant "$deepvariant")
   [ -z "$gpu_type" ] || gpu_args+=(--gpu-type "$gpu_type")
   [ -z "$parabricks_gpus" ] || gpu_args+=(--parabricks-gpus "$parabricks_gpus")
+  [ -z "$profile" ] || gpu_args+=(--profile "$profile")
   if [ "$deepvariant" != cpu ] && ! grep -q -- '--nv' "$cfg"; then
     log "warning: $cfg has no --nv in [singularity] run_options; the GPU tasks will not see a device (site.cfg SINGULARITY_NV=1)"
   fi
@@ -191,6 +199,14 @@ cmd_check() {
   mode=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("mode") or sys.argv[2])' "$cur/run_manifest.json" "$mode" 2>/dev/null || echo "$mode")
   local -a expected=("$here/expected/$stage.txt")
   [ -f "$here/expected/$stage.$mode.txt" ] && expected+=("$here/expected/$stage.$mode.txt")
+  # 0.15.0 invariant: the cohort small-variant VCF carries no chrM record (mitorsaw is the chrM caller; GLnexus skips the shard)
+  local jv
+  for jv in "$cur"/out/cohort_small_variant_vcf/*.vcf.gz; do
+    [ -s "$jv" ] || continue
+    if zcat "$jv" | awk -F'\t' '!/^#/ && $1 == "chrM" { found = 1; exit } END { exit !found }'; then
+      log "check $stage $subject: chrM records in $(basename "$jv") (GLnexus must skip chrM)"; return 1
+    fi
+  done
   local bad=0 n=0 pattern
   while IFS= read -r pattern; do
     case "$pattern" in ''|'#'*) continue ;; esac
@@ -389,6 +405,80 @@ cmd_summary() {  # ugc-wgw summary for both cohorts: per-sample pages plus the c
   [ "$fails" -eq 0 ]
 }
 
+# ---- eval -------------------------------------------------------------------
+cmd_eval() {  # cmd_eval sawfish23 [compare]: a second project with the eval-sawfish23 profile, its standalone phase, then the comparison; "compare" = the comparison alone, on finished runs
+  local what=${1:-} step=${2:-}
+  [ "$what" = sawfish23 ] || die "eval: the known evaluations: sawfish23"
+  [ -z "$step" ] || [ "$step" = compare ] || die "eval: the second word is 'compare' or nothing"
+  [ -z "$variant" ] || die "eval: run it without UGC_WGW_SMOKE_VARIANT (it sets the variant itself)"
+  set_ugc   # the production project is the base of the comparison
+  if [ -z "$step" ]; then
+    log "eval $what: project-$what (profile eval-$what, the same data, references, cache and SIFs), then the comparison with $project"
+    UGC_WGW_SMOKE_VARIANT=$what "$0" init --force --profile "eval-$what"
+    UGC_WGW_SMOKE_VARIANT=$what "$0" all standalone || log "eval $what: the standalone phase reported failures (see above); comparing what finished"
+  else
+    [ -d "$smoke/project-$what/.ugc-wgw" ] || die "eval: no project-$what yet; run 'eval $what' first"
+    log "eval $what: the comparison alone (project-$what against $project)"
+  fi
+  eval_compare "$what" "$results" "$smoke/results-$what" "$smoke/project-$what"
+}
+
+eval_compare() {  # <what> <base results> <comp results> <comp project>: truvari bench per member on the phased SV VCFs; the sawfish tasks' resources
+  local what=$1 base=$2 comp=$3 comp_project=$4
+  local code version stamp out sif_dir sif_name
+  code=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["code_dir"])' "$project/.ugc-wgw/config.json")
+  version=$(cat "$code/VERSION")
+  stamp=$(date -u +%Y%m%dT%H%M%SZ)
+  out=$smoke/logs/eval-$what-$stamp
+  mkdir -p "$out"
+  sif_dir=$(python3 -c 'import configparser,sys; c=configparser.ConfigParser(); c.read(sys.argv[1]); print(c.get("singularity", "image_cache"))' "$project/.ugc-wgw/miniwdl.cfg" 2>/dev/null || true)
+  [ -n "$sif_dir" ] || sif_dir=$(python3 -c 'import configparser,sys; c=configparser.ConfigParser(); c.read(sys.argv[1]); print(c.get("singularity", "image_cache"))' "$smoke/miniwdl.cfg")
+  sif_name=$(grep -o 'quay.io/biocontainers/truvari@sha256:[0-9a-f]*' "$code/image_manifest.ugc-wgw.txt" | head -1)
+  sif_name="docker___${sif_name//\//_}"; sif_name="${sif_name//:/_}.sif"
+  [ -f "$sif_dir/$sif_name" ] || die "eval: truvari SIF not in $sif_dir ($sif_name); populate the SIF cache from image_manifest.ugc-wgw.txt"
+  local m b c
+  printf 'member\tbase_calls\tcomp_calls\tTP_base\tTP_comp\tFP\tFN\tprecision\trecall\tF1\tgt_concordance\n' > "$out/sv.tsv"
+  for m in $(members); do
+    b=$(find "$base/samples/$m/$version/singleton/current/out/phased_sv_vcf" -name '*.vcf.gz' 2>/dev/null | head -1)
+    c=$(find "$comp/samples/$m/$version/singleton/current/out/phased_sv_vcf" -name '*.vcf.gz' 2>/dev/null | head -1)
+    if [ -z "$b" ] || [ -z "$c" ]; then log "eval: $m has no phased SV VCF in both projects; skipped"; continue; fi
+    # truvari wants the index next to the VCF; the run keeps it in its own output directory (phased_sv_vcf_index)
+    mkdir -p "$out/in-$m"
+    ln -sfn "$b" "$out/in-$m/base.vcf.gz"; ln -sfn "${b%/phased_sv_vcf/*}/phased_sv_vcf_index/$(basename "$b").tbi" "$out/in-$m/base.vcf.gz.tbi"
+    ln -sfn "$c" "$out/in-$m/comp.vcf.gz"; ln -sfn "${c%/phased_sv_vcf/*}/phased_sv_vcf_index/$(basename "$c").tbi" "$out/in-$m/comp.vcf.gz.tbi"
+    apptainer exec --bind "$smoke","$code" "$sif_dir/$sif_name" truvari bench -b "$out/in-$m/base.vcf.gz" -c "$out/in-$m/comp.vcf.gz" -o "$out/truvari-$m" \
+        --sizemin 50 --sizefilt 50 --pctseq 0 > "$out/truvari-$m.log" 2>&1 || { log "eval: truvari bench failed for $m (see $out/truvari-$m.log)"; continue; }
+    python3 - "$m" "$out/truvari-$m/summary.json" >> "$out/sv.tsv" <<'PY'
+import json, sys
+m, d = sys.argv[1], json.load(open(sys.argv[2]))
+f = lambda k, n=4: ("%.*f" % (n, d[k])) if isinstance(d.get(k), (int, float)) and d.get(k) is not None else "NA"
+print("\t".join([m, str(d.get("base cnt", "NA")), str(d.get("comp cnt", "NA")), str(d.get("TP-base", "NA")), str(d.get("TP-comp", "NA")), str(d.get("FP", "NA")),
+                 str(d.get("FN", "NA")), f("precision"), f("recall"), f("f1"), f("gt_concordance")]))
+PY
+  done
+  log "eval: SV sets, production (base) vs $what (comp), truvari bench --sizemin 50 --pctseq 0:"
+  column -t -s $'\t' "$out/sv.tsv" >&2
+  # the sawfish tasks' resources in both projects (the call cache replayed everything else)
+  "$code/bin/ugc-wgw" --project "$project" usage --by task --any-version --json > "$out/usage-base.json" 2>/dev/null || true
+  "$code/bin/ugc-wgw" --project "$comp_project" usage --by task --any-version --json > "$out/usage-$what.json" 2>/dev/null || true
+  python3 - "$out/usage-base.json" "$out/usage-$what.json" "$what" > "$out/sawfish.tsv" <<'PY'
+import json, sys
+rows = ["project\ttask\tjobs\telapsed_s\tcore_h_alloc\tpeak_rss_mb"]
+for label, path in (("production", sys.argv[1]), (sys.argv[3], sys.argv[2])):
+    try:
+        by_task = json.load(open(path)).get("by_task", {})
+    except (OSError, ValueError):
+        continue
+    for task, u in sorted(by_task.items()):
+        if "sawfish" in task:
+            rows.append("\t".join([label, task, str(u.get("jobs", "")), "%.0f" % float(u.get("elapsed_s") or 0), "%.3f" % float(u.get("core_h_alloc") or 0), "%.0f" % float(u.get("peak_rss_mb") or 0)]))
+print("\n".join(rows))
+PY
+  log "eval: sawfish tasks' resources (ugc-wgw usage --by task; on the dev machine without sacct the memory is an estimate):"
+  column -t -s $'\t' "$out/sawfish.tsv" >&2
+  log "eval: written to $out (sv.tsv, sawfish.tsv, truvari-<member>/); paste both tables into tests/smoke/README.md"
+}
+
 [ $# -ge 1 ] || usage 2
 case "$1" in
   init) shift; cmd_init "$@" ;;
@@ -398,6 +488,7 @@ case "$1" in
   report) cmd_report ;;
   summary) cmd_summary ;;
   sacct) cmd_sacct ;;
+  eval) shift; cmd_eval "$@" ;;
   -h|--help) usage ;;
   singleton|upstream|cohort_qc|cohort_call|downstream|cohort_merge|cohort_freq|assembly|assembly_call|cohort_pangenome) cmd_stage "$@" ;;
   *) die "unknown command $1" ;;

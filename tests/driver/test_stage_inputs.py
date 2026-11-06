@@ -84,8 +84,9 @@ class SourcesTest(unittest.TestCase):
         self.gen("cohort_qc", "cohort", "C1")                                                  # ... so its aligned BAM travels
         self.gen("cohort_merge", "cohort", "C1")
         self.gen("cohort_merge", "cohort", "C1", merge_phased_small_variants=True)
-        self.seed("cohort_merge", "cohort", "C1", attempt=2, run_glnexus=True)
-        self.gen("cohort_freq", "cohort", "C1")
+        self.gen("cohort_merge", "cohort", "C1", merge_mitochondria=False)                     # the off switch: no mt arrays
+        self.seed("cohort_merge", "cohort", "C1", attempt=2, run_glnexus=True, merge_mitochondria=True)
+        self.gen("cohort_freq", "cohort", "C1")                                                # ... so the mt sets travel
         # assembly, trio and sample mode; assembly_call with (S1 has a singleton) and without read-based calls
         self.gen("assembly", "sample", "K1", "assembly")
         self.gen("assembly", "sample", "S1", "assembly")

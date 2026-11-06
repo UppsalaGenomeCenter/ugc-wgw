@@ -3,6 +3,57 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.15.0
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin (0.6.0)
+unchanged; one new image, haplogrep3 3.3.2, and one image for evaluation
+only, PacBio's sawfish 2.3.0_build1. The mitochondrial genome becomes a
+call set the cohort can use, and tool versions ahead of upstream can be
+tried on a copy of the data before they are adopted.
+
+- **A diploid mitochondrial call set per sample.** mitorsaw writes one
+  genotype entry per haplotype it finds (`0|1|1|1`), which no VCF consumer
+  merges or counts. After mitorsaw, `singleton` and `upstream` collapse
+  those entries to a diploid genotype (nallo's rule: every haplotype
+  alternate `1/1`, mixed `0/1` heteroplasmic, `VAF` the read fraction),
+  split the records at 50 bp into small variants and SVs, and write one
+  haploid column per haplotype for haplogrep3, which assigns each a
+  haplogroup against PhyloTree 17's forensic update (`phylotree-fu-rcrs@1.3`;
+  PhyloTree 17 is also installed). The sample's haplogroup is its most
+  abundant haplotype's; the sample page shows every haplotype with its
+  haplogroup and quality. A re-run of an older sample replays everything
+  but the two new tasks from the call cache.
+- **chrM leaves the cohort small-variant VCF.** GLnexus no longer merges
+  DeepVariant's diploid chrM records (they counted heteroplasmies as
+  nuclear alleles): a result change for anyone who read chrM from the
+  cohort set or from `cohort_freq`. Instead `cohort_merge` merges the
+  members' collapsed mitochondrial sets (`cohort_mt_small_variant_vcf`,
+  `cohort_mt_sv_vcf`; a member without the variant is `0/0`, stated in the
+  header) and gathers every member's haplogroups into one table; a member
+  whose run predates this release is collapsed and classified inside the
+  stage from its mitorsaw outputs, so an existing cohort needs no
+  per-sample re-run. `cohort_freq` counts the mitochondrial sets without
+  sex strata (`AC_Het` heteroplasmic members, `AC_Hom` homoplasmic) and
+  the frequency summary gains the `mt_small_variants` and `mt_svs`
+  resources; the cohort page gets a Mitochondria block with the haplogroup
+  counts and the heteroplasmic sites per member; `ugc-wgw export` fills
+  `mito.tsv`'s haplogroup columns and writes `mito.freq.tsv` (haplogroups
+  and macro-haplogroups per stratum). Digest schema 4: every per-sample
+  digest rebuilds once.
+- **Evaluating a tool version ahead of upstream.** `workflows/overrides/sawfish.wdl`
+  is upstream's sawfish task file with the image as a task input, and the
+  profile `eval-sawfish23` sets PacBio's sawfish 2.3.0_build1 for
+  `singleton`, `upstream` and `cohort_call`; `tests/smoke/run.sh eval
+  sawfish23` runs a second project on the smoke data with it and compares
+  the SV sets (truvari) and the sawfish tasks' resources with the
+  production project's. Production behaviour is unchanged; the override
+  changes the sawfish task digest once, so a re-run of an older sample
+  recomputes sawfish onward (guide 12).
+- The identity pass list (`summary --pass-on identity`) keeps a pair the
+  sheet declares (parent and child); only undeclared relatives and
+  duplicates drop their later member.
+
 ## 0.14.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

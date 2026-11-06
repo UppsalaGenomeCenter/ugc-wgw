@@ -1,0 +1,16 @@
+{
+  "description": "Evaluation of sawfish 2.3.0 (PacBio's quay.io image 2.3.0_build1; upstream v4.0.0 pins 2.2.1_build2) on the smoke trio: the sawfish tasks of singleton, upstream and cohort_call take the newer image through the sawfish_image input of workflows/overrides/sawfish.wdl; every other task is unchanged, so the SV call sets and the sawfish resources of a project initialised with this profile can be compared with a production project's over the same members (tests/smoke/run.sh eval sawfish23: truvari bench per member, ugc-wgw usage per task). The call cache replays everything up to sawfish; sawfish onward recomputes. Never a production profile: production moves to 2.3 only through the override's default and a changelog entry, when the sets match within run-to-run noise and the memory drop holds (docs/DESIGN.md \u00a718 2026-11-05).",
+  "stage_inputs": {
+    "singleton": {
+      "upstream.sawfish_discover.sawfish_image": "sawfish@sha256:40b167ebdfa07643c918c45fb782f61bd598c38876fc654416d8539b2faa4cf2",
+      "upstream.sawfish_call.sawfish_image": "sawfish@sha256:40b167ebdfa07643c918c45fb782f61bd598c38876fc654416d8539b2faa4cf2"
+    },
+    "upstream": {
+      "upstream.sawfish_discover.sawfish_image": "sawfish@sha256:40b167ebdfa07643c918c45fb782f61bd598c38876fc654416d8539b2faa4cf2",
+      "upstream.sawfish_call.sawfish_image": "sawfish@sha256:40b167ebdfa07643c918c45fb782f61bd598c38876fc654416d8539b2faa4cf2"
+    },
+    "cohort_call": {
+      "sawfish_call.sawfish_image": "sawfish@sha256:40b167ebdfa07643c918c45fb782f61bd598c38876fc654416d8539b2faa4cf2"
+    }
+  }
+}

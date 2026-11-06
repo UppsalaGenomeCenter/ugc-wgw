@@ -28,8 +28,8 @@ pbsamoa_merge	32	32G	-	-	-	singleton,upstream	vendor/hifi-human-wgs-wdl/workflow
 pbstarphase_diplotype	2	8G	-	-	-	singleton,downstream	vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/pbstarphase.wdl:5	cpu from input default; memory from input default
 run_parabricks_deepvariant	48	192G	-	-	-	singleton,upstream	vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/parabricks/parabricks_deepvariant.wdl:94	cpu from input default; memory from input default; command uses threads; gpu
 samtools_fasta	16	16G	-	-	-	assembly	vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/samtools.wdl:86	cpu from input default; memory from input default; command uses threads
-sawfish_call	16	32G	-	-	-	singleton,upstream,cohort_call	vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/sawfish.wdl:139	cpu from input default; memory from input default; command uses threads
-sawfish_discover	16	128G	-	-	-	singleton,upstream	vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/sawfish.wdl:5	cpu from input default; memory from input default; command uses threads
+sawfish_call	16	32G	-	-	-	singleton,upstream,cohort_call	workflows/overrides/sawfish.wdl:147	cpu from input default; memory from input default; command uses threads
+sawfish_discover	16	128G	-	-	-	singleton,upstream	workflows/overrides/sawfish.wdl:9	cpu from input default; memory from input default; command uses threads
 split_vcf_by_sample	2	4G	-	-	-	cohort_call	vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/bcftools.wdl:224	cpu from input default; memory from input default; command uses threads
 subset_bam	4	8G	-	-	-	singleton,upstream	vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/samtools.wdl:255	cpu from input default; memory from input default; command uses threads
 sv_stats	2	4G	-	-	-	singleton,downstream	vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/bcftools.wdl:415	cpu from input default; memory from input default
@@ -52,10 +52,14 @@ ugc_wgw_flagger_correct_bam	8	16G	-	-	-	assembly	workflows/ugc_wgw/assembly/flag
 ugc_wgw_flagger_hmm	16	32G	-	-	-	assembly	workflows/ugc_wgw/assembly/flagger.wdl:202	cpu from workflow input default; cpu input: flagger_threads; memory from workflow input default; memory input: flagger_mem_gb; command uses threads
 ugc_wgw_freq_summary	1	2G	-	-	-	cohort_freq	workflows/ugc_wgw/cohort/freq.wdl:179	
 ugc_wgw_gfatools_gfa2fa	2	4G	-	-	-	assembly	workflows/ugc_wgw/assembly/gfatools.wdl:9	cpu from input default; memory from input default; command uses threads
+ugc_wgw_haplogrep	1	2G	-	-	-	singleton,upstream,cohort_merge	workflows/ugc_wgw/mito/collapse.wdl:238	
 ugc_wgw_hifiasm_assemble	48	288G	-	-	-	assembly	workflows/ugc_wgw/assembly/hifiasm.wdl:9	cpu from workflow input default; cpu input: hifiasm_threads; memory from workflow input default; memory input: hifiasm_mem_gb; command uses threads
 ugc_wgw_liftover_unreliable	2	8G	-	-	-	assembly_call	workflows/ugc_wgw/assembly/masking.wdl:7	
 ugc_wgw_manifest_write	1	1G	-	-	-	singleton,upstream,cohort_qc,cohort_call,downstream,cohort_merge,cohort_freq,assembly,assembly_call,cohort_pangenome	workflows/ugc_wgw/provenance.wdl:9	
 ugc_wgw_minimap2_align_asm	16	32G	-	-	-	assembly_call	workflows/ugc_wgw/assembly/align_asm.wdl:7	cpu from workflow input default; cpu input: align_threads; memory from workflow input default; memory input: align_mem_gb; command uses threads
+ugc_wgw_mito_collapse	1	1G	-	-	-	singleton,upstream,cohort_merge	workflows/ugc_wgw/mito/collapse.wdl:9	
+ugc_wgw_mito_haplogroups_gather	1	1G	-	-	-	cohort_merge	workflows/ugc_wgw/mito/merge.wdl:110	
+ugc_wgw_mito_merge	2	4G	-	-	-	cohort_merge	workflows/ugc_wgw/mito/merge.wdl:9	cpu from input default; memory from input default; command uses threads
 ugc_wgw_pangenome_freq_summary	1	4G	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/vcf_post.wdl:169	
 ugc_wgw_pangenome_member_stats	1	4G	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/member_stats.wdl:7	
 ugc_wgw_pangenome_member_stats_gather	1	2G	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/member_stats.wdl:70	

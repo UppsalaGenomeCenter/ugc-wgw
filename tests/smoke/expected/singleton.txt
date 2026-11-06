@@ -32,4 +32,10 @@ mitorsaw_vcf/*.vcf.gz
 pbstarphase_summary/*
 somalier_extract/*.somalier
 somalier_sex_tsv/*.sex.tsv
+# 0.15.0: mitorsaw's chrM calls collapsed (empty but valid VCFs on chr20-only data) and the haplogroups
+mt_small_variant_vcf/*.mt.small_variants.vcf.gz
+mt_sv_vcf/*.mt.svs.vcf.gz
+mt_haplotypes_vcf/*.mt.haplotypes.vcf.gz
+mt_summary/*.mt.summary.tsv
+mt_haplogroups/*.mt.haplogroups.tsv
 ugc_wgw_manifest/*.singleton.ugc_wgw_manifest.json

@@ -32,6 +32,9 @@ task ugc_wgw_regions_prepare {
     require_whole_contigs: {
       description: "Fail if a contig is split across shards (needed by tools that only scope by contig, e.g. trgt merge)"
     }
+    skip_contigs: {
+      description: "Contigs left out (their rows dropped; a shard emptied by it disappears): chrM for the GLnexus scatter, whose cohort genotypes come from mitorsaw"
+    }
     runtime_attributes: {
       description: "Runtime attribute structure"
     }
@@ -40,6 +43,7 @@ task ugc_wgw_regions_prepare {
   input {
     File scatter_regions
     Boolean require_whole_contigs = false
+    Array[String] skip_contigs = []
     RuntimeAttributes runtime_attributes
   }
 
@@ -54,14 +58,17 @@ task ugc_wgw_regions_prepare {
 
     mkdir -p beds
 
-    python3 - "~{scatter_regions}" "~{require_whole_contigs}" << 'EOF'
+    python3 - "~{scatter_regions}" "~{require_whole_contigs}" "~{write_lines(skip_contigs)}" << 'EOF'
     import sys
     tsv, whole = sys.argv[1], sys.argv[2] == "true"
+    skip = {l.strip() for l in open(sys.argv[3]) if l.strip()}
     shards, order = {}, []
     for line in open(tsv):
         if not line.strip() or line.startswith("#"):
             continue
         shard, chrom, start, end = line.rstrip("\n").split("\t")[:4]
+        if chrom in skip:
+            continue
         if shard not in shards:
             shards[shard] = []
             order.append(shard)

@@ -11,11 +11,12 @@ editing them by hand.
 
 - `ugc_wgw/cohort/` — ours: regions, concat, gvcf_slice, glnexus_scatter, split_by_sample, svx, sv_merge_bcftools, trgt_merge_lps, freq
 - `ugc_wgw/qc/` — ours: somalier (the extract, the one-sample relate and the sex resolution the upstream override calls; ped, relate, ancestry and the summary tables of `ugc_wgw_cohort_qc`)
+- `ugc_wgw/mito/` — ours: collapse (mitorsaw's per-haplotype chrM genotypes to diploid, the haplogroups with haplogrep3; called by the upstream override and, for members from before 0.15, by `ugc_wgw_cohort_merge`), merge (the cohort's mt sets and the gathered haplogroups)
 - `ugc_wgw/assembly/` — ports (rows in `DERIVED_FILES.md`): hifiasm, gfatools and yak from HiFi-human-assembly-WDL v1.0.2; align_asm, that repository's align_hifiasm rewritten for our minimap2 2.31 image (the paftools call is retired); flagger, HMM-Flagger v1.2.0's commands as three tasks around the upstream images. Ours: chrom_coverage, dipcall, pav, vcf_finish, masking, concordance
 - `ugc_wgw/pangenome/` — ours: cactus_split and cactus_chrom (Minigraph-Cactus v3.3.0's own commands), names, vcf_post, truvari
 - `ugc_wgw/fail.wdl` — ugc_wgw_fail: a task that fails with a message (WDL 1.0 has no assert)
 - `ugc_wgw/provenance.wdl` — ugc_wgw_manifest_write
-- `overrides/` — glnexus, pbmm2, upstream: copied+modified upstream files; every file listed in `DERIVED_FILES.md`
+- `overrides/` — glnexus, pbmm2, sawfish (the image as a task input, for the `eval-sawfish23` profile), upstream: copied+modified upstream files; every file listed in `DERIVED_FILES.md`
 
 Header for every authored file:
 

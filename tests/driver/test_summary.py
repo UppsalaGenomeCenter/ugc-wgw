@@ -635,6 +635,21 @@ class IdentityTest(unittest.TestCase):
         self.assertEqual(anc[0]["probs"], {"EAS": 0.0, "AFR": 0.0, "AMR": 0.1, "SAS": 0.0, "EUR": 0.9})
         self.assertEqual(anc[0]["pcs"], [0.5, 2.0, 0.1, 0.2, 0.3])
 
+    def test_mt_parsers(self):
+        from fixtures import fixture_bytes
+        summ = sp.parse_mt_summary(fixture_bytes("mt_summary", "S1", "singleton").decode().splitlines())
+        self.assertEqual((summ["haplotypes"], summ["records"], summ["homoplasmic"], summ["heteroplasmic"], summ["svs"], summ["het_vaf_max"], summ["major_haplotype"]),
+                         (2, 3, 2, 1, 0, 0.4136, "hap_0"))
+        self.assertEqual(sp.parse_mt_summary([]), {})
+        hg = sp.parse_haplogroups(fixture_bytes("mt_haplogroups", "S1", "singleton", haplogroup="K1a1b1a").decode().splitlines())
+        self.assertEqual([(h["haplotype"], h["abundance"], h["haplogroup"], h["quality"]) for h in hg], [("hap_0", 0.97, "K1a1b1a", 1.0), ("hap_1", 0.03, "K1a1b1a", 0.95)])
+        mt = sp.parse_mt_vcf(iter(fixture_bytes("cohort_mt_small_variant_vcf", "C1", "cohort_merge", members=["A", "B", "C"]).splitlines(keepends=True)))
+        self.assertEqual((mt["records"], mt["samples"]), (3, ["A", "B", "C"]))
+        self.assertEqual(mt["members"]["A"], {"homoplasmic": 2, "heteroplasmic": 1, "het_vaf_max": 0.4136})
+        self.assertEqual(mt["members"]["B"], {"homoplasmic": 2, "heteroplasmic": 0, "het_vaf_max": None})
+        empty = sp.parse_mt_vcf(iter(fixture_bytes("cohort_mt_sv_vcf", "C1", "cohort_merge", members=["A"]).splitlines(keepends=True)))
+        self.assertEqual((empty["records"], empty["members"]["A"]["homoplasmic"]), (0, 0))
+
     def test_scatter(self):
         c = _Checker()
         s = sv.scatter([("EUR", 0.5, 2.0), ("EAS", 2.6, -7.1), ("AFR", -3.0, 1.0)], [("S1", 0.4, 2.0, "EUR"), ("S2", -2.9, 1.1, "AFR")])
@@ -689,13 +704,14 @@ class IdentityTest(unittest.TestCase):
         self.assertEqual(passed, ["D", "F"])
         self.assertEqual([sid for sid, _why in excluded], ["A", "B", "C", "E"])
         self.assertIn("same individual as B", dict(excluded)["A"])
-        # sheet order decides which relative stays: with D first, B's partner D is kept and B goes for the pair, not only for the duplicate
+        # sheet order decides which undeclared relative stays: with D first, B's partner D is kept and B goes; the declared
+        # pair A-C (expected 0.5) stays whole
         rows2 = [dict(r, identity_status="pass") for r in rows]
         passed2, excluded2 = sc.identity_pass({"members": rows2, "identity": {"available": True, "flags": {}, "pairs": pairs}, "thresholds": thr},
                                               {"D": 0, "B": 1, "A": 2, "C": 3, "E": 4, "F": 5})
-        self.assertEqual(passed2, ["D", "A", "E", "F"])
-        self.assertEqual(dict(excluded2)["B"], "related to D (relatedness 0.450), which comes first in the sheet")
-        self.assertIn("related to A (relatedness 0.500)", dict(excluded2)["C"])
+        self.assertEqual(passed2, ["D", "A", "C", "E", "F"])
+        self.assertEqual(dict(excluded2)["B"], "related to D (relatedness 0.450) with no pedigree link in the sheet; D comes first")
+        self.assertEqual([sid for sid, _w in excluded2], ["B"])
 
 
 class IdentityEndToEnd(unittest.TestCase):
@@ -721,10 +737,10 @@ class IdentityEndToEnd(unittest.TestCase):
     def test_pages_pass_list_manifest_and_freeze(self):
         code, out, err = run_cli(["--project", self.proj, "summary", "--cohort", "C1", "--pass-list", str(self.tmp / "id.txt"), "--pass-on", "identity"])
         self.assertEqual(code, 0, err)
-        self.assertEqual((self.tmp / "id.txt").read_text().split(), ["S1"])
-        self.assertIn("S2 excluded: related to S1 (relatedness 0.520), which comes first in the sheet", err)
+        self.assertEqual((self.tmp / "id.txt").read_text().split(), ["S1", "S2"])   # the declared parent-child pair stays
+        self.assertNotIn("S2 excluded", err)
         self.assertIn("S3 excluded: same individual as S4", err)
-        self.assertIn("pass list (identity): 1 of 4", err)
+        self.assertIn("pass list (identity): 2 of 4", err)
         cd = json.loads((self.out_dir / "C1.summary.json").read_text())
         self.assertEqual(cd["identity"]["counts"], {"duplicate": 2})   # the declared parent-child pair at 0.52 is no `related`
         self.assertEqual({r["id"]: r["identity_status"] for r in cd["members"]}, {"S1": "warn", "S2": "pass", "S3": "fail", "S4": "fail"})
@@ -876,6 +892,13 @@ class SummaryEndToEnd(unittest.TestCase):
         self.assertEqual(len(digest["targeted"]["starphase"]), 7)
         self.assertEqual(digest["targeted"]["starphase_meta"]["genes"]["CYP2C19"]["simple_diplotype"], "*1/*17")
         self.assertEqual(digest["targeted"]["paraphase"]["n_with_gene_cn"], 1)
+        # the mitochondrial block (0.15): the collapsed counts, the haplogroup per haplotype and the sample's
+        mito = digest["targeted"]["mitorsaw"]
+        self.assertEqual((mito["collapsed"]["heteroplasmic"], mito["collapsed"]["major_haplotype"], mito["haplogroup"], mito["legacy"]), (1, "hap_0", "H5a7", False))
+        self.assertEqual([(h["label"], h["haplogroup"], h["haplogroup_quality"]) for h in mito["haplotypes"]], [("hap_0", "H5a7", 1.0), ("hap_1", "H5a7", 0.95)])
+        self.assertIn("mt_summary", digest["files"])
+        for needle in ("haplogroup (major haplotype)", "H5a7", "heteroplasmic sites"):
+            self.assertIn(needle, text, needle)
         self.assertEqual(digest["methylation"]["profile"]["labels"]["Methylated"], 1)
         self.assertEqual(digest["provenance"]["ugc_wgw"]["version"], config.read_version(self.cfg.code_dir))
         self.assertIn("hifi-human-wgs-wdl", digest["provenance"]["upstream"])
@@ -1094,6 +1117,18 @@ class SummaryEndToEnd(unittest.TestCase):
         self.assertIn("No identity flag", s1)
         self.assertEqual(cd["callsets"]["cohort_merge"]["sv"]["counts"], {"DEL": 2, "INS": 1, "BND": 1, "DUP": 1})
         self.assertEqual(cd["callsets"]["cohort_merge"]["sv"]["samples"], ["S1", "S2"])
+        # the mitochondrial sets of cohort_merge and cohort_freq (0.15)
+        self.assertEqual(cd["callsets"]["cohort_merge"]["mt"]["records"], 3)
+        self.assertEqual(cd["callsets"]["cohort_merge"]["mt"]["members"]["S1"]["heteroplasmic"], 1)
+        self.assertEqual(len(cd["callsets"]["cohort_merge"]["mt_haplogroups"]), 4)
+        self.assertEqual(cd["callsets"]["cohort_freq"]["summary"]["mt_small_variants"]["records"]["total"], 3)
+        self.assertIn("mt_small_variant_freq_vcf", cd["callsets"]["cohort_freq"])
+        self.assertEqual((cd["targeted"]["mito"]["haplogroups"], cd["targeted"]["mito"]["n_haplogrouped"]), ({"H5a7": 2}, 2))
+        self.assertEqual(cd["targeted"]["mito"]["freq"][0], {"kind": "haplogroup", "value": "H5a7", "stratum_kind": "ALL", "stratum": "ALL", "count": 2, "fraction": 1.0, "n_called": 2, "n_members": 2})
+        self.assertIn({"kind": "macro_haplogroup", "value": "H", "stratum_kind": "ALL", "stratum": "ALL", "count": 2, "fraction": 1.0, "n_called": 2, "n_members": 2}, cd["targeted"]["mito"]["freq"])
+        self.assertIn("mt_heteroplasmic", cd["distributions"])
+        for needle in ("mitochondrial small variants", "Haplogroup of each member", "in mt VCF"):
+            self.assertIn(needle, text, needle)
         self.assertEqual((cd["callsets"]["cohort_merge"]["trgt_lps"]["loci"], cd["callsets"]["cohort_merge"]["trgt_lps"]["samples"]), (5, ["S1", "S2"]))
         self.assertEqual(cd["callsets"]["cohort_freq"]["summary"]["samples"]["n"]["total"], 2)
         self.assertEqual(len(cd["callsets"]["cohort_freq"]["samples"]), 2)

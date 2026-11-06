@@ -9,6 +9,8 @@ import "../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/backend_
 import "ugc_wgw/cohort/concat.wdl" as Concat
 import "ugc_wgw/cohort/glnexus_scatter.wdl" as GlnexusScatter
 import "ugc_wgw/cohort/regions.wdl" as Regions
+import "ugc_wgw/mito/collapse.wdl" as Mito
+import "ugc_wgw/mito/merge.wdl" as MitoMerge
 import "ugc_wgw/cohort/sv_merge_bcftools.wdl" as BcftoolsMerge
 import "ugc_wgw/cohort/svx.wdl" as Svx
 import "ugc_wgw/cohort/trgt_merge_lps.wdl" as Trgt
@@ -44,6 +46,21 @@ workflow ugc_wgw_cohort_merge {
       },
       cohort_small_variant_vcf_index: {
         description: "Index for GLnexus VCF"
+      },
+      cohort_mt_small_variant_vcf: {
+        description: "The members' collapsed mitochondrial small variants merged (mitorsaw; 0/1 heteroplasmic, 1/1 homoplasmic, 0/0 not reported by mitorsaw); absent when merge_mitochondria is false"
+      },
+      cohort_mt_small_variant_vcf_index: {
+        description: "Index"
+      },
+      cohort_mt_sv_vcf: {
+        description: "The members' collapsed mitochondrial SVs merged; absent when merge_mitochondria is false"
+      },
+      cohort_mt_sv_vcf_index: {
+        description: "Index"
+      },
+      cohort_mt_haplogroups: {
+        description: "Every member's mitochondrial haplogroups, one row per mitorsaw haplotype, with made_in_stage for members whose run predates the per-sample classification; absent when merge_mitochondria is false"
       },
       ugc_wgw_workflow_version: {
         description: "ugc_wgw_version echoed"
@@ -128,6 +145,45 @@ workflow ugc_wgw_cohort_merge {
     bcftools_merge_mem_gb: {
       description: "Memory (GB) per bcftools merge shard; default 8 + 0.02 per sample"
     }
+    merge_mitochondria: {
+      description: "Merge the members' collapsed mitochondrial call sets (the driver sets it when the members have mt outputs or mitorsaw outputs to collapse here)"
+    }
+    mt_small_variant_vcfs: {
+      description: "Per member, the collapsed chrM small-variant VCF (mt_small_variant_vcf of upstream/singleton), null for a member whose run predates it (then its mitorsaw VCF is collapsed here); aligned with sample_ids"
+    }
+    mt_small_variant_vcf_indices: {
+      description: "Index per entry of mt_small_variant_vcfs"
+    }
+    mt_sv_vcfs: {
+      description: "Per member, the collapsed chrM SV VCF (mt_sv_vcf), null where mt_small_variant_vcfs is null"
+    }
+    mt_sv_vcf_indices: {
+      description: "Index per entry of mt_sv_vcfs"
+    }
+    mt_haplogroups: {
+      description: "Per member, the haplogroup table (mt_haplogroups), null where the run has none"
+    }
+    mitorsaw_vcfs: {
+      description: "Per member without a collapsed set, mitorsaw's VCF (mitorsaw_vcf), null otherwise; empty when every member has one"
+    }
+    mitorsaw_vcf_indices: {
+      description: "Index per entry of mitorsaw_vcfs"
+    }
+    mitorsaw_hap_stats: {
+      description: "Per entry of mitorsaw_vcfs, mitorsaw's JSON (mitorsaw_hap_stats)"
+    }
+    mito_sv_min_size: {
+      description: "Allele-length difference (bp) from which a mitorsaw record is an SV, for the collapses made here (nallo's 50)"
+    }
+    haplogrep_tree: {
+      description: "haplogrep3 tree for the haplogroups made here (phylotree-fu-rcrs@1.3 or phylotree-rcrs@17.3)"
+    }
+    run_haplogrep: {
+      description: "Classify the haplotypes of the members collapsed here"
+    }
+    skip_contigs: {
+      description: "Contigs left out of the GLnexus scatter (default chrM: the cohort's mitochondrial genotypes are the mt merges here)"
+    }
     ref_map_file: {
       description: "ugc-wgw reference map (docs/DESIGN.md §10.4); keys used here: name, fasta, fasta_index, trgt_tandem_repeat_bed, scatter_regions"
     }
@@ -188,6 +244,20 @@ workflow ugc_wgw_cohort_merge {
     Array[File]? phased_small_variant_vcfs
     Array[File]? phased_small_variant_vcf_indices
     Int? bcftools_merge_mem_gb
+
+    Boolean merge_mitochondria = false
+    Array[File?] mt_small_variant_vcfs = []
+    Array[File?] mt_small_variant_vcf_indices = []
+    Array[File?] mt_sv_vcfs = []
+    Array[File?] mt_sv_vcf_indices = []
+    Array[File?] mt_haplogroups = []
+    Array[File?] mitorsaw_vcfs = []
+    Array[File?] mitorsaw_vcf_indices = []
+    Array[File?] mitorsaw_hap_stats = []
+    Int mito_sv_min_size = 50
+    String haplogrep_tree = "phylotree-fu-rcrs@1.3"
+    Boolean run_haplogrep = true
+    Array[String] skip_contigs = ["chrM"]
 
     File ref_map_file
     String ugc_wgw_container_registry
@@ -372,20 +442,96 @@ workflow ugc_wgw_cohort_merge {
   }
 
   # ---- optional: GLnexus (standalone mode) ---------------------------------
+  # its own shard list: chrM left out, the cohort's mitochondrial genotypes being mitorsaw's (below)
 
   if (run_glnexus) {
+    call Regions.ugc_wgw_regions_prepare as regions_glnexus { input:
+      scatter_regions = ref_map["scatter_regions"],  # !FileCoercion
+      skip_contigs = skip_contigs,
+      runtime_attributes = default_runtime_attributes
+    }
+
     call GlnexusScatter.ugc_wgw_glnexus_scatter { input:
       cohort_id = cohort_id,
       sample_ids = sample_ids,
       gvcfs = select_first([gvcfs]),
       gvcf_indices = select_first([gvcf_indices]),
       ref_name = ref_map["name"],
-      shard_names = ugc_wgw_regions_prepare.shard_names,
-      shard_beds = ugc_wgw_regions_prepare.shard_beds,
+      shard_names = regions_glnexus.shard_names,
+      shard_beds = regions_glnexus.shard_beds,
       out_prefix = "~{out_prefix}.small_variants",
       glnexus_mem_gb = glnexus_mem,
       glnexus_threads = glnexus_threads,
       default_runtime_attributes = default_runtime_attributes
+    }
+  }
+
+  # ---- mitochondria: the members' collapsed chrM sets merged (one contig, no scatter) -------------
+  # a member whose run predates the collapse is collapsed (and haplogrouped) here from its mitorsaw outputs
+
+  if (merge_mitochondria) {
+    scatter (i in range(n_samples)) {
+      if (!defined(mt_small_variant_vcfs[i])) {
+        call Mito.ugc_wgw_mito_collapse as mito_collapse_here { input:
+          sample_id = sample_ids[i],
+          mitorsaw_vcf = select_first([mitorsaw_vcfs[i]]),
+          mitorsaw_vcf_index = select_first([mitorsaw_vcf_indices[i]]),
+          mitorsaw_hap_stats = select_first([mitorsaw_hap_stats[i]]),
+          mito_sv_min_size = mito_sv_min_size,
+          out_prefix = "~{sample_ids[i]}.~{ref_map["name"]}",
+          runtime_attributes = default_runtime_attributes
+        }
+        if (run_haplogrep) {
+          call Mito.ugc_wgw_haplogrep as haplogrep_here { input:
+            sample_id = sample_ids[i],
+            mt_haplotypes_vcf = mito_collapse_here.mt_haplotypes_vcf,
+            mt_haplotypes_tsv = mito_collapse_here.mt_haplotypes_tsv,
+            tree = haplogrep_tree,
+            out_prefix = "~{sample_ids[i]}.~{ref_map["name"]}",
+            ugc_wgw_container_registry = ugc_wgw_container_registry,
+            runtime_attributes = default_runtime_attributes
+          }
+        }
+      }
+      File member_mt_small = select_first([mt_small_variant_vcfs[i], mito_collapse_here.mt_small_variant_vcf])
+      File member_mt_small_index = select_first([mt_small_variant_vcf_indices[i], mito_collapse_here.mt_small_variant_vcf_index])
+      File member_mt_sv = select_first([mt_sv_vcfs[i], mito_collapse_here.mt_sv_vcf])
+      File member_mt_sv_index = select_first([mt_sv_vcf_indices[i], mito_collapse_here.mt_sv_vcf_index])
+      File? member_haplogroups = if defined(mt_haplogroups[i]) then mt_haplogroups[i] else haplogrep_here.mt_haplogroups
+      if (defined(member_haplogroups)) {
+        String member_with_haplogroups = sample_ids[i]
+        String member_made_in_stage = if defined(mt_haplogroups[i]) then "no" else "yes"
+      }
+    }
+
+    Array[String] header_mt = [
+      "##ugc_wgw_cohort_merge_version=~{ugc_wgw_version}",
+      "##ugc_wgw_cohort_merge_cohort=~{cohort_id}",
+      "##ugc_wgw_cohort_merge_mt=the members' mitorsaw calls collapsed to diploid (ugc_wgw_mito_collapse: 0/1 heteroplasmic, 1/1 homoplasmic; FORMAT/VAF the read fraction) and merged; 0/0 = no alternate allele reported by mitorsaw for that member"
+    ]
+
+    call MitoMerge.ugc_wgw_mito_merge as mt_small_merge { input:
+      vcfs = member_mt_small,
+      vcf_indices = member_mt_small_index,
+      header_lines = header_mt,
+      out_prefix = "~{out_prefix}.mt_small_variants",
+      runtime_attributes = default_runtime_attributes
+    }
+
+    call MitoMerge.ugc_wgw_mito_merge as mt_sv_merge { input:
+      vcfs = member_mt_sv,
+      vcf_indices = member_mt_sv_index,
+      header_lines = header_mt,
+      out_prefix = "~{out_prefix}.mt_svs",
+      runtime_attributes = default_runtime_attributes
+    }
+
+    call MitoMerge.ugc_wgw_mito_haplogroups_gather { input:
+      sample_ids = select_all(member_with_haplogroups),
+      haplogroup_tsvs = select_all(member_haplogroups),
+      made_in_stage = select_all(member_made_in_stage),
+      out_prefix = out_prefix,
+      runtime_attributes = default_runtime_attributes
     }
   }
 
@@ -419,6 +565,12 @@ workflow ugc_wgw_cohort_merge {
 
     File? cohort_small_variant_vcf = ugc_wgw_glnexus_scatter.vcf
     File? cohort_small_variant_vcf_index = ugc_wgw_glnexus_scatter.vcf_index
+
+    File? cohort_mt_small_variant_vcf = mt_small_merge.vcf
+    File? cohort_mt_small_variant_vcf_index = mt_small_merge.vcf_index
+    File? cohort_mt_sv_vcf = mt_sv_merge.vcf
+    File? cohort_mt_sv_vcf_index = mt_sv_merge.vcf_index
+    File? cohort_mt_haplogroups = ugc_wgw_mito_haplogroups_gather.table
 
     String ugc_wgw_workflow_version = ugc_wgw_version
     File ugc_wgw_manifest = ugc_wgw_manifest_write.ugc_wgw_manifest

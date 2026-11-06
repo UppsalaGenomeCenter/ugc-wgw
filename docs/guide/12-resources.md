@@ -511,3 +511,33 @@ row, which lets more jobs run at once; one that ends near its limit needs a
 larger one. The worked policy above was written that way from the first
 ten samples; proposing rows from the accounting automatically stays a
 manual step.
+
+## Evaluation profiles
+
+An evaluation profile runs the production entrypoints with one tool
+swapped, so that a second project over the same members can be compared
+with a production one before anything changes for everyone. The first is
+`eval-sawfish23` (`backends/hpc/profiles/eval-sawfish23.json`): it sets the
+`sawfish_image` input of the sawfish tasks (`workflows/overrides/sawfish.wdl`,
+upstream's task file with the image as an input, default upstream's
+2.2.1_build2) to PacBio's published 2.3.0_build1 for `singleton`,
+`upstream` and `cohort_call`; every other task is unchanged, the call cache
+replays everything up to sawfish, and sawfish onward recomputes. The
+bundle ships both images. On the dev machine `tests/smoke/run.sh eval
+sawfish23` initialises `project-sawfish23/` with the profile, runs the
+standalone phase, then compares each member's phased SV VCF with the
+production project's with truvari (`--sizemin 50 --pctseq 0`: recall,
+precision, F1, genotype concordance) and prints the sawfish tasks' wall
+time, core-hours and peak memory from `ugc-wgw usage` for both. On the
+cluster, `ugc-wgw init --profile eval-sawfish23` on a trio project does
+the same at whole-genome scale; the numbers go into `tests/smoke/README.md`
+and the decision into the design log. sawfish 2.3.0 promises `discover` at
+16.5 minutes and 4 GiB instead of 48.9 minutes and 72 GiB per sample with
+"usually identical" output: the override's default moves to 2.3 when the
+SV sets match within run-to-run noise and the memory drop holds on our
+data; otherwise it waits for the upstream sync. On the chr20 smoke data
+(2026-11-06) the SV sets were identical for all four members (truvari F1
+and genotype concordance 1.0) and `discover` ran five to seven times
+faster; the memory question waits for a cluster run, where SLURM
+accounting measures it. An evaluation profile is never applied to a
+production project.

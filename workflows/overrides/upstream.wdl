@@ -1,8 +1,8 @@
 version 1.0
 
-# ugc-pacbio-wgw — upstream subworkflow with a prebuilt pbmm2 reference index and the sex resolved before sawfish (override of upstream subworkflow: imports overrides/pbmm2.wdl, pbmm2_index input passed to the HiFi and fail-reads alignments; somalier extract, one-sample relate and ugc_wgw_resolve_sex after mosdepth, sawfish_discover gets the resolved sex)
+# ugc-pacbio-wgw — upstream subworkflow with a prebuilt pbmm2 reference index and the sex resolved before sawfish (override of upstream subworkflow: imports overrides/pbmm2.wdl, pbmm2_index input passed to the HiFi and fail-reads alignments; somalier extract, one-sample relate and ugc_wgw_resolve_sex after mosdepth, sawfish_discover gets the resolved sex; mitorsaw's chrM genotypes collapsed to diploid and haplogrouped after mitorsaw)
 # origin: vendor/hifi-human-wgs-wdl/workflows/upstream/upstream.wdl @ v4.0.0
-# see docs/DESIGN.md §18 (2026-10-15, 2026-11-05), DERIVED_FILES.md
+# see docs/DESIGN.md §18 (2026-10-15, 2026-11-05 ×3), DERIVED_FILES.md
 
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/structs.wdl"
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/kivvi.wdl" as Kivvi
@@ -11,11 +11,12 @@ import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/mosdepth.
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/paraphase.wdl" as Paraphase
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/pbsamoa.wdl" as Pbsamoa
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/samtools.wdl" as Samtools
-import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/sawfish.wdl" as Sawfish
+import "sawfish.wdl" as Sawfish  # ugc-wgw override: the image is a task input (the eval-sawfish23 profile)
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl" as DeepVariant
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/parabricks/parabricks_deepvariant.wdl" as ParabricksDeepVariant
 import "pbmm2.wdl" as Pbmm2  # ugc-wgw override of the alignment subworkflow: prebuilt reference index
 import "../ugc_wgw/qc/somalier.wdl" as Somalier  # ugc-wgw: somalier extract and the sex resolution
+import "../ugc_wgw/mito/collapse.wdl" as Mito  # ugc-wgw: mitorsaw's chrM genotypes collapsed, haplogroups
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl" as Pbmm2Tasks  # upstream's tasks for the fail-reads path
 
 workflow upstream {
@@ -59,6 +60,36 @@ workflow upstream {
       },
       somalier_sex: {
         description: "ugc-wgw: somalier's call from chrX heterozygosity (MALE, FEMALE or empty)"
+      },
+      mt_small_variant_vcf: {
+        description: "ugc-wgw: mitorsaw's chrM calls collapsed to diploid GT, small variants (ugc_wgw_mito_collapse)"
+      },
+      mt_small_variant_vcf_index: {
+        description: "ugc-wgw: index"
+      },
+      mt_sv_vcf: {
+        description: "ugc-wgw: the collapsed chrM SVs (allele-length difference at or above mito_sv_min_size)"
+      },
+      mt_sv_vcf_index: {
+        description: "ugc-wgw: index"
+      },
+      mt_haplotypes_vcf: {
+        description: "ugc-wgw: one haploid column per mitorsaw haplotype"
+      },
+      mt_haplotypes_vcf_index: {
+        description: "ugc-wgw: index"
+      },
+      mt_haplotypes_tsv: {
+        description: "ugc-wgw: haplotype, abundance, variants carried"
+      },
+      mt_summary: {
+        description: "ugc-wgw: one row: haplotypes, records, homoplasmic, heteroplasmic, SVs, heteroplasmic VAF mean and max, the major haplotype"
+      },
+      mt_haplogroups: {
+        description: "ugc-wgw: a haplogroup per mitorsaw haplotype (haplogrep3), absent when run_haplogrep is false"
+      },
+      mt_haplogroup: {
+        description: "ugc-wgw: the most abundant haplotype's haplogroup, absent when run_haplogrep is false"
       },
       somalier_extract: {
         description: "ugc-wgw: the sample's somalier extract (.somalier), read by cohort_qc"
@@ -240,7 +271,16 @@ workflow upstream {
       description: "ugc-wgw: mean chrX depth somalier must have seen before its sex call is used"
     }
     ugc_wgw_container_registry: {
-      description: "ugc-wgw: registry holding the ugc-built images (somalier)"
+      description: "ugc-wgw: registry holding the ugc-built images (somalier, haplogrep3)"
+    }
+    mito_sv_min_size: {
+      description: "ugc-wgw: allele-length difference (bp) from which a mitorsaw record is an SV in the collapsed chrM sets (nallo's 50)"
+    }
+    haplogrep_tree: {
+      description: "ugc-wgw: haplogrep3 tree for the haplogroups (the image has phylotree-fu-rcrs@1.3 and phylotree-rcrs@17.3)"
+    }
+    run_haplogrep: {
+      description: "ugc-wgw: classify the haplotypes with haplogrep3"
     }
     use_parabricks_deepvariant: {
       description: "Use Parabricks DeepVariant"
@@ -275,6 +315,9 @@ workflow upstream {
     Int somalier_sex_min_x_sites = 50
     Float somalier_sex_min_x_depth = 5.0
     String ugc_wgw_container_registry
+    Int mito_sv_min_size = 50
+    String haplogrep_tree = "phylotree-fu-rcrs@1.3"
+    Boolean run_haplogrep = true
     RuntimeAttributes default_runtime_attributes
   }
 
@@ -508,6 +551,29 @@ workflow upstream {
     runtime_attributes = default_runtime_attributes
   }
 
+  # ugc-wgw: mitorsaw's per-haplotype genotypes as a diploid call set, and a haplogroup per haplotype (docs/DESIGN.md §18 2026-11-05)
+  call Mito.ugc_wgw_mito_collapse { input:
+    sample_id = sample_id,
+    mitorsaw_vcf = mitorsaw.vcf,
+    mitorsaw_vcf_index = mitorsaw.vcf_index,
+    mitorsaw_hap_stats = mitorsaw.hap_stats,
+    mito_sv_min_size = mito_sv_min_size,
+    out_prefix = "~{sample_id}.~{ref_name}",
+    runtime_attributes = default_runtime_attributes
+  }
+
+  if (run_haplogrep) {
+    call Mito.ugc_wgw_haplogrep { input:
+      sample_id = sample_id,
+      mt_haplotypes_vcf = ugc_wgw_mito_collapse.mt_haplotypes_vcf,
+      mt_haplotypes_tsv = ugc_wgw_mito_collapse.mt_haplotypes_tsv,
+      tree = haplogrep_tree,
+      out_prefix = "~{sample_id}.~{ref_name}",
+      ugc_wgw_container_registry = ugc_wgw_container_registry,
+      runtime_attributes = default_runtime_attributes
+    }
+  }
+
   call Kivvi.kivvi_kiv2 { input:
     aligned_bam = aligned_bam_data,
     aligned_bam_index = aligned_bam_index,
@@ -616,6 +682,18 @@ workflow upstream {
     File mitorsaw_vcf_index = mitorsaw.vcf_index
     File mitorsaw_hap_stats = mitorsaw.hap_stats
 
+    # ugc-wgw: the collapsed chrM call sets and the haplogroups
+    File mt_small_variant_vcf = ugc_wgw_mito_collapse.mt_small_variant_vcf
+    File mt_small_variant_vcf_index = ugc_wgw_mito_collapse.mt_small_variant_vcf_index
+    File mt_sv_vcf = ugc_wgw_mito_collapse.mt_sv_vcf
+    File mt_sv_vcf_index = ugc_wgw_mito_collapse.mt_sv_vcf_index
+    File mt_haplotypes_vcf = ugc_wgw_mito_collapse.mt_haplotypes_vcf
+    File mt_haplotypes_vcf_index = ugc_wgw_mito_collapse.mt_haplotypes_vcf_index
+    File mt_haplotypes_tsv = ugc_wgw_mito_collapse.mt_haplotypes_tsv
+    File mt_summary = ugc_wgw_mito_collapse.mt_summary
+    File? mt_haplogroups = ugc_wgw_haplogrep.mt_haplogroups
+    String? mt_haplogroup = ugc_wgw_haplogrep.mt_haplogroup
+
     # per sample kivvi kiv2 outputs
     File? kivvi_kiv2_vcf = kivvi_kiv2.vcf
     File? kivvi_kiv2_vcf_index = kivvi_kiv2.vcf_index
@@ -641,7 +719,8 @@ workflow upstream {
       kivvi_kiv2.msg,
       kivvi_d4z4.msg,
       sawfish_discover.msg,
-      ugc_wgw_resolve_sex.msg
+      ugc_wgw_resolve_sex.msg,
+      ugc_wgw_mito_collapse.msg
     ])
   }
 }

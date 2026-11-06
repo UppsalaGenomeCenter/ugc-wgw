@@ -243,6 +243,51 @@ def build_cohort_merge(ctx: BuildContext) -> dict[str, object]:
     if merge_phased:
         doc["merge_phased_small_variants"] = True
         doc["phased_small_variant_vcfs"], doc["phased_small_variant_vcf_indices"] = ph, phi
+    doc.update(_mito_inputs(ctx, members, gvcf_stage))
+    return doc
+
+
+def _mito_inputs(ctx: BuildContext, members: list[str], per_stage: str) -> dict[str, object]:
+    """cohort_merge's mitochondrial inputs: each member's collapsed chrM sets and haplogroups (upstream/singleton since
+    0.15.0), or null plus its mitorsaw outputs for a member whose run predates the collapse (the stage collapses and
+    classifies it); merge_mitochondria is on when at least one member brings something. `merge_mitochondria` set to false
+    in config.json stage_inputs leaves the whole branch out."""
+    if not bool(ctx.ov("cohort_merge", "merge_mitochondria", True)):
+        return {"merge_mitochondria": False}
+    doc: dict[str, object] = {}
+    small, smalli, svs, svsi, hg, mv, mvi, mj = ([] for _ in range(8))
+    legacy: list[str] = []
+    for sid in members:
+        _, outs = ctx.prior(per_stage, "sample", sid)
+        vcf = outs.opt("mt_small_variant_vcf")
+        if vcf is not None:
+            small.append(vcf)
+            smalli.append(outs.req("mt_small_variant_vcf_index"))
+            svs.append(outs.req("mt_sv_vcf"))
+            svsi.append(outs.req("mt_sv_vcf_index"))
+            hg.append(outs.opt("mt_haplogroups"))
+            mv.append(None)
+            mvi.append(None)
+            mj.append(None)
+        else:
+            legacy.append(sid)
+            small.append(None)
+            smalli.append(None)
+            svs.append(None)
+            svsi.append(None)
+            hg.append(None)
+            mv.append(outs.req("mitorsaw_vcf"))
+            mvi.append(outs.req("mitorsaw_vcf_index"))
+            mj.append(outs.req("mitorsaw_hap_stats"))
+    if legacy:
+        LOGGER.warning("cohort_merge %s: %d member(s) have no collapsed mitochondrial set (per-sample runs before 0.15.0): the stage "
+                       "collapses and classifies their mitorsaw calls: %s", ctx.subject_id, len(legacy), ", ".join(legacy[:5]) + (" ..." if len(legacy) > 5 else ""))
+    doc["merge_mitochondria"] = True
+    doc["mt_small_variant_vcfs"], doc["mt_small_variant_vcf_indices"] = small, smalli
+    doc["mt_sv_vcfs"], doc["mt_sv_vcf_indices"] = svs, svsi
+    doc["mt_haplogroups"] = hg
+    if legacy:
+        doc["mitorsaw_vcfs"], doc["mitorsaw_vcf_indices"], doc["mitorsaw_hap_stats"] = mv, mvi, mj
     return doc
 
 
@@ -322,6 +367,12 @@ def build_cohort_freq(ctx: BuildContext) -> dict[str, object]:
     _, cm = ctx.prior("cohort_merge", "cohort", ctx.subject_id)
     doc["sv_vcf"] = cm.req("cohort_sv_vcf")
     doc["sv_vcf_index"] = cm.req("cohort_sv_vcf_index")
+    # the mitochondrial sets: absent when cohort_merge ran without merge_mitochondria (or at 0.14)
+    for name in ("mt_small_variant_vcf", "mt_sv_vcf"):
+        doc[name] = cm.opt("cohort_" + name)
+        doc[name + "_index"] = cm.opt("cohort_" + name + "_index")
+    if doc["mt_small_variant_vcf"] is None:
+        LOGGER.info("cohort_freq %s: cohort_merge has no mitochondrial set; the mt frequencies are skipped", ctx.subject_id)
     if ctx.mode == "joint":
         _, cc = ctx.prior("cohort_call", "cohort", ctx.subject_id)
         doc["small_variant_vcf"] = cc.req("cohort_small_variant_vcf")

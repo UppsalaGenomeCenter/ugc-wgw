@@ -4,7 +4,8 @@
 # svx 0.6.0 and trgt-lps 0.10.0 pushed 2026-09-10; hifiasm 0.25.0 pushed 2026-09-22 (replaces quay.io/pacbio/hifiasm 0.25.0_build1);
 # minimap2 2.31 + samtools 1.24 + k8/paftools.js pushed 2026-10-20 (assembly v2; replaced quay.io/pacbio/align_hifiasm 2.17_1.14_build2,
 # which left the manifest after 0.11.0: no task used it since the calling stage landed);
-# somalier 0.3.7 pushed 2026-11-05 (identity QC: the extract and sex resolution in upstream/singleton, cohort_qc):
+# somalier 0.3.7 pushed 2026-11-05 (identity QC: the extract and sex resolution in upstream/singleton, cohort_qc);
+# haplogrep3 3.3.2 pushed 2026-11-06 (mitochondrial haplogroups after mitorsaw; the trees baked in):
 ghcr.io/uppsalagenomecenter/hifiasm@sha256:0e03f1dc2ab6ede5200bbc0e8e9c3ea10e693ce87cad9346e3a1aa59cec272cf
 ghcr.io/uppsalagenomecenter/minimap2@sha256:00dd2dfbb7f395672eb0e71317899f913cd64af80c02864655dc9d848202604a
 ghcr.io/uppsalagenomecenter/svx@sha256:5f5577e979e4a1e629c9630ebb647e3efe8ebe3978cd20dfb81a712807007a94
@@ -23,3 +24,7 @@ ghcr.io/becklaboratory/pav3@sha256:729964f51e6c2d6f84c42f56065d218bfd1f275026ad5
 quay.io/comparative-genomics-toolkit/cactus@sha256:fb4f1bab95d9c3b003d1036989f977e8cde2ffcf90a27691b992bd7d2d1a253d
 quay.io/biocontainers/truvari@sha256:28a193205760fad402674f6011425cee09f45085ab82d57f5ff3df4bc59c1264
 ghcr.io/uppsalagenomecenter/somalier@sha256:8b4c7d98c83fdd1e459baad80876f6eeb9a607a488ef7ce2b3db0a4ae707fe64
+ghcr.io/uppsalagenomecenter/haplogrep3@sha256:12de1423817083013a974595cabb4ca8aadbd97a3109fafe4e1ddf10a973c09e
+# Evaluation only (backends/hpc/profiles/eval-sawfish23.json; docs/DESIGN.md §18 2026-11-05): sawfish 2.3.0_build1 as published by PacBio,
+# shipped so the profile runs offline; production stays on upstream's 2.2.1_build2 until the comparison says otherwise:
+quay.io/pacbio/sawfish@sha256:40b167ebdfa07643c918c45fb782f61bd598c38876fc654416d8539b2faa4cf2

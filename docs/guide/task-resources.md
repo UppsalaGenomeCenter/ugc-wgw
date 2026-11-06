@@ -49,7 +49,7 @@ Reading the tables:
 
 ## ugc_wgw_singleton
 
-31 tasks, in first-call order.
+33 tasks, in first-call order.
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
@@ -67,13 +67,15 @@ Reading the tables:
 | `deepvariant_call_variants_cpu` | 64 | 28G | cpu from workflow input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:330` |
 | `deepvariant_call_variants_gpu` | 8 | 44G | cpu from input default; memory from input default; gpu | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:419` |
 | `deepvariant_postprocess_variants` | 8 | 48G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:512` |
-| `sawfish_discover` | 16 | 128G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/sawfish.wdl:5` |
+| `sawfish_discover` | 16 | 128G | cpu from input default; memory from input default; command uses threads | `workflows/overrides/sawfish.wdl:9` |
 | `subset_bam` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/samtools.wdl:255` |
 | `paraphase` | 8 | 16G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/paraphase.wdl:5` |
 | `mitorsaw` | 4 | 32G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/mitorsaw.wdl:5` |
+| `ugc_wgw_mito_collapse` | 1 | 1G | - | `workflows/ugc_wgw/mito/collapse.wdl:9` |
+| `ugc_wgw_haplogrep` | 1 | 2G | - | `workflows/ugc_wgw/mito/collapse.wdl:238` |
 | `kivvi_kiv2` | 2 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/kivvi.wdl:5` |
 | `kivvi_d4z4` | 2 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/kivvi.wdl:119` |
-| `sawfish_call` | 16 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/sawfish.wdl:139` |
+| `sawfish_call` | 16 | 32G | cpu from input default; memory from input default; command uses threads | `workflows/overrides/sawfish.wdl:147` |
 | `hiphase` | 16 | 96G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/hiphase.wdl:5` |
 | `trgt_genotype` | 16 | 32G | cpu from input default; memory from input default; command uses threads; command uses mem | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/trgt.wdl:5` |
 | `pbjam_bam_stats` | 8 | 8G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/pbjam.wdl:5` |
@@ -87,7 +89,7 @@ Reading the tables:
 
 ## ugc_wgw_upstream
 
-22 tasks, in first-call order.
+24 tasks, in first-call order.
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
@@ -105,13 +107,15 @@ Reading the tables:
 | `deepvariant_call_variants_cpu` | 64 | 28G | cpu from workflow input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:330` |
 | `deepvariant_call_variants_gpu` | 8 | 44G | cpu from input default; memory from input default; gpu | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:419` |
 | `deepvariant_postprocess_variants` | 8 | 48G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:512` |
-| `sawfish_discover` | 16 | 128G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/sawfish.wdl:5` |
+| `sawfish_discover` | 16 | 128G | cpu from input default; memory from input default; command uses threads | `workflows/overrides/sawfish.wdl:9` |
 | `subset_bam` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/samtools.wdl:255` |
 | `paraphase` | 8 | 16G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/paraphase.wdl:5` |
 | `mitorsaw` | 4 | 32G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/mitorsaw.wdl:5` |
+| `ugc_wgw_mito_collapse` | 1 | 1G | - | `workflows/ugc_wgw/mito/collapse.wdl:9` |
+| `ugc_wgw_haplogrep` | 1 | 2G | - | `workflows/ugc_wgw/mito/collapse.wdl:238` |
 | `kivvi_kiv2` | 2 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/kivvi.wdl:5` |
 | `kivvi_d4z4` | 2 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/kivvi.wdl:119` |
-| `sawfish_call` | 16 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/sawfish.wdl:139` |
+| `sawfish_call` | 16 | 32G | cpu from input default; memory from input default; command uses threads | `workflows/overrides/sawfish.wdl:147` |
 | `ugc_wgw_manifest_write` | 1 | 1G | - | `workflows/ugc_wgw/provenance.wdl:9` |
 
 ## ugc_wgw_cohort_qc
@@ -133,7 +137,7 @@ Reading the tables:
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
-| `sawfish_call` | 16 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/sawfish.wdl:139` |
+| `sawfish_call` | 16 | 32G | cpu from input default; memory from input default; command uses threads | `workflows/overrides/sawfish.wdl:147` |
 | `ugc_wgw_manifest_write` | 1 | 1G | - | `workflows/ugc_wgw/provenance.wdl:9` |
 | `ugc_wgw_regions_prepare` | 1 | 1G | - | `workflows/ugc_wgw/cohort/regions.wdl:9` |
 | `ugc_wgw_bcftools_slice` | 2 | 4G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/cohort/gvcf_slice.wdl:9` |
@@ -162,11 +166,13 @@ Reading the tables:
 
 ## ugc_wgw_cohort_merge
 
-11 tasks, in first-call order.
+15 tasks, in first-call order.
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
 | `filter_trgt_catalog` | 4 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/process_trgt_catalog/process_trgt_catalog.wdl:74` |
+| `ugc_wgw_mito_collapse` | 1 | 1G | - | `workflows/ugc_wgw/mito/collapse.wdl:9` |
+| `ugc_wgw_haplogrep` | 1 | 2G | - | `workflows/ugc_wgw/mito/collapse.wdl:238` |
 | `ugc_wgw_manifest_write` | 1 | 1G | - | `workflows/ugc_wgw/provenance.wdl:9` |
 | `ugc_wgw_regions_prepare` | 1 | 1G | - | `workflows/ugc_wgw/cohort/regions.wdl:9` |
 | `ugc_wgw_bcftools_slice` | 2 | 4G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/cohort/gvcf_slice.wdl:9` |
@@ -177,6 +183,8 @@ Reading the tables:
 | `ugc_wgw_trgt_merge` | 2 | - | cpu from workflow input default; cpu input: trgt_merge_threads; memory: "~{mem_gb} GiB" where mem_gb = trgt_merge_mem = select_first([trgt_merge_mem_gb, 8 + ceil(n_samples * 0.02)]); memory scales with N; command uses threads | `workflows/ugc_wgw/cohort/trgt_merge_lps.wdl:9` |
 | `ugc_wgw_trgt_lps` | 4 | 16G | cpu from workflow input default; cpu input: trgt_lps_threads; memory from input default; command uses threads | `workflows/ugc_wgw/cohort/trgt_merge_lps.wdl:122` |
 | `ugc_wgw_trgt_lps_gather` | 1 | 2G | - | `workflows/ugc_wgw/cohort/trgt_merge_lps.wdl:217` |
+| `ugc_wgw_mito_merge` | 2 | 4G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/mito/merge.wdl:9` |
+| `ugc_wgw_mito_haplogroups_gather` | 1 | 1G | - | `workflows/ugc_wgw/mito/merge.wdl:110` |
 
 ## ugc_wgw_cohort_freq
 

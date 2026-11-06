@@ -24,7 +24,7 @@ Legend:
 
 ## ugc_wgw_singleton
 
-Source `workflows/ugc_wgw_singleton.wdl`, depth 1, Mermaid source 2589 characters.
+Source `workflows/ugc_wgw_singleton.wdl`, depth 1, Mermaid source 2726 characters.
 
 Inlined workflows:
 
@@ -81,30 +81,34 @@ flowchart TD
     end
     n18["paraphase"]
     n19["mitorsaw"]
-    n20["kivvi_kiv2"]
-    n21["kivvi_d4z4"]
-    subgraph s12["if single_sample"]
-      n22["sawfish_call"]
+    n20["ugc_wgw_mito_collapse"]
+    subgraph s12["if run_haplogrep"]
+      n21["ugc_wgw_haplogrep"]
+    end
+    n22["kivvi_kiv2"]
+    n23["kivvi_d4z4"]
+    subgraph s13["if single_sample"]
+      n24["sawfish_call"]
     end
   end
-  subgraph s13["downstream (downstream.wdl)"]
-    n23["hiphase"]
-    n24["trgt_genotype"]
-    n25["pbjam_bam_stats"]
-    n26["bcftools_stats_roh_small_variants"]
-    n27["sv_stats"]
-    n28["methbat_pileup"]
-    subgraph s14["if defined(methbat_pileup.cpg_pileup_bed)"]
-      n29["methbat_profile_task"]
+  subgraph s14["downstream (downstream.wdl)"]
+    n25["hiphase"]
+    n26["trgt_genotype"]
+    n27["pbjam_bam_stats"]
+    n28["bcftools_stats_roh_small_variants"]
+    n29["sv_stats"]
+    n30["methbat_pileup"]
+    subgraph s15["if defined(methbat_pileup.cpg_pileup_bed)"]
+      n31["methbat_profile_task"]
     end
-    subgraph s15["if run_starphase"]
-      n30["pbstarphase_diplotype"]
+    subgraph s16["if run_starphase"]
+      n32["pbstarphase_diplotype"]
     end
   end
-  n31(["stats"])
-  n32[["filter_messages"]]
-  n33["consolidate_stats"]
-  n34["ugc_wgw_manifest_write"]
+  n33(["stats"])
+  n34[["filter_messages"]]
+  n35["consolidate_stats"]
+  n36["ugc_wgw_manifest_write"]
   n1 --> n2
   n1 -.-> s2
   n3 --> n4
@@ -118,45 +122,47 @@ flowchart TD
   n5 --> n12
   n5 --> n18
   n5 --> n19
-  n5 --> n20
-  n5 --> n21
   n5 --> n22
+  n5 --> n23
+  n5 --> n24
   n6 --> n9
   n7 --> n8
   n8 --> n9
   n9 --> n12
-  n12 --> n22
+  n12 --> n24
   n13 --> n15
   n14 --> n15
   n15 --> n16
   n16 --> n17
   n16 -.-> s11
-  n23 --> n24
-  n23 --> n25
-  n23 --> n26
-  n23 --> n27
-  n23 --> n28
-  n23 --> n30
-  n28 --> n29
-  n28 -.-> s14
-  n31 --> n33
-  n32 --> n33
+  n19 --> n20
+  n20 --> n21
+  n25 --> n26
+  n25 --> n27
+  n25 --> n28
+  n25 --> n29
+  n25 --> n30
+  n25 --> n32
+  n30 --> n31
+  n30 -.-> s15
+  n33 --> n35
+  n34 --> n35
   s1 --> n13
   s1 --> n16
-  s1 --> n24
-  s1 --> n32
+  s1 --> n26
+  s1 --> n34
   s1 -.-> s8
-  s3 --> n23
-  s3 --> n24
-  s3 --> n31
-  s3 --> n32
-  s13 --> n31
-  s13 --> n32
+  s3 --> n25
+  s3 --> n26
+  s3 --> n33
+  s3 --> n34
+  s14 --> n33
+  s14 --> n34
 ```
 
 ## ugc_wgw_upstream
 
-Source `workflows/ugc_wgw_upstream.wdl`, depth 1, Mermaid source 1926 characters.
+Source `workflows/ugc_wgw_upstream.wdl`, depth 1, Mermaid source 2063 characters.
 
 Inlined workflows:
 
@@ -212,14 +218,18 @@ flowchart TD
     end
     n18["paraphase"]
     n19["mitorsaw"]
-    n20["kivvi_kiv2"]
-    n21["kivvi_d4z4"]
-    subgraph s12["if single_sample"]
-      n22["sawfish_call"]
+    n20["ugc_wgw_mito_collapse"]
+    subgraph s12["if run_haplogrep"]
+      n21["ugc_wgw_haplogrep"]
+    end
+    n22["kivvi_kiv2"]
+    n23["kivvi_d4z4"]
+    subgraph s13["if single_sample"]
+      n24["sawfish_call"]
     end
   end
-  n23[["filter_messages"]]
-  n24["ugc_wgw_manifest_write"]
+  n25[["filter_messages"]]
+  n26["ugc_wgw_manifest_write"]
   n1 --> n2
   n1 -.-> s2
   n3 --> n4
@@ -233,24 +243,26 @@ flowchart TD
   n5 --> n12
   n5 --> n18
   n5 --> n19
-  n5 --> n20
-  n5 --> n21
   n5 --> n22
+  n5 --> n23
+  n5 --> n24
   n6 --> n9
   n7 --> n8
   n8 --> n9
   n9 --> n12
-  n12 --> n22
+  n12 --> n24
   n13 --> n15
   n14 --> n15
   n15 --> n16
   n16 --> n17
   n16 -.-> s11
+  n19 --> n20
+  n20 --> n21
   s1 --> n13
   s1 --> n16
-  s1 --> n23
+  s1 --> n25
   s1 -.-> s8
-  s3 --> n23
+  s3 --> n25
 ```
 
 ## ugc_wgw_cohort_qc
@@ -367,7 +379,7 @@ flowchart TD
 
 ## ugc_wgw_cohort_merge
 
-Source `workflows/ugc_wgw_cohort_merge.wdl`, depth 1, Mermaid source 1587 characters.
+Source `workflows/ugc_wgw_cohort_merge.wdl`, depth 1, Mermaid source 2058 characters.
 
 Inlined workflows:
 
@@ -407,30 +419,41 @@ flowchart TD
     n13["concat_phased_small_variants"]
   end
   subgraph s9["if run_glnexus"]
+    n14["regions_glnexus"]
     subgraph s10["ugc_wgw_glnexus_scatter (glnexus_scatter.wdl)"]
       subgraph s11["scatter sample_index in range(length(gvcfs))"]
-        n14["ugc_wgw_bcftools_slice"]
+        n15["ugc_wgw_bcftools_slice"]
       end
       subgraph s12["scatter shard_index in range(length(shard_names))"]
-        n15["glnexus"]
+        n16["glnexus"]
       end
-      n16["ugc_wgw_bcftools_concat"]
+      n17["ugc_wgw_bcftools_concat"]
     end
   end
-  n17["ugc_wgw_manifest_write"]
+  subgraph s13["if merge_mitochondria"]
+    subgraph s14["scatter i in range(n_samples)"]
+      subgraph s15["if !defined(mt_small_variant_vcfs[i])"]
+        n18["mito_collapse_here"]
+        subgraph s16["if run_haplogrep"]
+          n19["haplogrep_here"]
+        end
+      end
+    end
+    n20["mt_small_merge"]
+    n21["mt_sv_merge"]
+    n22["ugc_wgw_mito_haplogroups_gather"]
+  end
+  n23["ugc_wgw_manifest_write"]
   n1 --> n3
   n1 --> n6
   n1 --> n8
   n1 --> n10
   n1 --> n12
-  n1 --> n14
-  n1 --> n15
   n1 -.-> s2
   n1 -.-> s4
   n1 -.-> s5
   n1 -.-> s6
   n1 -.-> s8
-  n1 -.-> s12
   n2 --> n3
   n3 --> n5
   n4 --> n5
@@ -440,12 +463,19 @@ flowchart TD
   n10 --> n11
   n12 --> n13
   n14 --> n15
+  n14 --> n16
+  n14 -.-> s12
   n15 --> n16
+  n16 --> n17
+  n18 --> n19
+  n18 --> n20
+  n18 --> n21
+  n19 --> n22
 ```
 
 ## ugc_wgw_cohort_freq
 
-Source `workflows/ugc_wgw_cohort_freq.wdl`, depth 1, Mermaid source 510 characters.
+Source `workflows/ugc_wgw_cohort_freq.wdl`, depth 1, Mermaid source 682 characters.
 
 Inlined workflows: none.
 
@@ -464,18 +494,26 @@ flowchart TD
     n4["sv_shard"]
   end
   n5["concat_svs"]
-  n6["ugc_wgw_freq_summary"]
-  n7["ugc_wgw_manifest_write"]
+  subgraph s4["if defined(mt_small_variant_vcf)"]
+    n6["mt_small_shard"]
+  end
+  subgraph s5["if defined(mt_sv_vcf)"]
+    n7["mt_sv_shard"]
+  end
+  n8["ugc_wgw_freq_summary"]
+  n9["ugc_wgw_manifest_write"]
   n1 --> n2
   n1 --> n4
   n1 -.-> s2
   n1 -.-> s3
   n2 --> n3
-  n2 --> n6
-  n3 --> n6
+  n2 --> n8
+  n3 --> n8
   n4 --> n5
-  n4 --> n6
-  n5 --> n6
+  n4 --> n8
+  n5 --> n8
+  n6 --> n8
+  n7 --> n8
 ```
 
 ## ugc_wgw_assembly

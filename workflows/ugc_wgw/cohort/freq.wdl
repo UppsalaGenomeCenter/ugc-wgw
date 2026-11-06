@@ -178,7 +178,7 @@ task ugc_wgw_bcftools_freq {
 
 task ugc_wgw_freq_summary {
   meta {
-    description: "Summary of the frequency files (records by type, contig class, filter, AF bin; singletons; call rate; strata) and the table of members with the sex used"
+    description: "Summary of the frequency files (records by type, contig class, filter, AF bin; singletons; call rate; strata; the mitochondrial resources when present) and the table of members with the sex used"
     outputs: {
       summary: {
         description: "Long-format TSV: resource, metric, key, value"
@@ -208,6 +208,21 @@ task ugc_wgw_freq_summary {
     sv_samples: {
       description: "Sample list of the SV input VCF"
     }
+    mt_small_variant_vcf: {
+      description: "Sites-only mitochondrial small-variant frequency VCF (absent without a cohort mt VCF)"
+    }
+    mt_small_variant_vcf_index: {
+      description: "Index"
+    }
+    mt_sv_vcf: {
+      description: "Sites-only mitochondrial SV frequency VCF (absent without one)"
+    }
+    mt_sv_vcf_index: {
+      description: "Index"
+    }
+    mt_samples: {
+      description: "Sample list of the mitochondrial input VCF"
+    }
     sample_ids: {
       description: "Cohort members"
     }
@@ -230,8 +245,13 @@ task ugc_wgw_freq_summary {
     File? small_variant_vcf_index
     File sv_vcf
     File sv_vcf_index
+    File? mt_small_variant_vcf
+    File? mt_small_variant_vcf_index
+    File? mt_sv_vcf
+    File? mt_sv_vcf_index
     File? small_variant_samples
     File sv_samples
+    File? mt_samples
     Array[String] sample_ids
     Array[String] sample_sexes
     Array[String] sample_sex_sources
@@ -240,6 +260,8 @@ task ugc_wgw_freq_summary {
   }
 
   Boolean have_small_variants = defined(small_variant_vcf)
+  Boolean have_mt = defined(mt_small_variant_vcf)
+  Boolean have_mt_svs = defined(mt_sv_vcf)
   Int threads = 1
   Int mem_gb = 2
   Int disk_size = ceil(size(sv_vcf, "GB") + size(small_variant_vcf, "GB") + 10)
@@ -268,14 +290,28 @@ task ugc_wgw_freq_summary {
       : > small_samples.txt
     fi
     bcftools query --format "$(fmt_for "~{sv_vcf}")\t%INFO/SVTYPE\n" "~{sv_vcf}" > sv.tsv
+    # the mitochondrial resources (no strata tags, no SVTYPE): present when cohort_merge merged the members' mitorsaw sets
+    if [ "~{have_mt}" = "true" ]; then
+      bcftools query --format "$(fmt_for "~{default="" mt_small_variant_vcf}")\n" "~{default="" mt_small_variant_vcf}" > mt_small.tsv
+      cp "~{default="" mt_samples}" mt_samples.txt
+    else
+      : > mt_small.tsv
+      : > mt_samples.txt
+    fi
+    if [ "~{have_mt_svs}" = "true" ]; then
+      bcftools query --format "$(fmt_for "~{default="" mt_sv_vcf}")\n" "~{default="" mt_sv_vcf}" > mt_sv.tsv
+    else
+      : > mt_sv.tsv
+    fi
 
     python3 - "~{out_prefix}" "~{have_small_variants}" small.tsv sv.tsv small_samples.txt "~{sv_samples}" \
-      "~{write_lines(sample_ids)}" "~{write_lines(sample_sexes)}" "~{write_lines(sample_sex_sources)}" <<'PYEOF'
+      "~{write_lines(sample_ids)}" "~{write_lines(sample_sexes)}" "~{write_lines(sample_sex_sources)}" \
+      "~{have_mt}" mt_small.tsv "~{have_mt_svs}" mt_sv.tsv mt_samples.txt <<'PYEOF'
     import collections
     import sys
 
     (out_prefix, have_small, small_tsv, sv_tsv, small_samples, sv_samples,
-     ids_file, sexes_file, sources_file) = sys.argv[1:10]
+     ids_file, sexes_file, sources_file, have_mt, mt_small_tsv, have_mt_svs, mt_sv_tsv, mt_samples) = sys.argv[1:15]
 
     def lines(path):
         try:
@@ -291,6 +327,7 @@ task ugc_wgw_freq_summary {
     sources += [""] * (len(ids) - len(sources))
     in_small = set(lines(small_samples)) if have_small == "true" else set()
     in_sv = set(lines(sv_samples))
+    in_mt = set(lines(mt_samples)) if have_mt == "true" else set()
     n = len(ids)
     rows = []
 
@@ -306,12 +343,14 @@ task ugc_wgw_freq_summary {
     add("samples", "n_sex_source", "none", sum(1 for s in sources if s not in ("sheet", "inferred")))
     add("samples", "n_in_vcf", "small_variants", sum(1 for s in ids if s in in_small))
     add("samples", "n_in_vcf", "structural_variants", sum(1 for s in ids if s in in_sv))
+    add("samples", "n_in_vcf", "mt_small_variants", sum(1 for s in ids if s in in_mt))
 
     with open(out_prefix + ".samples.tsv", "w") as fh:
-        fh.write("sample_id\tgroup\tsex_source\tin_small_variant_vcf\tin_sv_vcf\n")
+        fh.write("sample_id\tgroup\tsex_source\tin_small_variant_vcf\tin_sv_vcf\tin_mt_vcf\n")
         for sid, sex, src in zip(ids, sexes, sources):
             fh.write("\t".join([sid, sex if sex in ("XX", "XY") else "unknown", src or "none",
-                                "yes" if sid in in_small else "no", "yes" if sid in in_sv else "no"]) + "\n")
+                                "yes" if sid in in_small else "no", "yes" if sid in in_sv else "no",
+                                "yes" if sid in in_mt else ("no" if have_mt == "true" else "none")]) + "\n")
 
     def contig_class(chrom):
         c = chrom[3:] if chrom.lower().startswith("chr") else chrom
@@ -391,6 +430,10 @@ task ugc_wgw_freq_summary {
     if have_small == "true":
         summarise("small_variants", small_tsv, False)
     summarise("structural_variants", sv_tsv, True)
+    if have_mt == "true":
+        summarise("mt_small_variants", mt_small_tsv, False)   # AC_Het = heteroplasmic members, AC_Hom = homoplasmic; no strata
+    if have_mt_svs == "true":
+        summarise("mt_svs", mt_sv_tsv, False)
 
     with open(out_prefix + ".summary.tsv", "w") as fh:
         fh.write("# ugc-pacbio-wgw cohort_freq: AF bins use the largest allele frequency of a record with AC > 0; "

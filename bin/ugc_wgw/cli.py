@@ -160,8 +160,8 @@ def build_parser() -> argparse.ArgumentParser:
                                                        "(the input of `cohort freeze`)")
     s.add_argument("--pass-on", default="assembly", choices=summary.PASS_ON,
                    help="what the pass list gates on: assembly (no assembly QC fail; the pangenome cohort), identity (no identity failure "
-                        "in the cohort's cohort_qc run and no related or duplicate partner earlier in the sheet; needs --cohort), "
-                        "or all (both) (default: assembly)")
+                        "in the cohort's cohort_qc run and no undeclared relative or duplicate earlier in the sheet; a declared pair stays; "
+                        "needs --cohort), or all (both) (default: assembly)")
 
     s = sub.add_parser("export", help="write the cohort's tables as TSV files, one per domain, from the members' digests "
                                       "and the cohort stages' outputs (the pages are for reading; the export is for joining)")

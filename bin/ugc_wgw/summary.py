@@ -31,7 +31,7 @@ from .report import Raw, _bytes, _esc, _table
 from .stages import namespace
 from .util import UgcError, diag, read_json, utc_now, write_json
 
-DIGEST_SCHEMA = 3   # 3 (0.14.0): per-gene rows of the targeted callers, identity; every per-sample digest rebuilds once
+DIGEST_SCHEMA = 4   # 4 (0.15.0): the mitorsaw block gains the collapsed chrM counts and the haplogroups; every per-sample digest rebuilds once
 # The public repository (scripts/export-public.sh fills the owner); `project_url` in config.json overrides it.
 DEFAULT_PROJECT_URL = "https://github.com/UppsalaGenomeCenter/ugc-wgw"
 
@@ -89,6 +89,12 @@ SOURCE_MAP: dict[str, dict[str, str]] = {  # logical name -> {stage: output name
     # identity (0.14.0): the somalier extract and the sex resolution table of the per-sample run
     "somalier_extract": {"singleton": "somalier_extract", "upstream": "somalier_extract"},
     "somalier_sex_tsv": {"singleton": "somalier_sex_tsv", "upstream": "somalier_sex_tsv"},
+    # mitochondria (0.15.0): mitorsaw's calls collapsed to diploid, the per-haplotype VCF and the haplogroups
+    "mt_small_variant_vcf": {"singleton": "mt_small_variant_vcf", "upstream": "mt_small_variant_vcf"},
+    "mt_sv_vcf": {"singleton": "mt_sv_vcf", "upstream": "mt_sv_vcf"},
+    "mt_haplotypes_vcf": {"singleton": "mt_haplotypes_vcf", "upstream": "mt_haplotypes_vcf"},
+    "mt_summary": {"singleton": "mt_summary", "upstream": "mt_summary"},
+    "mt_haplogroups": {"singleton": "mt_haplogroups", "upstream": "mt_haplogroups"},
     # the assembly track (arrays such as assembly_stats are read through Sources.paths)
     "assembler_version": {"assembly": "assembler_version"},
     "flagger_summary": {"assembly": "flagger_summary"},
@@ -124,6 +130,7 @@ CITATIONS: list[tuple[str, str]] = [
     ("bcftools / samtools", "https://github.com/samtools/bcftools; Danecek P et al. GigaScience 2021, doi:10.1093/gigascience/giab008"),
     ("Paraphase", "https://github.com/PacificBiosciences/paraphase"),
     ("mitorsaw", "https://github.com/PacificBiosciences/mitorsaw"),
+    ("haplogrep3", "https://github.com/genepi/haplogrep3; Schönherr S et al. Nucleic Acids Res 2023, doi:10.1093/nar/gkad284"),
     ("MethBat", "https://github.com/PacificBiosciences/MethBat"),
     ("StarPhase", "https://github.com/PacificBiosciences/pb-StarPhase"),
     ("kivvi", "https://github.com/PacificBiosciences/kivvi"),
@@ -698,9 +705,23 @@ def build_digest(src: Sources, thr: dict[str, float], y_threshold: float = 0.1) 
                         "methbat": {k: _stat_num(stats, f"methbat_{k}_count") for k in ("methylated", "unmethylated", "asm")},
                         "profile": mb}
 
-    # targeted callers
+    # targeted callers; the mitorsaw block carries the collapsed chrM counts and the haplogroups (0.15.0) when the run has them
+    mitorsaw: dict[str, object] = jsonf("mitorsaw_hap_stats", sp.parse_mitorsaw) or {}
+    mt_summary = text("mt_summary", sp.parse_mt_summary) or {}
+    haplogroups = text("mt_haplogroups", sp.parse_haplogroups) or []
+    if mitorsaw or mt_summary:
+        by_label = {str(h.get("haplotype")): h for h in haplogroups}
+        for h in mitorsaw.get("haplotypes", []) or []:  # type: ignore[union-attr]
+            hg = by_label.get(str(h.get("label")))
+            h["haplogroup"] = (hg or {}).get("haplogroup") or ""
+            h["haplogroup_quality"] = (hg or {}).get("quality")
+        major = str(mt_summary.get("major_haplotype") or "")
+        mitorsaw["collapsed"] = mt_summary
+        mitorsaw["haplogroups"] = haplogroups
+        mitorsaw["haplogroup"] = (by_label.get(major) or {}).get("haplogroup") or "" if major else ""
+        mitorsaw["legacy"] = src.path("mt_summary") is None
     d["targeted"] = {"paraphase": jsonf("paraphase_json", sp.parse_paraphase) or {},
-                     "mitorsaw": jsonf("mitorsaw_hap_stats", sp.parse_mitorsaw) or {},
+                     "mitorsaw": mitorsaw,
                      "starphase": text("pbstarphase_tsv", sp.parse_starphase_tsv) or [],
                      "starphase_meta": jsonf("pbstarphase_json", sp.parse_starphase_json) or {},
                      "kivvi": {k: (jsonf(f"kivvi_{k}_json", sp.parse_kivvi) or {}) for k in ("kiv2", "d4z4")}}
@@ -1281,8 +1302,10 @@ def render_sample(d: dict[str, object], tools: list[dict[str, object]], *, proje
     para_rows = [[r["region"], r.get("genes"), sv.fmt(r.get("depth_median"), 1), sv.fmt(r.get("total_cn")), sv.fmt(r.get("gene_cn")), sv.fmt(r.get("n_haplotypes")),
                   ", ".join(f"{g} {n}" for g, n in (r.get("haplotypes_by_gene") or {}).items()) or "–", ", ".join(r.get("fusions") or []) or "–",  # type: ignore[union-attr]
                   Raw('<span class="flag-warn">failed for coverage</span>') if r.get("failed") else "ok"] for r in para.get("regions", [])]  # type: ignore[union-attr]
-    mito_rows = [[h.get("label"), sv.fmt(h.get("seq_len")), sv.fmt(h.get("num_ref_variants")), sv.fmt(h.get("estimated_abundance"), 3)] for h in mito.get("haplotypes", [])]  # type: ignore[union-attr]
+    mito_rows = [[h.get("label"), sv.fmt(h.get("seq_len")), sv.fmt(h.get("num_ref_variants")), sv.fmt(h.get("estimated_abundance"), 3),
+                  h.get("haplogroup") or "–", sv.fmt(h.get("haplogroup_quality"), 3)] for h in mito.get("haplotypes", [])]  # type: ignore[union-attr]
     fp: dict[str, object] = mito.get("fingerprint", {}) or {}  # type: ignore[assignment]
+    collapsed: dict[str, object] = mito.get("collapsed", {}) or {}  # type: ignore[assignment]
     thr_mito = (d.get("qc", {}) or {}).get("thresholds", {}).get("mito_unexplained_max", DEFAULT_THRESHOLDS["mito_unexplained_max"])  # type: ignore[union-attr]
     star_genes: dict[str, dict[str, object]] = star_meta.get("genes", {}) or {}  # type: ignore[assignment]
     pgx_rows = [[g, v.get("diplotype"), v.get("simple_diplotype"), v.get("hap1"), v.get("hap2"), "yes" if v.get("called") else Raw('<span class="flag-warn">no</span>')]
@@ -1296,9 +1319,15 @@ def render_sample(d: dict[str, object], tools: list[dict[str, object]], *, proje
         + _cards([("regions", sv.fmt(para.get("n_regions"))), ("with a copy number", sv.fmt(para.get("n_with_cn"))), ("failed for coverage", sv.fmt(para.get("n_failed")))])
         + ("<details><summary>per region</summary>" + _table(["region", "genes", "depth median", "total copy number", "gene copy number", "haplotypes", "haplotypes by gene", "fusions", "status"], para_rows) + "</details>" if para_rows else "<p class='muted'>Not available.</p>")
         + "<h3>mitorsaw (mitochondrial haplotypes)</h3>"
-        + (_table(["haplotype", "length", "variants vs reference", "estimated abundance"], mito_rows, cls="") if mito_rows else "<p class='muted'>Not available.</p>")
+        + (_cards([("haplogroup (major haplotype)", mito.get("haplogroup") or ("not run" if mito.get("legacy") else "–")),
+                   ("homoplasmic sites", sv.fmt(collapsed.get("homoplasmic"))), ("heteroplasmic sites", sv.fmt(collapsed.get("heteroplasmic"))),
+                   ("chrM SVs", sv.fmt(collapsed.get("svs"))), ("heteroplasmic VAF max", sv.fmt(collapsed.get("het_vaf_max"), 3))]) if collapsed else "")
+        + (_table(["haplotype", "length", "variants vs reference", "estimated abundance", "haplogroup", "quality"], mito_rows, cls="") if mito_rows else "<p class='muted'>Not available.</p>")
         + (f"<p class='small muted'>fingerprint explanation passing: {_esc(fp.get('passing_explanation'))}; unexplained fraction "
            f"{sv.fmt(fp.get('unexplained_fraction'), 4)} (warns above {sv.fmt(thr_mito, 3)})</p>" if fp else "")
+        + ("<p class='small muted'>The collapsed chrM call set (0/0, 0/1 heteroplasmic, 1/1 homoplasmic; VAF the read fraction) is what cohort_merge merges "
+           "and cohort_freq counts; haplogroups by haplogrep3 per haplotype.</p>" if collapsed else
+           "<p class='small muted'>This run predates the collapsed chrM set (0.15); cohort_merge collapses and classifies it when the cohort is merged.</p>")
         + "<h3>StarPhase (pharmacogenomic diplotypes)</h3>"
         + (f"<p class='small muted'>StarPhase {_esc(star_meta.get('version') or '')}; database: " + _esc(", ".join(f"{k} {v}" for k, v in sorted(db_meta.items()))) + "</p>" if star_meta else "")  # type: ignore[union-attr]
         + (_table(["gene", "diplotype", "core alleles", "haplotype 1", "haplotype 2", "called"], pgx_rows) if pgx_rows
@@ -1430,8 +1459,8 @@ def run(cfg: Config, db: DB, code: CodeInfo, *, sample_ids: list[str] | None, co
         jobs: int = 1, pass_list: Path | None = None, pass_on: str = "assembly") -> list[Path]:
     """Write the per-sample reports (and the cohort report when asked); returns the report paths written. With
     pass_list, also the IDs that pass `pass_on`, in the sample sheet's order, one per line: `assembly` (an assembly
-    without a QC fail), `identity` (no identity failure in the cohort's cohort_qc run and no related or duplicate
-    partner earlier in the sheet; needs --cohort), `all` (both)."""
+    without a QC fail), `identity` (no identity failure in the cohort's cohort_qc run and no undeclared relative or
+    duplicate earlier in the sheet; a pair the sheet declares stays; needs --cohort), `all` (both)."""
     thr = thresholds or dict(DEFAULT_THRESHOLDS)
     if pass_on not in PASS_ON:
         raise UgcError(f"--pass-on must be one of {', '.join(PASS_ON)}, not {pass_on!r}")
@@ -1499,7 +1528,7 @@ def run(cfg: Config, db: DB, code: CodeInfo, *, sample_ids: list[str] | None, co
             passed, excluded = identity_pass(cdigest, sheet_order)
             for sid, why in excluded:
                 diag(f"pass list: {sid} excluded: {why}")
-            what = "pass the identity checks (no failure, no related or duplicate partner earlier in the sheet)"
+            what = "pass the identity checks (no failure, no undeclared relative or duplicate earlier in the sheet)"
             if pass_on == "all":
                 passed = [sid for sid in passed if sid in asm_passed]
                 what += " and have an assembly without a QC fail"

@@ -49,7 +49,16 @@ workflow ugc_wgw_singleton {
       description: "Mean chrX depth somalier must have seen before its sex call is used"
     }
     ugc_wgw_container_registry: {
-      description: "Registry holding the ugc-built images (somalier)"
+      description: "Registry holding the ugc-built images (somalier, haplogrep3)"
+    }
+    mito_sv_min_size: {
+      description: "Allele-length difference (bp) from which a mitorsaw record is an SV in the collapsed chrM call sets (nallo's 50)"
+    }
+    haplogrep_tree: {
+      description: "haplogrep3 tree for the mitochondrial haplogroups: phylotree-fu-rcrs@1.3 (PhyloTree 17 forensic update) or phylotree-rcrs@17.3"
+    }
+    run_haplogrep: {
+      description: "Classify each mitorsaw haplotype with haplogrep3"
     }
     use_parabricks_deepvariant: {
       description: "Use Parabricks DeepVariant"
@@ -93,6 +102,9 @@ workflow ugc_wgw_singleton {
     Int somalier_sex_min_x_sites = 50
     Float somalier_sex_min_x_depth = 5.0
     String ugc_wgw_container_registry
+    Int mito_sv_min_size = 50
+    String haplogrep_tree = "phylotree-fu-rcrs@1.3"
+    Boolean run_haplogrep = true
 
     # Backend configuration
     String backend = "HPC"
@@ -167,6 +179,9 @@ workflow ugc_wgw_singleton {
     somalier_sex_min_x_sites = somalier_sex_min_x_sites,
     somalier_sex_min_x_depth = somalier_sex_min_x_depth,
     ugc_wgw_container_registry = ugc_wgw_container_registry,
+    mito_sv_min_size = mito_sv_min_size,
+    haplogrep_tree = haplogrep_tree,
+    run_haplogrep = run_haplogrep,
     default_runtime_attributes = default_runtime_attributes
   }
 
@@ -394,6 +409,18 @@ workflow ugc_wgw_singleton {
     String somalier_sex = upstream.somalier_sex
     File somalier_extract = upstream.somalier_extract
     File somalier_sex_tsv = upstream.somalier_sex_tsv
+
+    # mitorsaw's chrM calls collapsed to diploid, and the haplogroups
+    File mt_small_variant_vcf = upstream.mt_small_variant_vcf
+    File mt_small_variant_vcf_index = upstream.mt_small_variant_vcf_index
+    File mt_sv_vcf = upstream.mt_sv_vcf
+    File mt_sv_vcf_index = upstream.mt_sv_vcf_index
+    File mt_haplotypes_vcf = upstream.mt_haplotypes_vcf
+    File mt_haplotypes_vcf_index = upstream.mt_haplotypes_vcf_index
+    File mt_haplotypes_tsv = upstream.mt_haplotypes_tsv
+    File mt_summary = upstream.mt_summary
+    File? mt_haplogroups = upstream.mt_haplogroups
+    String? mt_haplogroup = upstream.mt_haplogroup
 
     # phasing stats
     File phase_stats = downstream.phase_stats

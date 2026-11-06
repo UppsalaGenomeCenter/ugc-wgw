@@ -1,0 +1,5 @@
+#!/bin/bash
+# haplogrep3 wrapper (containers/haplogrep3): the shipped launcher word-splits its arguments and fixes the heap
+# at 10 GB; this one passes the arguments through quoted and sizes the heap from HAPLOGREP3_XMX (default 1500m,
+# enough for a few thousand chrM profiles). The trees live next to the jar (/opt/haplogrep3/trees).
+exec java -Xmx"${HAPLOGREP3_XMX:-1500m}" -jar /opt/haplogrep3/haplogrep3.jar "$@"

@@ -383,9 +383,38 @@ def _qc_pairs(members: list[str], *, related_only: bool, pedigree: dict[str, set
     return header + "".join(rows)
 
 
+MT_HEADER = ('##fileformat=VCFv4.2\n##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">\n'
+             '##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Read depth">\n##FORMAT=<ID=AD,Number=R,Type=Integer,Description="Read depth for each allele">\n'
+             '##FORMAT=<ID=VAF,Number=A,Type=Float,Description="Variant allele fractions.">\n##contig=<ID=chrM,length=16569>\n'
+             '##mitorsaw_version="0.2.13-49bcf18"\n##ugc_wgw_mito_collapse_rule=every haplotype reference -> 0/0; every haplotype alternate -> a/a; mixed -> 0/a (heteroplasmic)\n'
+             '##ugc_wgw_mito_haplotypes=2\n##ugc_wgw_mito_abundances=hap_0:0.9700,hap_1:0.0300\n##ugc_wgw_mito_sv_min_size=50\n')
+MT_SITES = ((263, "A", "G"), (152, "T", "C"), (750, "A", "G"))   # 152 is the heteroplasmic one
+
+
+def _mt_vcf(samples: list[str], het_for: set[str]) -> str:
+    """A collapsed chrM VCF: 263 and 750 homoplasmic in every sample, 152 heteroplasmic (0/1, VAF 0.4) for `het_for`, 0/0 otherwise."""
+    rows = []
+    for pos, ref, alt in MT_SITES:
+        cols = []
+        for s in samples:
+            if pos != 152:
+                cols.append("1/1:6500:0,6490:1")
+            elif s in het_for:
+                cols.append("0/1:4057:2370,1672:0.4136")
+            else:
+                cols.append("0/0:4000:4000,0:0")
+        rows.append(f"chrM\t{pos}\t.\t{ref}\t{alt}\t.\t.\t.\tGT:DP:AD:VAF\t" + "\t".join(cols))
+    return MT_HEADER + "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t" + "\t".join(samples) + "\n" + "".join(r + "\n" for r in rows)
+
+
+def _mt_haplogroups(haplogroup: str) -> list[str]:
+    return [f"hap_0\t0.9700\t{haplogroup}\t1.0000\t1-16569\t263G 750G\t", f"hap_1\t0.0300\t{haplogroup}\t0.9500\t1-16569\t263G 750G\t152C (localPrivateMutation)"]
+
+
 def fixture_bytes(name: str, sid: str, stage: str, inferred_sex: str = "", index: int = 0,
                   members: list[str] | None = None, pedigree: dict[str, set[str]] | None = None,
-                  sex: dict[str, str] | None = None) -> bytes | None:
+                  sex: dict[str, str] | None = None, legacy: list[str] | None = None, mt: bool = False,
+                  haplogroup: str = "H5a7") -> bytes | None:
     """The content of output `name` for sample/cohort `sid`, or None for outputs that stay placeholders. `pedigree`
     (child -> parents in the cohort) shapes cohort_qc's expectations; `sex` (declared, coverage, somalier, resolved,
     source) the sex resolution table of a per-sample run."""
@@ -408,6 +437,30 @@ def fixture_bytes(name: str, sid: str, stage: str, inferred_sex: str = "", index
         text = BCFTOOLS_STATS.replace("{sid}", sid)
     elif name == "bcftools_roh_out":
         text = ROH_OUT.replace("{sid}", sid)
+    elif name == "mt_small_variant_vcf":
+        text = _mt_vcf([sid], {sid})
+    elif name == "mt_sv_vcf":
+        text = _mt_vcf([sid], set()).split("#CHROM")[0] + "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t" + sid + "\n"
+    elif name == "mt_haplotypes_vcf":
+        text = (MT_HEADER + f"#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t{sid}.hap_0\t{sid}.hap_1\n"
+                + "".join(f"chrM\t{pos}\t.\t{ref}\t{alt}\t.\t.\t.\tGT\t{'0' if pos == 152 else '1'}\t1\n" for pos, ref, alt in MT_SITES))
+    elif name == "mt_haplotypes_tsv":
+        text = "haplotype\tabundance\tn_variants\nhap_0\t0.9700\t2\nhap_1\t0.0300\t3\n"
+    elif name == "mt_summary":
+        text = ("sample_id\tvcf_sample\thaplotypes\trecords\thomoplasmic\theteroplasmic\tsvs\thet_vaf_mean\thet_vaf_max\tmajor_haplotype\tmajor_abundance\n"
+                f"{sid}\t{sid}\t2\t3\t2\t1\t0\t0.4136\t0.4136\thap_0\t0.9700\n")
+    elif name == "mt_haplogroups":
+        text = "haplotype\tabundance\thaplogroup\tquality\trange\tfound_polys\tremaining_polys\n" + "".join(r + "\n" for r in _mt_haplogroups(haplogroup))
+    elif name == "cohort_mt_small_variant_vcf":
+        ms = members or []
+        text = _mt_vcf(ms, {m for i, m in enumerate(ms) if i % 2 == 0})
+    elif name == "cohort_mt_sv_vcf":
+        ms = members or []
+        text = _mt_vcf(ms, set()).split("#CHROM")[0] + "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t" + "\t".join(ms) + "\n"
+    elif name == "cohort_mt_haplogroups":
+        ms = members or []
+        text = ("sample_id\thaplotype\tabundance\thaplogroup\tquality\trange\tfound_polys\tremaining_polys\tmade_in_stage\n"
+                + "".join(f"{m}\t{r}\t{'yes' if m in (legacy or []) else 'no'}\n" for m in ms for r in _mt_haplogroups("K1a1b1a" if m in (legacy or []) else haplogroup)))
     elif name in ("phased_sv_vcf", "sv_vcf"):
         text = SV_VCF.replace("{samples}", sid).replace("{gts}", "0/1")
     elif name == "cohort_sv_vcf":
@@ -443,14 +496,22 @@ def fixture_bytes(name: str, sid: str, stage: str, inferred_sex: str = "", index
         ms = members or []
         tpl = PANGENOME_FREQ_SUMMARY if stage == "cohort_pangenome" else FREQ_SUMMARY
         text = tpl.replace("{n}", str(len(ms))).replace("{xx}", str(len(ms) // 2)).replace("{xy}", str(len(ms) - len(ms) // 2))
+        if mt and stage == "cohort_freq":
+            text += f"samples\tn_in_vcf\tmt_small_variants\t{len(ms)}\n" + "".join(
+                f"mt_small_variants\t{m}\t{k}\t{val}\n" for m, k, val in (("records", "total", 3), ("records_by_type", "SNP", 3), ("records_by_contig_class", "chrM", 3),
+                                                               ("records_by_filter", "PASS", 3), ("records", "ac_gt0", 3), ("records", "singletons", 0),
+                                                               ("records_by_af_bin", "<0.001", 0), ("records_by_af_bin", "<0.01", 0), ("records_by_af_bin", "<0.05", 0),
+                                                               ("records_by_af_bin", ">=0.05", 3), ("records_ac_gt0_in", "XX", 0), ("records_ac_gt0_in", "XY", 0),
+                                                               ("mean_call_rate", "all", "1.0000"), ("records", "call_rate_below_0.9", 0)))
+            text += "mt_svs\trecords\ttotal\t0\nmt_svs\trecords\tac_gt0\t0\nmt_svs\trecords\tsingletons\t0\nmt_svs\tmean_call_rate\tall\tNA\nmt_svs\trecords\tcall_rate_below_0.9\t0\n"
     elif name == "freq_samples" and stage == "cohort_pangenome":
         ms = members or []
         text = "sample_id\tgroup\tsex_source\tin_pangenome_vcf\n" + "".join(
             f"{m}\t{'XX' if i % 2 else 'XY'}\tkaryotype\tyes\n" for i, m in enumerate(ms))
     elif name == "freq_samples":
         ms = members or []
-        text = "sample_id\tgroup\tsex_source\tin_small_variant_vcf\tin_sv_vcf\n" + "".join(
-            f"{m}\t{'XX' if i % 2 else 'XY'}\tdeclared\tyes\tyes\n" for i, m in enumerate(ms))
+        text = "sample_id\tgroup\tsex_source\tin_small_variant_vcf\tin_sv_vcf\tin_mt_vcf\n" + "".join(
+            f"{m}\t{'XX' if i % 2 else 'XY'}\tdeclared\tyes\tyes\t{'yes' if mt else 'none'}\n" for i, m in enumerate(ms))
     elif name == "somalier_sex_tsv":
         sx = sex or {"declared": inferred_sex, "coverage": inferred_sex, "somalier": "", "resolved": inferred_sex, "source": "declared" if inferred_sex else "none"}
         som = sx.get("somalier") or ""

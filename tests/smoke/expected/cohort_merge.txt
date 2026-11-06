@@ -5,4 +5,8 @@ cohort_sv_vcf_index/*.merged.*.structural_variants.vcf.gz.tbi
 cohort_trgt_vcf/*.merged.*.trgt.vcf.gz
 cohort_trgt_vcf_index/*.merged.*.trgt.vcf.gz.tbi
 cohort_trgt_lps/*.merged.*.trgt.lps.tsv
+# 0.15.0: the members' collapsed mitochondrial sets merged (the driver sets merge_mitochondria) and the haplogroups
+cohort_mt_small_variant_vcf/*.merged.*.mt_small_variants.vcf.gz
+cohort_mt_sv_vcf/*.merged.*.mt_svs.vcf.gz
+cohort_mt_haplogroups/*.merged.*.mt_haplogroups.tsv
 ugc_wgw_manifest/*.cohort_merge.ugc_wgw_manifest.json

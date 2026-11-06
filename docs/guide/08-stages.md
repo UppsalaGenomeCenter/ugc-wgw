@@ -126,6 +126,26 @@ recomputes only where the resolved sex differs from what coverage said.
 `declared_sex` (the sheet's, filled by the driver), `somalier_sex_min_x_sites`
 (50) and `somalier_sex_min_x_depth` (5.0) are the inputs.
 
+Since 0.15 both per-sample stages also turn mitorsaw's chrM calls into a
+call set the cohort can use. mitorsaw writes one genotype entry per
+mitochondrial haplotype it detects (`0|1|1|1` for four haplotypes), which
+nothing downstream can merge or count. `ugc_wgw_mito_collapse` rewrites it
+as a diploid genotype by the rule nallo uses: every haplotype reference
+`0/0`, every haplotype alternate `1/1` (homoplasmic), a mix `0/1`
+(heteroplasmic); the read fraction of the allele is mitorsaw's own `VAF`.
+It splits small variants from SVs at `mito_sv_min_size` (50 bp), writes a
+VCF with one haploid column per haplotype, and a one-row summary. With
+`run_haplogrep` (default true) `ugc_wgw_haplogrep` classifies every
+haplotype against a phylogenetic tree (`haplogrep_tree`, default
+`phylotree-fu-rcrs@1.3`, the forensic update of PhyloTree 17;
+`phylotree-rcrs@17.3` is in the image too) and names the sample by its most
+abundant haplotype. Outputs `mt_small_variant_vcf`, `mt_sv_vcf`,
+`mt_haplotypes_vcf`, `mt_haplotypes_tsv`, `mt_summary`, `mt_haplogroups`
+and the string `mt_haplogroup`. Both tasks hang off mitorsaw, so a re-run
+of an older sample replays everything else from the call cache. On
+chr20-only data (the smoke) mitorsaw sees no chrM read: the files are
+empty but valid and the haplogroup is empty.
+
 ## `cohort_qc`
 
 The identity check of a frozen cohort, first of the cohort stages in both
@@ -219,7 +239,12 @@ and each GLnexus shard reads only its slices.
 
 | Driver fills | You may override |
 |---|---|
-| `cohort_id`, `sample_ids`, `gvcfs`, `gvcf_indices`; with `run_sawfish_joint_call`: `discover_tars`, `aligned_bams`, `aligned_bam_indices` | `split_keep_homref` (true), `run_sawfish_joint_call` (false), `glnexus_threads` (32), `glnexus_mem_gb` (32 + 0.1 N), `split_mem_gb` (8 + 0.02 N), `scatter_regions_file` |
+| `cohort_id`, `sample_ids`, `gvcfs`, `gvcf_indices`; with `run_sawfish_joint_call`: `discover_tars`, `aligned_bams`, `aligned_bam_indices` | `split_keep_homref` (true), `run_sawfish_joint_call` (false), `glnexus_threads` (32), `glnexus_mem_gb` (32 + 0.1 N), `split_mem_gb` (8 + 0.02 N), `scatter_regions_file`, `skip_contigs` (`["chrM"]`) |
+
+GLnexus skips the `chrM` shard (`skip_contigs`): the cohort's mitochondrial
+genotypes come from mitorsaw through `cohort_merge`, not from DeepVariant's
+diploid calls on a genome that is not diploid, so the cohort small-variant
+VCF carries no chrM record since 0.15.
 
 Resources per shard: GLnexus `glnexus_threads` CPUs and `glnexus_mem_gb` GB,
 which is also its `--mem-gbytes` budget; the database lives on the node's
@@ -307,10 +332,22 @@ concatenated with the per-contig results.
 
 | Driver fills | You may override |
 |---|---|
-| `cohort_id`, `sample_ids`, `sv_vcfs`, `trgt_vcfs` (+ indices; from `singleton` in standalone, from `downstream` in joint), `gvcfs` when `run_glnexus`, `phased_small_variant_vcfs` when `merge_phased_small_variants`, `ugc_wgw_container_registry` | `sv_merge_method` (`svx`), `svx_threads` (8), `svx_min_supp` (1), `svx_mem_gb` (8 + 0.05 N), `trgt_merge_threads` (2), `trgt_merge_mem_gb` (8 + 0.02 N), `trgt_lps_threads` (8), `run_glnexus` (true in standalone, false in joint), `glnexus_threads` (32), `glnexus_mem_gb` (32 + 0.1 N), `merge_phased_small_variants` (false), `bcftools_merge_mem_gb` (8 + 0.02 N) |
+| `cohort_id`, `sample_ids`, `sv_vcfs`, `trgt_vcfs` (+ indices; from `singleton` in standalone, from `downstream` in joint), `gvcfs` when `run_glnexus`, `phased_small_variant_vcfs` when `merge_phased_small_variants`, `merge_mitochondria` with each member's `mt_small_variant_vcfs`, `mt_sv_vcfs`, `mt_haplogroups` (+ indices) or, for a member whose run predates 0.15, null plus its `mitorsaw_vcfs` and `mitorsaw_hap_stats`, `ugc_wgw_container_registry` | `sv_merge_method` (`svx`), `svx_threads` (8), `svx_min_supp` (1), `svx_mem_gb` (8 + 0.05 N), `trgt_merge_threads` (2), `trgt_merge_mem_gb` (8 + 0.02 N), `trgt_lps_threads` (8), `run_glnexus` (true in standalone, false in joint), `glnexus_threads` (32), `glnexus_mem_gb` (32 + 0.1 N), `merge_phased_small_variants` (false), `bcftools_merge_mem_gb` (8 + 0.02 N), `merge_mitochondria` (true when any member brings something; false leaves the branch out), `mito_sv_min_size` (50), `haplogrep_tree`, `run_haplogrep` (true), `skip_contigs` (`["chrM"]`, the GLnexus scatter only) |
 
 Outputs: `<cohort_id>.merged.GRCh38_GIABv3.` SV VCF, TRGT VCF, trgt-lps TSV,
-optional phased small-variant VCF and GLnexus VCF (chapter 07).
+optional phased small-variant VCF and GLnexus VCF, and the mitochondrial
+sets (chapter 07).
+
+Since 0.15 the stage also merges the members' collapsed mitochondrial call
+sets (`bcftools merge` over one contig, no scatter): `…mt_small_variants.vcf.gz`
+and `…mt_svs.vcf.gz`, where `0/0` means mitorsaw reported no alternate
+allele for that member at the site, and `…mt_haplogroups.tsv`, every
+member's haplogroups in one table. A member whose per-sample run predates
+the collapse (the 864) is collapsed and classified inside the stage from
+its mitorsaw VCF and JSON (seconds each; the driver names them once), so
+an existing cohort gets its mitochondrial sets without any per-sample
+re-run (chapter 10). The GLnexus branch takes its own shard list without
+chrM; the SV and TRGT merges keep every shard.
 
 ### Scatter regions
 
@@ -369,11 +406,12 @@ VCF; `bcftools concat` of each; `ugc_wgw_freq_summary`; the manifest.
 
 | Driver fills | You may override |
 |---|---|
-| `cohort_id`, `sample_ids`, `sample_sexes` and `sample_sex_sources` (the sex each member's run resolved and where it came from: `declared`, `coverage` or `somalier`; for a run from before 0.14 the sheet, else the coverage inference), `sv_vcf` (+ index; from `cohort_merge`), `small_variant_vcf` (+ index; from `cohort_call` in joint mode, from `cohort_merge` with `run_glnexus` in standalone mode; absent otherwise) | `freq_threads` (2), `freq_mem_gb` (4) |
+| `cohort_id`, `sample_ids`, `sample_sexes` and `sample_sex_sources` (the sex each member's run resolved and where it came from: `declared`, `coverage` or `somalier`; for a run from before 0.14 the sheet, else the coverage inference), `sv_vcf` (+ index; from `cohort_merge`), `small_variant_vcf` (+ index; from `cohort_call` in joint mode, from `cohort_merge` with `run_glnexus` in standalone mode; absent otherwise), `mt_small_variant_vcf` and `mt_sv_vcf` (+ indices; from `cohort_merge` when it merged the mitochondrial sets) | `freq_threads` (2), `freq_mem_gb` (4), `mt_contig` (`chrM`), `mt_length` (16569) |
 
 Outputs: `<cohort_id>.freq.GRCh38.` small-variant VCF (only with a joint
-VCF), SV VCF, summary TSV, samples TSV (chapter 07). Resources are small:
-every task streams one record at a time; the smoke cohort takes ten seconds.
+VCF), SV VCF, the two mitochondrial VCFs (when `cohort_merge` made the
+sets), summary TSV, samples TSV (chapter 07). Resources are small: every
+task streams one record at a time; the smoke cohort takes ten seconds.
 
 ### Reading the counts
 
@@ -398,6 +436,14 @@ every task streams one record at a time; the smoke cohort takes ten seconds.
 - Sex chromosomes: upstream calls every contig diploid, so an XY sample's
   hemizygous ALT on chrX appears as `AC_Hom_XY` and `AN_XY` is two per XY
   sample there.
+- Mitochondria (`…mt_small_variants.vcf.gz`, `…mt_svs.vcf.gz`): the counts
+  come from mitorsaw's collapsed genotypes, not from the joint VCF, which
+  carries no chrM. `0/1` means heteroplasmic (some haplotypes carry the
+  allele), `1/1` homoplasmic, so `AC_Het` and `AC_Hom` count members in
+  each state; a member without the variant in its mitorsaw call set counts
+  as reference; no sex strata (mitochondria are maternal, and a split would
+  only thin the cohort). The per-member read fraction (`VAF`) is in the
+  merged VCF of `cohort_merge`, not in the sites-only frequency file.
 
 The `##ugc_wgw_cohort_freq_*` header lines repeat these conventions in the file
 itself, with the cohort, version and source file names.

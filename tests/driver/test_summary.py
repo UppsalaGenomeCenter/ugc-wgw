@@ -1102,7 +1102,7 @@ class SummaryEndToEnd(unittest.TestCase):
         self.assertEqual(cd["distributions"]["mito_unexplained"]["threshold"], 0.02)
         self.assertEqual([r["id"] for r in cd["members"]], ["S1", "S2"])
         self.assertEqual(cd["missing_members"], [])
-        self.assertEqual(set(cd["runs"]), {"cohort_qc", "cohort_merge", "cohort_freq"})
+        self.assertEqual(set(cd["runs"]), {"cohort_qc", "cohort_merge", "cohort_freq", "cohort_methyl"})
         # identity: cohort_qc's tables read, no flag for two unrelated members without a pedigree; the section and the member pages
         self.assertTrue(cd["identity"]["available"])
         self.assertEqual((cd["identity"]["counts"], cd["identity"]["n_fail"]), ({}, 0))
@@ -1254,3 +1254,100 @@ class SummaryEndToEnd(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MethylationTest(unittest.TestCase):
+    """cohort_methyl's tables and the per-sample methbat report -> parsers, the digest's methylation block and flag, the
+    cohort page's Methylation section and the methyl_outlier flag (bin/ugc_wgw/summary.py, summary_cohort.py)."""
+
+    def test_parsers(self):
+        from fixtures import fixture_bytes
+        rep = sp.parse_methbat_report(fixture_bytes("methbat_report", "S1", "singleton", imprinting="anomalous").decode().splitlines())
+        self.assertEqual((rep["n"], rep["pass"], rep["inconclusive"], rep["anomalous"], rep["anomalous_qc"]), (3, 2, 0, 1, 0))
+        self.assertEqual(rep["anomalous_regions"], ["MEG3:TSS-DMRb"])
+        self.assertEqual(rep["regions"][0]["region"], "PLAGL1:alt-TSS-DMR")
+        self.assertAlmostEqual(rep["regions"][0]["combined"], 46.0)
+        plain = sp.parse_methbat_report(fixture_bytes("methbat_report", "S1", "singleton").decode().splitlines())
+        self.assertEqual((plain["inconclusive"], plain["anomalous"], plain["anomalous_regions"]), (1, 0, []))
+        summ = sp.parse_methyl_summary(fixture_bytes("methyl_summary", "C1", "cohort_methyl", members=["A", "B", "C"], legacy=["C"], labels=["XX", "XY", ""]).decode().splitlines())
+        self.assertEqual(summ["cohort"]["n_members"][""], 3)
+        self.assertEqual(summ["labels"]["n_members"]["XX"], 1)
+        self.assertIn("XX", summ["notes"]["label_below_min"])
+        self.assertEqual(summ["genes"]["members_with_event"]["GENEA"], 2)
+        samples = sp.parse_methyl_samples(fixture_bytes("methyl_samples", "C1", "cohort_methyl", members=["A", "B", "C"], legacy=["C"], labels=["XX", "XY", ""]).decode().splitlines())
+        self.assertEqual([(r["sample_id"], r["n_events"], r["report_source"]) for r in samples], [("A", 0, "run"), ("B", 1, "run"), ("C", 1, "stage")])
+        self.assertEqual(samples[2]["imprinting_anomalous"], 1)
+        regions = sp.parse_methyl_regions(fixture_bytes("methyl_regions", "C1", "cohort_methyl", members=["A", "B", "C"]).decode().splitlines(), top=2)
+        self.assertEqual(regions["n_regions"], 4)
+        self.assertEqual([(r["region"], r["events"], r["gene_symbol"]) for r in regions["top"]], [("CpG:_1", 2, "GENEA;GENEB")])
+        self.assertEqual(regions["totals"]["ALL"], {"regions": 4, "events": 2, "regions_with_event": 1})
+        events = sp.parse_methyl_events(fixture_bytes("methyl_events", "C1", "cohort_methyl", members=["A", "B", "C"]).decode().splitlines(), genes=["hgnc:2"])
+        self.assertEqual((events["n"], events["n_members"], len(events["rows"])), (2, 2, 2))
+        self.assertEqual(events["rows"][0]["sample_id"], "B")
+        none = sp.parse_methyl_events(fixture_bytes("methyl_events", "C1", "cohort_methyl", members=["A", "B", "C"]).decode().splitlines(), genes=["NOPE"])
+        self.assertEqual((none["n"], len(none["rows"])), (2, 0))
+
+
+class MethylationEndToEnd(unittest.TestCase):
+    """A five-member cohort through the fake with cohort_methyl last: the sample page's imprinting table and flag, the
+    cohort page's Methylation section, the digest's methylation block, the methyl_outlier flag, the export's methyl
+    domain, and a project without the stage's run."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.cfg = make_project(self.tmp, methyl_genes_of_interest=["GENEA"])
+        self.proj = str(self.cfg.project_dir)
+        tsv = write_tsv(self.tmp, [{"sample_id": f"S{i}", "sex": "MALE" if i % 2 else "FEMALE", "hifi_reads": f"s{i}.bam"} for i in range(1, 6)])
+        self.assertEqual(run_cli(["--project", self.proj, "samples", "add", str(tsv)])[0], 0)
+        self.assertEqual(run_cli(["--project", self.proj, "cohort", "freeze", "C1", "--samples", str(write_ids(self.tmp, [f"S{i}" for i in range(1, 6)]))])[0], 0)
+        code, out, err = run_cli(["--project", self.proj, "submit", "--mode", "standalone", "--cohort", "C1"])
+        self.assertEqual(code, 0, err)
+        self.out_dir = self.cfg.results_dir / "reports" / "summary"
+
+    def test_pages_digest_flags_and_export(self):
+        code, out, err = run_cli(["--project", self.proj, "summary", "--cohort", "C1"])
+        self.assertEqual(code, 0, err)
+        d1 = json.loads((self.out_dir / "S1.summary.json").read_text())
+        self.assertEqual(d1["schema"], summary.DIGEST_SCHEMA)
+        imp = d1["methylation"]["imprinting"]
+        self.assertEqual((imp["n"], imp["pass"], imp["inconclusive"], imp["anomalous"]), (3, 2, 1, 0))
+        self.assertNotIn("imprinting_anomalous", {f["code"] for f in d1["qc"]["flags"]})
+        self.assertIn("methbat_report", d1["files"])
+        page1 = (self.out_dir / "S1.summary.html").read_text()
+        self.assertIn("Imprinting regions (methbat report)", page1)
+        self.assertIn("PLAGL1:alt-TSS-DMR", page1)
+        cd = json.loads((self.out_dir / "C1.summary.json").read_text())
+        self.assertTrue(cd["methylation"]["available"])
+        self.assertIn("cohort_methyl", cd["runs"])
+        self.assertEqual(cd["callsets"]["cohort_methyl"]["summary"]["cohort"]["n_members"][""], 5)
+        self.assertEqual(cd["callsets"]["cohort_methyl"]["genes_of_interest"], ["GENEA"])
+        self.assertEqual(cd["callsets"]["cohort_methyl"]["events"]["n"], 4)       # the fixture: every member but the first has one event
+        self.assertEqual(cd["callsets"]["cohort_methyl"]["regions"]["top"][0]["gene_symbol"], "GENEA;GENEB")
+        self.assertEqual({r["id"]: r["methyl_events"] for r in cd["members"]}, {"S1": 0, "S2": 1, "S3": 1, "S4": 1, "S5": 1})
+        self.assertEqual(cd["methylation"]["counts"], {"methyl_outlier": 0})   # 0,1,1,1,1: median 1, MAD 0 -> nobody flagged
+        self.assertIn("methyl_events", cd["distributions"])
+        page = (self.out_dir / "C1.summary.html").read_text()
+        self.assertIn("Methylation (cohort_methyl)", page)
+        self.assertIn("Genes with the most members carrying an event", page)
+        self.assertIn("Events in the genes of interest", page)
+        self.assertIn("Imprinting screen (methbat report)", page)
+        self.assertIn("Group comparisons (methbat compare)", page)
+        self.assertIn("below the minimum", page)
+        # the export's methyl domain copies the stage's tables, the regions table included
+        out_dir = self.tmp / "export"
+        code, out, err = run_cli(["--project", self.proj, "export", "--cohort", "C1", "--out", str(out_dir), "--domains", "methyl"])
+        self.assertEqual(code, 0, err)
+        names = sorted(p.name for p in out_dir.glob("C1.methyl.*"))
+        self.assertEqual(names, ["C1.methyl.background.tsv", "C1.methyl.events.tsv", "C1.methyl.imprinting.tsv", "C1.methyl.regions.tsv",
+                                 "C1.methyl.samples.tsv", "C1.methyl.summary.tsv"])
+
+    def test_anomalous_report_flags_the_sample(self):
+        seed_success(self.cfg, DB(self.cfg.db_path), "singleton", "sample", "S2", {"sample_id": "S2", "inferred_sex": "MALE", "imprinting": "anomalous"}, attempt=3)
+        code, out, err = run_cli(["--project", self.proj, "summary", "--samples", "S2"])
+        self.assertEqual(code, 0, err)
+        d2 = json.loads((self.out_dir / "S2.summary.json").read_text())
+        flags = {f["code"]: f for f in d2["qc"]["flags"]}
+        self.assertIn("imprinting_anomalous", flags)
+        self.assertEqual(flags["imprinting_anomalous"]["severity"], "warn")
+        self.assertIn("MEG3:TSS-DMRb", flags["imprinting_anomalous"]["message"])
+        self.assertEqual(d2["methylation"]["imprinting"]["anomalous_regions"], ["MEG3:TSS-DMRb"])

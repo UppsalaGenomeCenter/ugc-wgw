@@ -54,10 +54,17 @@ def build_parser() -> argparse.ArgumentParser:
                    help="SLURM gres type of the GPU tasks (sbatch --gres gpu:TYPE:N); empty = any GPU (gpu:N)")
     s.add_argument("--parabricks-gpus", type=int, default=None, metavar="N", help="GPUs per Parabricks task (default 4)")
 
+    s = sub.add_parser("upgrade", help="point an existing project at another installed version (code_dir, miniwdl, "
+                                       "miniwdl_cfg, venv_dir and the reference map under it); the database migrates on the "
+                                       "next command; nothing on disk is re-run until submit decides so")
+    s.add_argument("--install", required=True, metavar="DIR", help="the version to move to: <root>/versions/<v> or <root>/current")
+
     s = sub.add_parser("samples", help="register and list samples")
     ss = s.add_subparsers(dest="samples_command", required=True)
     a = ss.add_parser("add", help="register samples from a TSV (sample_id, sex, hifi_reads, fail_reads, father_id, mother_id; "
-                                  "father_id/mother_id drive trio binning in assembly mode)")
+                                  "father_id/mother_id drive trio binning in assembly mode; aligned_bam instead of hifi_reads "
+                                  "registers an aligned BAM as is (its @RG SM must be the sample_id), with small_variant_vcf, sv_vcf and "
+                                  "optionally gvcf a pre-called sample)")
     a.add_argument("tsv")
     a.add_argument("--no-check", action="store_true", help="do not require read paths to exist (nothing is inspected)")
     a.add_argument("--no-inspect", action="store_true",
@@ -77,6 +84,11 @@ def build_parser() -> argparse.ArgumentParser:
                                      "for samples with recorded runs (results on disk are never touched)")
     a.add_argument("sample_ids", nargs="+", metavar="ID")
     a.add_argument("--force", action="store_true", help="also delete the samples' run rows")
+    a = ss.add_parser("rebase", help="register a sample's own earlier aligned BAM (and with --with-vcfs its VCFs) as its inputs, "
+                                     "so later stages reuse them: the entry kind becomes bam or vcf")
+    a.add_argument("sample_id", metavar="ID")
+    a.add_argument("--from-run", required=True, metavar="RUN_ID", help="a successful singleton, upstream or intake run of the sample")
+    a.add_argument("--with-vcfs", action="store_true", help="also take the run's small-variant and SV VCFs (and gVCF): the vcf kind")
     a = ss.add_parser("list", help="list samples with their latest status per stage")
     a.add_argument("--mode", default="standalone", choices=sorted(MODES))
     a.add_argument("--stage", choices=sorted(STAGES))
@@ -101,6 +113,9 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--max-inflight", type=int)
         s.add_argument("--poll-interval", type=float)
         s.add_argument("--any-version", action="store_true", help="accept prerequisite outputs from any ugc-wgw version")
+        s.add_argument("--allow-standalone-members", action="store_true",
+                       help="joint mode: a vcf-kind member without a gVCF is phased from its own VCFs and left out of cohort_call "
+                            "(and so of the joint small-variant VCF) instead of blocking the cohort")
         s.add_argument("--dry-run", action="store_true", help="print inputs and miniwdl command lines, change nothing")
         s.add_argument("--takeover", action="store_true",
                        help="take the project lease from a driver on another host that is known to be dead")
@@ -241,11 +256,31 @@ def _price_args(s: argparse.ArgumentParser) -> None:
 def _open(a: argparse.Namespace) -> tuple[config.Config, DB, Events, str]:
     cfg = config.load(Path(a.project))
     setup_logging(cfg.logs_dir, a.verbose, a.color)
+    version = config.check_engine_paths(cfg)   # this driver's version, one installed version for every engine path
     db = DB(cfg.db_path)
     for v in db.migrated:
         diag(f"migrated {cfg.db_path} to schema {v}")
     events = Events(db, cfg.logs_dir / "events.jsonl")
-    return cfg, db, events, config.read_version(cfg.code_dir)
+    return cfg, db, events, version
+
+
+def cmd_upgrade(a: argparse.Namespace) -> int:
+    cfg = config.load(Path(a.project))
+    setup_logging(cfg.logs_dir, a.verbose, a.color)
+    old, new, changes = config.upgrade_project(cfg, Path(a.install))
+    if not changes:
+        diag(f"{cfg.project_dir} already runs ugc-wgw {new} from {cfg.code_dir}; nothing changed")
+        return 0
+    for key, (before, after) in changes.items():
+        diag(f"{key}: {before} -> {after}")
+    db = DB(cfg.db_path)
+    for v in db.migrated:
+        diag(f"migrated {cfg.db_path} to schema {v}")
+    Events(db, cfg.logs_dir / "events.jsonl").emit("project.upgraded", old_version=old, new_version=new, changed=sorted(changes))
+    db.close()
+    diag(f"{cfg.project_dir}: ugc-wgw {old} -> {new} (the previous config.json is kept as config.json.{old}); "
+         f"submit decides what re-runs, the call cache replays unchanged tasks")
+    return 0
 
 
 def _selection(a: argparse.Namespace) -> Selection:
@@ -254,7 +289,8 @@ def _selection(a: argparse.Namespace) -> Selection:
         samples_sel = list(a.samples)
     elif getattr(a, "samples_file", None):
         samples_sel = cohorts.read_ids(Path(a.samples_file))
-    return Selection(mode=a.mode, stage=getattr(a, "stage", None), samples=samples_sel, cohort=getattr(a, "cohort", None))
+    return Selection(mode=a.mode, stage=getattr(a, "stage", None), samples=samples_sel, cohort=getattr(a, "cohort", None),
+                     allow_standalone_members=bool(getattr(a, "allow_standalone_members", False)))
 
 
 def cmd_init(a: argparse.Namespace) -> int:
@@ -286,6 +322,8 @@ def cmd_init(a: argparse.Namespace) -> int:
         poll_interval=float(pick(a.poll_interval, "poll_interval", 30.0)),  # type: ignore[arg-type]
         assembly_use_parents=False if a.no_assembly_parents else bool(profile.get("assembly_use_parents", True)),
         pangenome_sv_cohort=str(profile.get("pangenome_sv_cohort") or ""),
+        methyl_label_columns=profile.get("methyl_label_columns"),  # type: ignore[arg-type]
+        methyl_genes_of_interest=profile.get("methyl_genes_of_interest"),  # type: ignore[arg-type]
         resource_retry_max=int(profile.get("resource_retry_max", 2)),  # type: ignore[arg-type]
         resource_retry_factor=float(profile.get("resource_retry_factor", 2.0)),  # type: ignore[arg-type]
         learn_resources=bool(profile.get("learn_resources", True)),
@@ -335,6 +373,11 @@ def cmd_samples(a: argparse.Namespace) -> int:
             diag(f"{len(rows)} file(s) of {len({r['sample_id'] for r in rows})} sample(s): {len(problems)} problem(s), "
                  f"{len(warnings)} warning(s)")
             return 1 if problems else 0
+        if a.samples_command == "rebase":
+            rec = samples.rebase_sample(db, events, a.sample_id, a.from_run, with_vcfs=a.with_vcfs)
+            diag(f"{rec.sample_id}: entry kind {rec.entry_kind}; aligned_bam {rec.aligned_bam}"
+                 + (f"; small_variant_vcf {rec.small_variant_vcf}; sv_vcf {rec.sv_vcf}; gvcf {rec.gvcf or 'none'}" if a.with_vcfs else ""))
+            return 0
         if a.samples_command == "remove":
             for r in samples.remove_samples(db, events, list(a.sample_ids), force=a.force, results_dir=cfg.results_dir):
                 diag(f"removed {r['sample_id']} ({r['runs_deleted']} run row(s) deleted; results on disk kept: {r['results_kept']})")
@@ -730,6 +773,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if a.command == "init":
             return cmd_init(a)
+        if a.command == "upgrade":
+            return cmd_upgrade(a)
         if a.command == "samples":
             return cmd_samples(a)
         if a.command == "cohort":

@@ -6,6 +6,8 @@ the entrypoint's declared inputs, because miniwdl rejects unknown keys outright.
 """
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -13,8 +15,8 @@ from .config import Config
 from .db import DB, Cohort, RunRecord, SampleRecord
 from .log import LOGGER
 from .outputs import MissingOutputError, Outputs
-from .stages import declared_calls, declared_inputs, namespace, stage_spec, wdl_path
-from .util import UgcError, sha256_file, write_json
+from .stages import declared_calls, declared_inputs, namespace, sample_stages, stage_spec, wdl_path
+from .util import UgcError, read_json, sha256_file, write_json
 
 
 @dataclass
@@ -28,6 +30,7 @@ class BuildContext:
     cohort: Cohort | None = None
     any_version: bool = False
     member_runs: list[dict[str, object]] = field(default_factory=list)
+    allow_standalone: bool = False   # joint mode: vcf members without a gVCF are left out of cohort_call
 
     def prior(self, stage: str, subject_type: str, subject_id: str) -> tuple[RunRecord, Outputs]:
         run = self.db.latest_success(subject_type, subject_id, stage, None if self.any_version else self.ugc_wgw_version)
@@ -54,6 +57,25 @@ class BuildContext:
         LOGGER.info("%s %s: using %s run %s (ugc-wgw %s)", subject_type, subject_id, stage, run.run_id, run.ugc_wgw_version)
         return outs
 
+    def kind(self, sid: str) -> str:
+        rec = self.db.get_sample(sid)
+        return (rec.entry_kind if rec else None) or "reads"
+
+    def sample_outputs(self, sid: str) -> "MergedOutputs":
+        """The outputs of a member's per-sample runs in this mode, by its entry kind (singleton; upstream and downstream;
+        intake and downstream), the stages that have run so far merged (the first stage with a name wins). Raises
+        MissingOutputError when none of them has run."""
+        stages = sample_stages(self.mode, self.kind(sid))
+        parts: list[Outputs] = []
+        for stage in stages:
+            run = self.db.latest_success("sample", sid, stage, None if self.any_version else self.ugc_wgw_version)
+            if run is None:
+                continue
+            parts.append(self.prior(stage, "sample", sid)[1])
+        if not parts:
+            raise MissingOutputError("sample", sid, stages[0] if stages else "singleton", None, "*")
+        return MergedOutputs(sid, stages, parts)
+
     def sample(self) -> SampleRecord:
         rec = self.db.get_sample(self.subject_id)
         if rec is None:
@@ -67,6 +89,65 @@ class BuildContext:
 
     def ov(self, stage: str, name: str, default: object) -> object:
         return self.cfg.stage_overrides(stage).get(name, default)
+
+
+class MergedOutputs:
+    """The outputs of a member's per-sample stages seen as one: `opt` takes the first stage that has the name."""
+
+    def __init__(self, sample_id: str, stages: tuple[str, ...], parts: list[Outputs]):
+        self.sample_id, self.stages, self.parts = sample_id, stages, parts
+
+    @property
+    def run(self) -> RunRecord:
+        return self.parts[0].run
+
+    def opt(self, name: str) -> object | None:
+        for o in self.parts:
+            v = o.opt(name)
+            if v is not None:
+                return v
+        return None
+
+    def req(self, name: str) -> object:
+        v = self.opt(name)
+        if v is None:
+            raise MissingOutputError("sample", self.sample_id, "/".join(o.run.stage for o in self.parts) or self.stages[0], self.parts[0].run.run_id, name)
+        return v
+
+    def opt_arr(self, name: str) -> list[object] | None:
+        v = self.opt(name)
+        return list(v) if isinstance(v, list) else None
+
+    def arr(self, name: str) -> list[object]:
+        v = self.req(name)
+        return list(v) if isinstance(v, list) else [v]
+
+
+def entry_record(ctx: BuildContext) -> dict[str, object]:
+    """What a sample run's manifest records about its inputs: the entry kind and, for the bam and vcf kinds, every
+    external file with its size, modification time and what registration found (no content checksum: the files are
+    tens of GB; the registered size and mtime identify them, as for reads)."""
+    rec = ctx.sample()
+    files: list[dict[str, object]] = []
+    if rec.entry_kind != "reads":
+        for kind, path in rec.data_inputs():
+            info = rec.input_info.get(path) or {}
+            entry: dict[str, object] = {"role": kind, "path": path}
+            try:
+                st = Path(path).stat()
+                entry["bytes"], entry["mtime"] = st.st_size, st.st_mtime
+            except OSError:
+                entry["bytes"], entry["mtime"] = info.get("bytes"), info.get("mtime")
+            if info:
+                entry["info"] = {k: info.get(k) for k in ("samples", "n_ref", "reads", "reads_exact", "movies", "n_contigs", "fileformat", "sources") if k in info}
+            files.append(entry)
+            idx = getattr(rec, kind + "_index", None)
+            if idx:
+                files.append({"role": kind + "_index", "path": idx})
+    out: dict[str, object] = {"kind": rec.entry_kind, "inputs": files}
+    if rec.meta.get("rebase"):
+        out["rebase"] = rec.meta["rebase"]
+    return out
 
 
 def common_inputs(ctx: BuildContext) -> dict[str, object]:
@@ -85,6 +166,14 @@ def _sample_reads(ctx: BuildContext) -> dict[str, object]:
         "hifi_reads": list(rec.hifi_reads),
         "fail_reads": list(rec.fail_reads) or None,
     }
+
+
+def _entry_bam(ctx: BuildContext) -> dict[str, object]:
+    """The bam entry kind's inputs of upstream: the aligned BAM in place of reads (hifi_reads stays an empty array)."""
+    rec = ctx.sample()
+    if rec.entry_kind != "bam":
+        return {}
+    return {"aligned_bam_in": rec.aligned_bam, "aligned_bam_in_index": rec.aligned_bam_index}
 
 
 # Parabricks' task hard-codes four GPUs (`Int gpuCount = 4` in parabricks_deepvariant.wdl) and no workflow
@@ -128,6 +217,10 @@ def _sex_inputs(ctx: BuildContext) -> dict[str, object]:
 
 
 def build_singleton(ctx: BuildContext) -> dict[str, object]:
+    rec = ctx.sample()
+    if rec.entry_kind != "reads":
+        raise UgcError(f"singleton is for samples registered from reads; {rec.sample_id} is the {rec.entry_kind} kind "
+                       f"(its standalone stages: {' -> '.join(sample_stages('standalone', rec.entry_kind))})")
     doc = common_inputs(ctx)
     doc.update(_sample_reads(ctx))
     doc.update(_deepvariant_inputs(ctx))
@@ -136,9 +229,28 @@ def build_singleton(ctx: BuildContext) -> dict[str, object]:
 
 
 def build_upstream(ctx: BuildContext) -> dict[str, object]:
+    rec = ctx.sample()
+    if rec.entry_kind == "vcf":
+        raise UgcError(f"{rec.sample_id} is the vcf kind: its calls are given, so intake runs in place of upstream")
     doc = common_inputs(ctx)
     doc.update(_sample_reads(ctx))
+    doc.update(_entry_bam(ctx))
     doc.update(_deepvariant_inputs(ctx))
+    doc.update(_sex_inputs(ctx))
+    return doc
+
+
+def build_intake(ctx: BuildContext) -> dict[str, object]:
+    """The vcf entry kind: the sheet's aligned BAM and VCFs (indices resolved at registration), the declared sex."""
+    rec = ctx.sample()
+    if rec.entry_kind != "vcf":
+        raise UgcError(f"intake is for samples registered with VCFs (the vcf kind); {rec.sample_id} is the {rec.entry_kind} kind")
+    doc = common_inputs(ctx)
+    doc["sample_id"] = rec.sample_id
+    doc["aligned_bam"], doc["aligned_bam_index"] = rec.aligned_bam, rec.aligned_bam_index
+    doc["small_variant_vcf_in"], doc["small_variant_vcf_in_index"] = rec.small_variant_vcf, rec.small_variant_vcf_index
+    doc["sv_vcf_in"], doc["sv_vcf_in_index"] = rec.sv_vcf, rec.sv_vcf_index
+    doc["gvcf_in"], doc["gvcf_in_index"] = rec.gvcf, rec.gvcf_index
     doc.update(_sex_inputs(ctx))
     return doc
 
@@ -150,14 +262,32 @@ def build_cohort_call(ctx: BuildContext) -> dict[str, object]:
     doc["sample_ids"] = members
     gvcfs, gvcf_indices, discover, bams, bais = [], [], [], [], []
     joint_sv = bool(ctx.ov("cohort_call", "run_sawfish_joint_call", False))
+    kept: list[str] = []
+    left_out: list[str] = []
     for sid in members:
-        _, outs = ctx.prior("upstream", "sample", sid)
-        gvcfs.append(outs.req("small_variant_gvcf"))
+        outs = ctx.sample_outputs(sid)
+        gvcf = outs.opt("small_variant_gvcf")
+        if gvcf is None and ctx.kind(sid) == "vcf":
+            if not ctx.allow_standalone:
+                raise UgcError(f"cohort_call {ctx.subject_id}: member {sid} (vcf kind) has no gVCF; register its gvcf column or submit with "
+                               "--allow-standalone-members")
+            left_out.append(sid)
+            continue
+        kept.append(sid)
+        gvcfs.append(gvcf if gvcf is not None else outs.req("small_variant_gvcf"))
         gvcf_indices.append(outs.req("small_variant_gvcf_index"))
         if joint_sv:
-            discover.append(outs.req("discover_tar"))
+            tar = outs.opt("discover_tar")
+            if tar is None:
+                raise UgcError(f"cohort_call {ctx.subject_id}: run_sawfish_joint_call needs every member's sawfish discover output; "
+                               f"{sid} ({ctx.kind(sid)} kind) has none")
+            discover.append(tar)
             bams.append(outs.req("aligned_hifi_reads"))
             bais.append(outs.req("aligned_hifi_reads_index"))
+    if left_out:
+        LOGGER.warning("cohort_call %s: %d vcf member(s) without a gVCF left out of the joint call (--allow-standalone-members): %s",
+                       ctx.subject_id, len(left_out), ", ".join(left_out[:5]) + (" ..." if len(left_out) > 5 else ""))
+        doc["sample_ids"] = kept
     doc["gvcfs"] = gvcfs
     doc["gvcf_indices"] = gvcf_indices
     if joint_sv:
@@ -172,7 +302,8 @@ def build_downstream(ctx: BuildContext) -> dict[str, object]:
     doc = common_inputs(ctx)
     sid = ctx.subject_id
     doc["sample_id"] = sid
-    _, up = ctx.prior("upstream", "sample", sid)
+    head_stage = "intake" if ctx.kind(sid) == "vcf" else "upstream"
+    _, up = ctx.prior(head_stage, "sample", sid)
     sex = up.opt("resolved_sex")
     if sex is None:   # an upstream run from before 0.14.0: mosdepth's inference is all there is
         sex = up.req("inferred_sex")
@@ -189,15 +320,23 @@ def build_downstream(ctx: BuildContext) -> dict[str, object]:
             raise UgcError("downstream in joint mode needs --cohort (the cohort_call context)")
         if sid not in ctx.cohort.members:
             raise UgcError(f"sample {sid} is not a member of cohort {ctx.cohort.cohort_id}")
-        i = ctx.cohort.members.index(sid)
         _, cc = ctx.prior("cohort_call", "cohort", ctx.cohort.cohort_id)
-        doc["small_variant_vcf"] = cc.arr("split_small_variant_vcfs")[i]
-        doc["small_variant_vcf_index"] = cc.arr("split_small_variant_vcf_indices")[i]
-        split_sv = cc.opt_arr("split_sv_vcfs")
-        if split_sv:
-            doc["sv_vcf"] = split_sv[i]
-            doc["sv_vcf_index"] = cc.arr("split_sv_vcf_indices")[i]
-        else:
+        called = _run_input(cc.run, "cohort_call", "sample_ids") or list(ctx.cohort.members)
+        if sid in called:
+            i = called.index(sid)
+            doc["small_variant_vcf"] = cc.arr("split_small_variant_vcfs")[i]
+            doc["small_variant_vcf_index"] = cc.arr("split_small_variant_vcf_indices")[i]
+            split_sv = cc.opt_arr("split_sv_vcfs")
+            if split_sv:
+                doc["sv_vcf"] = split_sv[i]
+                doc["sv_vcf_index"] = cc.arr("split_sv_vcf_indices")[i]
+            else:
+                doc["sv_vcf"] = up.req("sv_vcf")
+                doc["sv_vcf_index"] = up.req("sv_vcf_index")
+        else:   # a vcf member left out of the joint call (--allow-standalone-members): phased from its own VCFs
+            LOGGER.info("downstream %s: not in cohort_call %s (no gVCF); phasing its own VCFs", sid, cc.run.run_id)
+            doc["small_variant_vcf"] = up.req("small_variant_vcf")
+            doc["small_variant_vcf_index"] = up.req("small_variant_vcf_index")
             doc["sv_vcf"] = up.req("sv_vcf")
             doc["sv_vcf_index"] = up.req("sv_vcf_index")
     else:
@@ -208,33 +347,43 @@ def build_downstream(ctx: BuildContext) -> dict[str, object]:
     return doc
 
 
+def _run_input(run: RunRecord, stage: str, name: str) -> list[object] | None:
+    """An array input a run was started with (its inputs.json), or None."""
+    try:
+        doc = read_json(Path(run.inputs_path)) if run.inputs_path else None
+    except (OSError, ValueError):
+        return None
+    v = doc.get(f"{namespace(stage)}.{name}") if isinstance(doc, dict) else None
+    return list(v) if isinstance(v, list) else None
+
+
 def build_cohort_merge(ctx: BuildContext) -> dict[str, object]:
     doc = common_inputs(ctx)
     members = ctx.members()
     doc["cohort_id"] = ctx.subject_id
     doc["sample_ids"] = members
     doc["ugc_wgw_container_registry"] = ctx.cfg.ugc_wgw_container_registry
-    if ctx.mode == "standalone":
-        sv_stage, trgt_name, gvcf_stage = "singleton", "phased_trgt_vcf", "singleton"
-    else:
-        sv_stage, trgt_name, gvcf_stage = "downstream", "trgt_vcf", "upstream"
     # standalone only by default: in joint mode cohort_call already made the cohort GLnexus VCF (DESIGN §7.5)
     run_glnexus = bool(ctx.ov("cohort_merge", "run_glnexus", ctx.mode == "standalone"))
     merge_phased = bool(ctx.ov("cohort_merge", "merge_phased_small_variants", False))
     sv, svi, tr, tri, gv, gvi, ph, phi = [], [], [], [], [], [], [], []
     for sid in members:
-        _, outs = ctx.prior(sv_stage, "sample", sid)
+        outs = ctx.sample_outputs(sid)   # singleton, or upstream/intake + downstream (downstream: phased_*, trgt_vcf)
         sv.append(outs.req("phased_sv_vcf"))
         svi.append(outs.req("phased_sv_vcf_index"))
-        tr.append(outs.req(trgt_name))
-        tri.append(outs.req(trgt_name + "_index"))
+        trgt = outs.opt("phased_trgt_vcf")
+        tr.append(trgt if trgt is not None else outs.req("trgt_vcf"))
+        tri.append(outs.req("phased_trgt_vcf_index") if trgt is not None else outs.req("trgt_vcf_index"))
         if merge_phased:
             ph.append(outs.req("phased_small_variant_vcf"))
             phi.append(outs.req("phased_small_variant_vcf_index"))
         if run_glnexus:
-            g = outs if gvcf_stage == sv_stage else ctx.prior(gvcf_stage, "sample", sid)[1]
-            gv.append(g.req("small_variant_gvcf"))
-            gvi.append(g.req("small_variant_gvcf_index"))
+            g = outs.opt("small_variant_gvcf")
+            if g is None:
+                raise UgcError(f"cohort_merge {ctx.subject_id}: GLnexus needs a gVCF from every member; {sid} ({ctx.kind(sid)} kind) has none "
+                               "(register its gvcf column, or set stage_inputs cohort_merge.run_glnexus false)")
+            gv.append(g)
+            gvi.append(outs.req("small_variant_gvcf_index"))
     doc["sv_vcfs"], doc["sv_vcf_indices"] = sv, svi
     doc["trgt_vcfs"], doc["trgt_vcf_indices"] = tr, tri
     doc["run_glnexus"] = run_glnexus
@@ -243,7 +392,7 @@ def build_cohort_merge(ctx: BuildContext) -> dict[str, object]:
     if merge_phased:
         doc["merge_phased_small_variants"] = True
         doc["phased_small_variant_vcfs"], doc["phased_small_variant_vcf_indices"] = ph, phi
-    doc.update(_mito_inputs(ctx, members, gvcf_stage))
+    doc.update(_mito_inputs(ctx, members, ""))
     return doc
 
 
@@ -257,9 +406,13 @@ def _mito_inputs(ctx: BuildContext, members: list[str], per_stage: str) -> dict[
     doc: dict[str, object] = {}
     small, smalli, svs, svsi, hg, mv, mvi, mj = ([] for _ in range(8))
     legacy: list[str] = []
+    without: list[str] = []
     for sid in members:
-        _, outs = ctx.prior(per_stage, "sample", sid)
+        outs = ctx.sample_outputs(sid)
         vcf = outs.opt("mt_small_variant_vcf")
+        if vcf is None and outs.opt("mitorsaw_vcf") is None:   # no mitorsaw call at all: a sample entered with its own VCFs
+            without.append(sid)
+            continue
         if vcf is not None:
             small.append(vcf)
             smalli.append(outs.req("mt_small_variant_vcf_index"))
@@ -279,6 +432,10 @@ def _mito_inputs(ctx: BuildContext, members: list[str], per_stage: str) -> dict[
             mv.append(outs.req("mitorsaw_vcf"))
             mvi.append(outs.req("mitorsaw_vcf_index"))
             mj.append(outs.req("mitorsaw_hap_stats"))
+    if without:
+        LOGGER.warning("cohort_merge %s: %d member(s) have no mitorsaw call (the vcf entry kind: calls made outside this project): the "
+                       "mitochondrial merge is left out for this cohort: %s", ctx.subject_id, len(without), ", ".join(without[:5]) + (" ..." if len(without) > 5 else ""))
+        return {"merge_mitochondria": False}
     if legacy:
         LOGGER.warning("cohort_merge %s: %d member(s) have no collapsed mitochondrial set (per-sample runs before 0.15.0): the stage "
                        "collapses and classifies their mitorsaw calls: %s", ctx.subject_id, len(legacy), ", ".join(legacy[:5]) + (" ..." if len(legacy) > 5 else ""))
@@ -303,7 +460,8 @@ def _sex_group(ctx: BuildContext, sid: str, inferred_stage: str) -> tuple[str, s
     upstream inferred from coverage (`coverage`; an empty inferred_sex is unknown, as upstream itself treats it)."""
     rec = ctx.db.get_sample(sid)
     sheet = SEX_TO_GROUP.get((rec.sex or "").upper()) if rec else None
-    _, outs = ctx.prior(inferred_stage, "sample", sid)   # recorded as provenance even when the sheet decides
+    del inferred_stage   # the member's own per-sample stages decide (singleton, upstream or intake)
+    outs = ctx.sample_outputs(sid)   # recorded as provenance even when the sheet decides
     if sheet:   # the sheet is the first source of the resolved sex as well
         return sheet, "declared"
     resolved = outs.opt("resolved_sex")
@@ -325,17 +483,17 @@ def build_cohort_qc(ctx: BuildContext) -> dict[str, object]:
     members = ctx.members()
     doc["cohort_id"] = ctx.subject_id
     doc["sample_ids"] = members
-    per_stage, bam_name = ("singleton", "merged_haplotagged_bam") if ctx.mode == "standalone" else ("upstream", "aligned_hifi_reads")
     extracts: list[object] = []
     bams: list[object] = []
     bais: list[object] = []
     legacy: list[str] = []
     for sid in members:
-        _, outs = ctx.prior(per_stage, "sample", sid)
+        outs = ctx.sample_outputs(sid)
         som = outs.opt("somalier_extract")
         extracts.append(som)
         if som is None:
             legacy.append(sid)
+            bam_name = "aligned_hifi_reads" if outs.opt("aligned_hifi_reads") is not None else "merged_haplotagged_bam"
             bams.append(outs.req(bam_name))
             bais.append(outs.req(bam_name + "_index"))
         else:
@@ -347,7 +505,7 @@ def build_cohort_qc(ctx: BuildContext) -> dict[str, object]:
                        "from their aligned BAMs: %s", ctx.subject_id, len(legacy), ", ".join(legacy[:5]) + (" ..." if len(legacy) > 5 else ""))
         doc["aligned_bams"] = bams
         doc["aligned_bam_indices"] = bais
-    groups = [_sex_group(ctx, sid, per_stage) for sid in members]
+    groups = [_sex_group(ctx, sid, "") for sid in members]
     doc["sample_sexes"] = [g for g, _ in groups]
     doc["sample_sex_sources"] = [src for _, src in groups]
     recs = {sid: ctx.db.get_sample(sid) for sid in members}
@@ -377,15 +535,87 @@ def build_cohort_freq(ctx: BuildContext) -> dict[str, object]:
         _, cc = ctx.prior("cohort_call", "cohort", ctx.subject_id)
         doc["small_variant_vcf"] = cc.req("cohort_small_variant_vcf")
         doc["small_variant_vcf_index"] = cc.req("cohort_small_variant_vcf_index")
-        inferred_stage = "upstream"
     else:
         # optional: absent when cohort_merge ran with run_glnexus = false; the stage then makes SV frequencies only
         doc["small_variant_vcf"] = cm.opt("cohort_small_variant_vcf")
         doc["small_variant_vcf_index"] = cm.opt("cohort_small_variant_vcf_index")
-        inferred_stage = "singleton"
-    groups = [_sex_group(ctx, sid, inferred_stage) for sid in members]
+    groups = [_sex_group(ctx, sid, "") for sid in members]
     doc["sample_sexes"] = [g for g, _ in groups]
     doc["sample_sex_sources"] = [src for _, src in groups]
+    doc["sample_entry_kinds"] = [ctx.kind(sid) for sid in members]
+    return doc
+
+
+LABEL_SAFE = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
+def methyl_label(column: str, value: object) -> str:
+    """A background label from a sheet column and its value: `column=value`, the value reduced to [A-Za-z0-9_.-] (MethBat
+    splits labels on ';'; the prefix keeps two columns' values apart)."""
+    v = LABEL_SAFE.sub("_", str(value).strip()).strip("_")
+    return f"{column}={v}" if v else ""
+
+
+def build_cohort_methyl(ctx: BuildContext) -> dict[str, object]:
+    """The methylation layer: every member's 5mC pileup and MethBat profile (singleton in standalone mode, downstream in
+    joint), its methbat report (null for a run from before the task: the stage makes it), and the labels for the
+    background: the resolved sex group as cohort_freq derives it, then the project's methyl_label_columns as
+    column=value. A member whose run has no pileup (no methylation tags) is left out with a warning."""
+    doc = common_inputs(ctx)
+    members = ctx.members()
+    doc["cohort_id"] = ctx.subject_id
+    columns = list(ctx.cfg.methyl_label_columns)
+    known_columns: set[str] = set()
+    kept: list[str] = []
+    pileups: list[object] = []
+    profiles: list[object] = []
+    reports: list[object] = []
+    labels: list[str] = []
+    legacy: list[str] = []
+    skipped: list[str] = []
+    for sid in members:
+        outs = ctx.sample_outputs(sid)
+        pileup, profile = outs.opt("cpg_pileup_bed"), outs.opt("methbat_profile")
+        if pileup is None or profile is None:
+            skipped.append(sid)
+            continue
+        kept.append(sid)
+        pileups.append(pileup)
+        profiles.append(profile)
+        report = outs.opt("methbat_report")
+        reports.append(report)
+        if report is None:
+            legacy.append(sid)
+        parts: list[str] = []
+        group, _src = _sex_group(ctx, sid, "")
+        if group:
+            parts.append(group)
+        rec = ctx.db.get_sample(sid)
+        meta = rec.meta if rec else {}
+        for col in columns:
+            if col in meta:
+                known_columns.add(col)
+                lab = methyl_label(col, meta.get(col))
+                if lab:
+                    parts.append(lab)
+        labels.append(";".join(parts))
+    unknown = [c for c in columns if c not in known_columns]
+    if unknown:
+        raise UgcError(f"methyl_label_columns names {', '.join(repr(c) for c in unknown)}, which no member of {ctx.subject_id} has in the "
+                       "sample sheet (the sheet's extra columns are the labels available)")
+    if skipped:
+        LOGGER.warning("cohort_methyl %s: %d member(s) have no 5mC pileup or MethBat profile (no methylation tags in the reads): left out "
+                       "of the methylation layer: %s", ctx.subject_id, len(skipped), ", ".join(skipped[:5]) + (" ..." if len(skipped) > 5 else ""))
+    if not kept:
+        raise UgcError(f"cohort_methyl {ctx.subject_id}: no member has a 5mC pileup and a MethBat profile")
+    if legacy:
+        LOGGER.warning("cohort_methyl %s: %d member(s) have no methbat_report (per-sample runs before 0.16.0): the stage makes it from "
+                       "their pileups: %s", ctx.subject_id, len(legacy), ", ".join(legacy[:5]) + (" ..." if len(legacy) > 5 else ""))
+    doc["sample_ids"] = kept
+    doc["sample_labels"] = labels
+    doc["cpg_pileup_beds"] = pileups
+    doc["methbat_profiles"] = profiles
+    doc["methbat_reports"] = reports
     return doc
 
 
@@ -494,11 +724,13 @@ def build_cohort_pangenome(ctx: BuildContext) -> dict[str, object]:
 BUILDERS = {
     "singleton": build_singleton,
     "upstream": build_upstream,
+    "intake": build_intake,
     "cohort_qc": build_cohort_qc,
     "cohort_call": build_cohort_call,
     "downstream": build_downstream,
     "cohort_merge": build_cohort_merge,
     "cohort_freq": build_cohort_freq,
+    "cohort_methyl": build_cohort_methyl,
     "assembly": build_assembly,
     "assembly_call": build_assembly_call,
     "cohort_pangenome": build_cohort_pangenome,

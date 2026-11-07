@@ -61,3 +61,28 @@ genotype concordance) and the sawfish tasks' resources of both projects
 sawfish23 compare` repeats the comparison alone on the finished runs.
 `init --profile NAME` applies any shipped profile to the smoke project.
 
+## Entry kinds
+
+`run.sh entry` (0.16.0) needs the main project's joint phase: it writes a
+sheet under `logs/entry-<stamp>/` registering `HG002b` as the `bam` kind
+(HG002's aligned BAM from its `upstream` run) and `HG003v` as the `vcf`
+kind (HG003's aligned BAM, DeepVariant VCF, sawfish VCF and gVCF, with
+the `_index` columns because the run keeps indices in their own output
+directories). The two BAMs are reheadered copies (`samtools reheader` from
+the pb_wdl_base SIF, `SM:HG002` → `SM:HG002b`, `SM:HG003` → `SM:HG003v`,
+then indexed): the read group's sample name must be the sample id. It
+initialises `project-entry/` with the sheet (`UGC_WGW_SMOKE_SHEET`
+and `UGC_WGW_SMOKE_COHORT` point `init` at another sheet and cohort file),
+runs the standalone phase (HG002b: `upstream` + `downstream`; HG003v:
+`intake` + `downstream`; the four cohort stages), compares HG003v's phased
+VCFs with HG003's singleton ones (`compare.tsv`: record counts and whether
+the bodies are identical), then the negative cases: `HG003r` (HG003v's BAM
+under another id) must be refused by `samples add`, and `HG003x` (its own
+reheadered BAM, HG003's small-variant VCF with the contigs renamed `chr20`
+→ `20`) must fail `intake` as an input error. The checks of `all standalone` are kind-aware: a member is
+checked on the stages it ran (`sample_stages_of`); `check cohort_merge` and
+`check cohort_freq` do not expect the mitochondrial outputs when the run's
+inputs show the branch off (a `vcf`-kind member has no mitorsaw call), and
+`summary` expects the pages of the first member with a run and of the modes
+whose phase ran in the results.
+

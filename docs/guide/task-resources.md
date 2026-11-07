@@ -49,12 +49,13 @@ Reading the tables:
 
 ## ugc_wgw_singleton
 
-33 tasks, in first-call order.
+35 tasks, in first-call order.
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
 | `filter_trgt_catalog` | 4 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/process_trgt_catalog/process_trgt_catalog.wdl:74` |
 | `create_pbmm2_index` | 8 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:88` |
+| `ugc_wgw_input_checks` | 1 | 2G | - | `workflows/ugc_wgw/intake/checks.wdl:9` |
 | `index_input_bam` | 16 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:154` |
 | `pbmm2_align_wgs` | 32 | 64G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:269` |
 | `pbsamoa_merge` | 32 | 32G | cpu from input default; memory from input default; command uses threads; command uses mem | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/pbsamoa.wdl:5` |
@@ -84,17 +85,19 @@ Reading the tables:
 | `methbat_pileup` | 8 | 16G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/methbat.wdl:5` |
 | `methbat_profile` | 2 | 4G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/methbat.wdl:182` |
 | `pbstarphase_diplotype` | 2 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/pbstarphase.wdl:5` |
+| `ugc_wgw_methbat_report` | 1 | 4G | memory from input default | `workflows/ugc_wgw/methyl/report.wdl:9` |
 | `consolidate_stats` | 2 | 4G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/utilities.wdl:71` |
 | `ugc_wgw_manifest_write` | 1 | 1G | - | `workflows/ugc_wgw/provenance.wdl:9` |
 
 ## ugc_wgw_upstream
 
-24 tasks, in first-call order.
+25 tasks, in first-call order.
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
 | `filter_trgt_catalog` | 4 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/process_trgt_catalog/process_trgt_catalog.wdl:74` |
 | `create_pbmm2_index` | 8 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:88` |
+| `ugc_wgw_input_checks` | 1 | 2G | - | `workflows/ugc_wgw/intake/checks.wdl:9` |
 | `index_input_bam` | 16 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:154` |
 | `pbmm2_align_wgs` | 32 | 64G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:269` |
 | `pbsamoa_merge` | 32 | 32G | cpu from input default; memory from input default; command uses threads; command uses mem | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/pbsamoa.wdl:5` |
@@ -146,9 +149,23 @@ Reading the tables:
 | `ugc_wgw_bcftools_split` | 16 | - | cpu from workflow input default; cpu input: split_threads; memory: "~{mem_gb} GiB" where mem_gb = split_mem = select_first([split_mem_gb, 8 + ceil(n_samples * 0.005 * split_threads)]); memory scales with N; command uses threads | `workflows/ugc_wgw/cohort/split_by_sample.wdl:9` |
 | `split_vcf_by_sample` | 2 | 4G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/bcftools.wdl:224` |
 
+## ugc_wgw_intake
+
+7 tasks, in first-call order.
+
+| task | cpu | memory | notes | source |
+|---|---|---|---|---|
+| `ugc_wgw_input_checks` | 1 | 2G | - | `workflows/ugc_wgw/intake/checks.wdl:9` |
+| `mosdepth` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/mosdepth.wdl:5` |
+| `ugc_wgw_somalier_extract` | 1 | 2G | memory from input default; memory from workflow input default; memory input: extract_mem_gb | `workflows/ugc_wgw/qc/somalier.wdl:9` |
+| `ugc_wgw_somalier_relate_one` | 1 | 1G | - | `workflows/ugc_wgw/qc/somalier.wdl:100` |
+| `ugc_wgw_resolve_sex` | 1 | 1G | - | `workflows/ugc_wgw/qc/somalier.wdl:176` |
+| `ugc_wgw_manifest_write` | 1 | 1G | - | `workflows/ugc_wgw/provenance.wdl:9` |
+| `ugc_wgw_vcf_sample_rename` | 1 | 2G | - | `workflows/ugc_wgw/intake/checks.wdl:264` |
+
 ## ugc_wgw_downstream
 
-11 tasks, in first-call order.
+12 tasks, in first-call order.
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
@@ -161,6 +178,7 @@ Reading the tables:
 | `methbat_pileup` | 8 | 16G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/methbat.wdl:5` |
 | `methbat_profile` | 2 | 4G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/methbat.wdl:182` |
 | `pbstarphase_diplotype` | 2 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/pbstarphase.wdl:5` |
+| `ugc_wgw_methbat_report` | 1 | 4G | memory from input default | `workflows/ugc_wgw/methyl/report.wdl:9` |
 | `consolidate_stats` | 2 | 4G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/utilities.wdl:71` |
 | `ugc_wgw_manifest_write` | 1 | 1G | - | `workflows/ugc_wgw/provenance.wdl:9` |
 
@@ -197,6 +215,21 @@ Reading the tables:
 | `ugc_wgw_bcftools_concat` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/cohort/concat.wdl:9` |
 | `ugc_wgw_bcftools_freq` | 2 | 4G | cpu from workflow input default; cpu input: freq_threads; memory from workflow input default; memory input: freq_mem_gb; command uses threads | `workflows/ugc_wgw/cohort/freq.wdl:9` |
 | `ugc_wgw_freq_summary` | 1 | 2G | - | `workflows/ugc_wgw/cohort/freq.wdl:179` |
+
+## ugc_wgw_cohort_methyl
+
+8 tasks, in first-call order.
+
+| task | cpu | memory | notes | source |
+|---|---|---|---|---|
+| `ugc_wgw_methbat_report` | 1 | 4G | memory from input default | `workflows/ugc_wgw/methyl/report.wdl:9` |
+| `ugc_wgw_manifest_write` | 1 | 1G | - | `workflows/ugc_wgw/provenance.wdl:9` |
+| `ugc_wgw_methbat_build` | 1 | 8G | memory from workflow input default; memory input: build_mem_gb | `workflows/ugc_wgw/methyl/cohort.wdl:9` |
+| `ugc_wgw_methbat_profile_bg` | 1 | 4G | memory from workflow input default; memory input: profile_mem_gb | `workflows/ugc_wgw/methyl/cohort.wdl:101` |
+| `ugc_wgw_methbat_deconvolve` | 1 | 4G | memory from input default | `workflows/ugc_wgw/methyl/cohort.wdl:487` |
+| `ugc_wgw_methbat_compare` | 1 | 2G | - | `workflows/ugc_wgw/methyl/cohort.wdl:267` |
+| `ugc_wgw_methbat_joint_segment` | 8 | 32G | cpu from workflow input default; cpu input: joint_segment_threads; memory from workflow input default; memory input: joint_segment_mem_gb; command uses threads | `workflows/ugc_wgw/methyl/cohort.wdl:397` |
+| `ugc_wgw_methyl_summary` | 1 | 4G | memory from workflow input default; memory input: summary_mem_gb | `workflows/ugc_wgw/methyl/cohort.wdl:561` |
 
 ## ugc_wgw_assembly
 

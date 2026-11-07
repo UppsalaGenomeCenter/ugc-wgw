@@ -19,7 +19,7 @@ class DryRunTest(unittest.TestCase):
         run_cli(["--project", proj, "cohort", "freeze", "C1", "--samples", str(write_ids(tmp, ["S1", "S2"]))])
         code, out, err = run_cli(["--project", proj, "submit", "--mode", "standalone", "--cohort", "C1", "--dry-run"])
         self.assertEqual(code, 0, err)
-        self.assertIn("runnable=2 blocked=3", out)   # cohort_qc, cohort_merge, cohort_freq
+        self.assertIn("runnable=2 blocked=4", out)   # cohort_qc, cohort_merge, cohort_freq, cohort_methyl
         self.assertEqual(out.count("miniwdl run"), 0)  # the fake is not called miniwdl; check the command shape instead
         cmds = [l for l in out.splitlines() if " run " in l and "ugc_wgw_singleton.wdl" in l]
         self.assertEqual(len(cmds), 2)

@@ -3,6 +3,55 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.16.0
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin (0.6.0)
+unchanged; no new image; one new reference entry, `ugc-wgw-methyl` 0.1.0
+(MethBat's imprinting regions, a CpG-island gene map generated from
+GENCODE 50, the nanomix cell-type atlas). The cohort's methylation layer,
+and samples that enter as an aligned BAM or as pre-called VCFs.
+
+- **A new stage, `cohort_methyl`.** MethBat 1.1.0's cohort layer, from
+  upstream's image: a background profile of the cohort from the members'
+  MethBat profiles, labelled by the resolved sex group and any sample-sheet
+  columns the project names (`methyl_label_columns`); every member's 5mC
+  pileup scored against it (Hypo- and Hyper-methylated regions, allele-
+  specific methylation gained or lost, with z-scores); group comparisons
+  (`XX:XY` by default); the imprinting regions of every member labelled by
+  `methbat report` (made per sample since this release, inside the stage
+  for older runs: no per-sample re-run); every region annotated with its
+  genes and type from the shipped map; optional joint segmentation and
+  cell-type deconvolution. The analyst's file is
+  `<cohort>.methyl.<ref>.events.tsv`, every member's events sorted by gene;
+  the cohort page gets a Methylation section (labels, events per member,
+  the genes with the most members carrying an event, recurrent regions, the
+  imprinting screen, comparisons), the sample page its imprinting table;
+  `ugc-wgw export --domains methyl` copies the stage's tables. New advisory
+  flags `imprinting_anomalous` and `methyl_outlier`. Digest schema 5: every
+  per-sample digest rebuilds once.
+- **Three entry kinds, derived from the sample sheet.** `hifi_reads` as
+  before (`reads`); `aligned_bam` alone (`bam`): alignment is skipped, the
+  BAM is checked against the installed reference (contigs and lengths,
+  index, sort order, a read group named after the sample id, methylation
+  tags) and used by every caller;
+  `aligned_bam` with `small_variant_vcf` and `sv_vcf` (and `gvcf`; `vcf`):
+  calling is skipped too, the new stage `intake` makes what phasing needs
+  (checks, depth, the sex resolution, the VCFs' sample column renamed) and
+  the sample enters at `downstream`. The sheet rules are explicit refusals;
+  each member runs its own stage sequence in both cohort modes; joint mode
+  needs a gVCF from every member unless `--allow-standalone-members`.
+  `samples rebase <id> --from-run RUN [--with-vcfs]` registers a member's
+  own earlier aligned BAM (and VCFs) as its inputs, so a tool change after
+  alignment costs one `downstream` per member. Run manifests name the
+  external files and the producing programs; the pages mark
+  `external_input`. The database schema moves to 4 on first open.
+- **`ugc-wgw upgrade --install <root>/current`** moves a project to another
+  installed version (the engine paths and the reference map; the previous
+  `config.json` is kept), and every command first checks that the project's
+  paths are one installed version, the running driver's, stopping with the
+  remedy instead of failing late in a stage.
+
 ## 0.15.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

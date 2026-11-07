@@ -21,6 +21,11 @@
 #   run.sh report                              ugc-wgw report (HTML) and the analysis summaries into $UGC_WGW_SMOKE_DIR/logs/
 #   run.sh summary                             ugc-wgw summary only (per-sample and cohort analysis pages)
 #   run.sh sacct                               SLURM accounting of every job the runs submitted (HPC only)
+#   run.sh entry                               the entry kinds (0.16.0): a project-entry/ whose sheet registers HG002b (bam kind:
+#                                              HG002's aligned BAM from the main project's upstream run) and HG003v (vcf kind:
+#                                              HG003's aligned BAM, DeepVariant VCF, sawfish VCF and gVCF), runs its standalone
+#                                              phase, compares HG003v's phased VCFs with HG003's singleton ones, and registers
+#                                              HG003x with contigs renamed to see intake fail as an input error; needs the joint phase
 #   run.sh eval sawfish23 [compare]            a second project (project-sawfish23/, results-sawfish23/) initialised with
 #                                              the eval-sawfish23 profile, its standalone phase, then per member truvari
 #                                              bench of its phased SV VCF against the production project's and the sawfish
@@ -53,16 +58,24 @@ usage() { sed -n '2,/^# Environment:/p' "$0" | sed '$d'; exit "${1:-0}"; }   # t
 
 mode_of_stage() {
   case "$1" in
-    singleton|cohort_qc|cohort_merge|cohort_freq) echo standalone ;;   # cohort_qc, cohort_merge and cohort_freq exist in joint too: --mode joint
+    singleton|cohort_qc|cohort_merge|cohort_freq|cohort_methyl|intake) echo standalone ;;   # the cohort stages exist in joint too: --mode joint; intake: run.sh entry
     upstream|cohort_call|downstream) echo joint ;;
     assembly|assembly_call|cohort_pangenome) echo assembly ;;
     *) die "unknown stage $1" ;;
   esac
 }
 cohort_of_mode() { case "$1" in joint) echo SMOKEJ ;; *) echo SMOKE ;; esac; }
-is_cohort_stage() { case "$1" in cohort_qc|cohort_call|cohort_merge|cohort_freq|cohort_pangenome) return 0 ;; *) return 1 ;; esac; }
+is_cohort_stage() { case "$1" in cohort_qc|cohort_call|cohort_merge|cohort_freq|cohort_methyl|cohort_pangenome) return 0 ;; *) return 1 ;; esac; }
 
-members() { sed 's/#.*//' "$smoke/data/cohort.txt" | awk 'NF { print $1 }'; }
+sheet=${UGC_WGW_SMOKE_SHEET:-$smoke/data/samples.tsv}     # run.sh entry registers another sheet in its variant project
+cohort_file=${UGC_WGW_SMOKE_COHORT:-$smoke/data/cohort.txt}
+members() { sed 's/#.*//' "$cohort_file" | awk 'NF { print $1 }'; }
+# the per-sample stages a member ran in standalone mode: singleton (reads), or upstream/intake + downstream (bam/vcf kinds)
+sample_stages_of() {  # <member>
+  local m=$1 version; version=$(cat "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["code_dir"])' "$project/.ugc-wgw/config.json")/VERSION")
+  if [ -d "$results/samples/$m/$version/singleton/current" ]; then echo singleton; return; fi
+  local st; for st in upstream intake downstream; do [ -d "$results/samples/$m/$version/$st/current" ] && echo "$st"; done
+}
 
 set_ugc() {
   [ -f "$project/.ugc-wgw/config.json" ] || die "no smoke project at $project; run: $0 init"
@@ -91,7 +104,7 @@ cmd_init() {
       *) die "init: unknown option $1" ;;
     esac
   done
-  if [ ! -f "$smoke/data/samples.tsv" ] || [ ! -f "$smoke/data/cohort.txt" ]; then die "no smoke data under $smoke/data; run tests/smoke/prepare.sh"; fi
+  if [ ! -f "$sheet" ] || [ ! -f "$cohort_file" ]; then die "no smoke data under $smoke/data ($sheet, $cohort_file); run tests/smoke/prepare.sh"; fi
   # default runs in flight: two, except a GPU flavour without SLURM, where every task sees every GPU and two
   # call_variants processes on one card end in CUDA_ERROR_OUT_OF_MEMORY (SLURM confines devices per job)
   if [ -z "$inflight" ]; then
@@ -168,13 +181,17 @@ PY
   fi
   # the sheet from prepare.sh names the paths of the machine that prepared the data;
   # point every read at this machine's data/ (columns 3 and 4: hifi_reads, fail_reads)
-  awk -F'\t' -v OFS='\t' -v d="$smoke/data" 'NR == 1 { print; next }
-    { for (i = 3; i <= 4; i++) if ($i != "") { n = split($i, parts, ","); out = ""
-        for (j = 1; j <= n; j++) { sub(/.*\//, "", parts[j]); out = out (j > 1 ? "," : "") d "/" parts[j] }
-        $i = out }
-      print }' "$smoke/data/samples.tsv" > "$project/samples.tsv"
+  if [ "$sheet" = "$smoke/data/samples.tsv" ]; then
+    awk -F'\t' -v OFS='\t' -v d="$smoke/data" 'NR == 1 { print; next }
+      { for (i = 3; i <= 4; i++) if ($i != "") { n = split($i, parts, ","); out = ""
+          for (j = 1; j <= n; j++) { sub(/.*\//, "", parts[j]); out = out (j > 1 ? "," : "") d "/" parts[j] }
+          $i = out }
+        print }' "$sheet" > "$project/samples.tsv"
+  else
+    cp "$sheet" "$project/samples.tsv"   # another sheet (run.sh entry): absolute paths already
+  fi
   "${ugc[@]}" samples add "$project/samples.tsv"
-  local ids=$smoke/data/cohort.txt
+  local ids=$cohort_file
   "${ugc[@]}" cohort freeze SMOKE --samples "$ids"
   "${ugc[@]}" cohort freeze SMOKEJ --samples "$ids"
   log "project ready: $project (code $code, cfg $cfg, results $results)"
@@ -207,9 +224,16 @@ cmd_check() {
       log "check $stage $subject: chrM records in $(basename "$jv") (GLnexus must skip chrM)"; return 1
     fi
   done
+  # the mitochondrial branch is off when the cohort holds a vcf-kind member (no mitorsaw call): its outputs are not expected then
+  local mt_on=1 skipped=0
+  case "$stage" in
+    cohort_merge|cohort_freq)
+      mt_on=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); off=d.get("ugc_wgw_cohort_merge.merge_mitochondria") is False or (sys.argv[2] == "cohort_freq" and not d.get("ugc_wgw_cohort_freq.mt_small_variant_vcf")); print(0 if off else 1)' "$cur/inputs.json" "$stage" 2>/dev/null || echo 1) ;;
+  esac
   local bad=0 n=0 pattern
   while IFS= read -r pattern; do
     case "$pattern" in ''|'#'*) continue ;; esac
+    if [ "$mt_on" -eq 0 ] && [[ "$pattern" == *mt_* ]]; then skipped=$((skipped + 1)); continue; fi
     n=$((n + 1))
     local hit=0 f
     for f in "$cur"/out/$pattern; do
@@ -218,7 +242,7 @@ cmd_check() {
     if [ "$hit" -eq 0 ]; then log "  MISSING $pattern"; bad=$((bad + 1)); fi
   done < <(cat "${expected[@]}")
   if [ "$status" = success ] && [ "$bad" -eq 0 ]; then
-    log "check $stage $subject: ok ($n patterns, manifest success, $cur)"
+    log "check $stage $subject: ok ($n patterns, manifest success, $cur)${skipped:+$([ "$skipped" -gt 0 ] && echo "; $skipped mitochondrial pattern(s) not expected: the branch is off (a vcf-kind member)")}"
     return 0
   fi
   log "check $stage $subject: FAILED (manifest status $status, $bad of $n patterns missing)"
@@ -282,10 +306,14 @@ cmd_all() {  # cmd_all [standalone] [joint] [assembly]: the named phases in the 
   t0=$(date +%s)
   if [[ "$want" == *" standalone "* ]]; then
     phase standalone --mode standalone --cohort SMOKE
-    for m in $(members); do cmd_check singleton "$m" || fails=$((fails + 1)); done
+    local st
+    for m in $(members); do
+      for st in $(sample_stages_of "$m"); do cmd_check "$st" "$m" || fails=$((fails + 1)); done
+    done
     cmd_check cohort_qc SMOKE || fails=$((fails + 1))
     cmd_check cohort_merge SMOKE || fails=$((fails + 1))
     cmd_check cohort_freq SMOKE || fails=$((fails + 1))
+    cmd_check cohort_methyl SMOKE || fails=$((fails + 1))
   fi
   if [[ "$want" == *" joint "* ]]; then
     phase joint --mode joint --cohort SMOKEJ
@@ -295,6 +323,7 @@ cmd_all() {  # cmd_all [standalone] [joint] [assembly]: the named phases in the 
     for m in $(members); do cmd_check downstream "$m" || fails=$((fails + 1)); done
     cmd_check cohort_merge SMOKEJ || fails=$((fails + 1))
     cmd_check cohort_freq SMOKEJ || fails=$((fails + 1))
+    cmd_check cohort_methyl SMOKEJ || fails=$((fails + 1))
   fi
   if [[ "$want" == *" assembly "* ]]; then
     # every smoke sample is assembled (HG002 trio-binned, the others not): chr20 only, enough to wire
@@ -396,8 +425,17 @@ cmd_summary() {  # ugc-wgw summary for both cohorts: per-sample pages plus the c
       --pass-list "$dir/standalone/identity-pass.txt" --pass-on identity || fails=$((fails + 1))   # HG002ds duplicates HG002: both out
   "${ugc[@]}" summary --cohort SMOKEJ --mode joint --any-version --out-dir "$dir/joint" || fails=$((fails + 1))
   "${ugc[@]}" summary --cohort SMOKE --mode assembly --any-version --out-dir "$dir/assembly" || fails=$((fails + 1))
-  for f in standalone/SMOKE.summary.html standalone/SMOKE.summary.json standalone/HG002.summary.html standalone/HG002.summary.json standalone/identity-pass.txt \
-           joint/SMOKEJ.summary.html joint/HG002.summary.html assembly/SMOKE.summary.html assembly/HG002.summary.html; do
+  # the pages of the first member and of the cohorts; a mode's pages are expected only when that phase ran in these results
+  local first="" version d
+  version=$(cat "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["code_dir"])' "$project/.ugc-wgw/config.json")/VERSION")
+  for d in "$results"/samples/*/; do   # the first member with a finished run (the variant projects register other members)
+    if [ -n "$(ls -d "$d$version"/*/current 2>/dev/null)" ]; then first=$(basename "$d"); break; fi
+  done
+  [ -n "$first" ] || first=$(members | head -1)
+  local -a pages=(standalone/SMOKE.summary.html standalone/SMOKE.summary.json "standalone/$first.summary.html" "standalone/$first.summary.json" standalone/identity-pass.txt)
+  if [ -d "$results/cohorts/SMOKEJ/$version/cohort_call/current" ]; then pages+=(joint/SMOKEJ.summary.html "joint/$first.summary.html"); else log "summary: no joint phase in $results; its pages are not expected"; fi
+  if [ -d "$results/samples/$first/$version/assembly/current" ]; then pages+=(assembly/SMOKE.summary.html "assembly/$first.summary.html"); else log "summary: no assembly phase in $results; its pages are not expected"; fi
+  for f in "${pages[@]}"; do
     [ -s "$dir/$f" ] || { log "summary: missing or empty $dir/$f"; fails=$((fails + 1)); }
   done
   if [ "$fails" -eq 0 ]; then log "summary: ok ($dir)"; else log "summary: FAILED ($fails problem(s), $dir)"; fi
@@ -421,6 +459,79 @@ cmd_eval() {  # cmd_eval sawfish23 [compare]: a second project with the eval-saw
     log "eval $what: the comparison alone (project-$what against $project)"
   fi
   eval_compare "$what" "$results" "$smoke/results-$what" "$smoke/project-$what"
+}
+
+cmd_entry() {  # the entry kinds: a variant project whose members enter as an aligned BAM (HG002b) and as BAM + VCFs (HG003v); then a bad VCF
+  [ -z "$variant" ] || die "entry: run it without UGC_WGW_SMOKE_VARIANT (it sets the variant itself)"
+  set_ugc
+  local version; version=$(cat "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["code_dir"])' "$project/.ugc-wgw/config.json")/VERSION")
+  local up2=$results/samples/HG002/$version/upstream/current/out up3=$results/samples/HG003/$version/upstream/current/out
+  if [ ! -d "$up2" ] || [ ! -d "$up3" ]; then die "entry: the main project needs successful upstream runs of HG002 and HG003 (run.sh all joint)"; fi
+  local stamp out; stamp=$(date -u +%Y%m%dT%H%M%SZ); out=$smoke/logs/entry-$stamp; mkdir -p "$out"
+  local sif_dir sif_name
+  sif_dir=$(python3 -c 'import configparser,sys; c=configparser.ConfigParser(); c.read(sys.argv[1]); print(c.get("singularity", "image_cache"))' "$smoke/miniwdl.cfg")
+  sif_name=$(grep -o 'quay.io/pacbio/pb_wdl_base@sha256:[0-9a-f]*' "$repo/vendor/hifi-human-wgs-wdl/image_manifest.txt" | head -1)
+  sif_name="docker___${sif_name//\//_}"; sif_name="${sif_name//:/_}.sif"
+  [ -f "$sif_dir/$sif_name" ] || die "entry: pb_wdl_base SIF not in $sif_dir ($sif_name); populate the SIF cache first"
+  # the read-group sample name must be the sample id (the callers name their outputs after it): the main project's BAMs
+  # carry SM:HG002 and SM:HG003, so the variant members get reheadered copies (samtools reheader rewrites the header only)
+  local b2 b2i b3 b3i sv svi smv smvi gv gvi
+  b2=$(ls "$up2"/aligned_hifi_reads/*.bam); b3=$(ls "$up3"/aligned_hifi_reads/*.bam)
+  reheader_bam() {  # <in.bam> <old SM> <new SM> <out.bam>
+    apptainer exec --bind "$smoke","$repo" "$sif_dir/$sif_name" samtools reheader -c "sed -E 's/(\tSM:)$2(\t|\$)/\1$3\2/'" "$1" > "$4"
+    apptainer exec --bind "$smoke","$repo" "$sif_dir/$sif_name" samtools index "$4"
+  }
+  reheader_bam "$b2" HG002 HG002b "$out/HG002b.aligned.bam"; b2=$out/HG002b.aligned.bam; b2i=$b2.bai
+  reheader_bam "$b3" HG003 HG003v "$out/HG003v.aligned.bam"; b3=$out/HG003v.aligned.bam; b3i=$b3.bai
+  smv=$(ls "$up3"/small_variant_vcf/*.vcf.gz); smvi=$(ls "$up3"/small_variant_vcf_index/*.tbi)
+  sv=$(ls "$up3"/sv_vcf/*.vcf.gz); svi=$(ls "$up3"/sv_vcf_index/*.tbi)
+  gv=$(ls "$up3"/small_variant_gvcf/*.g.vcf.gz); gvi=$(ls "$up3"/small_variant_gvcf_index/*.tbi)
+  printf 'sample_id\tsex\taligned_bam\taligned_bam_index\tsmall_variant_vcf\tsmall_variant_vcf_index\tsv_vcf\tsv_vcf_index\tgvcf\tgvcf_index\n' > "$out/samples.tsv"
+  printf 'HG002b\tMALE\t%s\t%s\t\t\t\t\t\t\n' "$b2" "$b2i" >> "$out/samples.tsv"
+  printf 'HG003v\tMALE\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$b3" "$b3i" "$smv" "$smvi" "$sv" "$svi" "$gv" "$gvi" >> "$out/samples.tsv"
+  printf 'HG002b\nHG003v\n' > "$out/cohort.txt"
+  log "entry: project-entry with HG002b (bam kind) and HG003v (vcf kind) from the main project's upstream outputs, BAMs reheadered to their ids (sheet $out/samples.tsv)"
+  UGC_WGW_SMOKE_VARIANT=entry UGC_WGW_SMOKE_SHEET=$out/samples.tsv UGC_WGW_SMOKE_COHORT=$out/cohort.txt "$0" init --force
+  local rc=0
+  UGC_WGW_SMOKE_VARIANT=entry UGC_WGW_SMOKE_SHEET=$out/samples.tsv UGC_WGW_SMOKE_COHORT=$out/cohort.txt "$0" all standalone || rc=1
+  # HG003v's phased VCFs against HG003's singleton ones: the same BAM and the same unphased calls went into HiPhase
+  local eres=$smoke/results-entry f3 fv n3 nv m3 mv
+  log "entry: HG003v (vcf kind, downstream) against HG003 (singleton), bodies without header lines:"
+  printf 'file\trecords_singleton\trecords_entry\tidentical\n' > "$out/compare.tsv"
+  for name in phased_small_variant_vcf phased_sv_vcf; do
+    local -a c3=("$results"/samples/HG003/"$version"/singleton/current/out/"$name"/*.vcf.gz) cv=("$eres"/samples/HG003v/"$version"/downstream/current/out/"$name"/*.vcf.gz)
+    f3=${c3[0]}; fv=${cv[0]}
+    if [ ! -e "$f3" ] || [ ! -e "$fv" ]; then printf '%s\t-\t-\tmissing\n' "$name" >> "$out/compare.tsv"; continue; fi
+    n3=$(zcat "$f3" | grep -vc '^#'); nv=$(zcat "$fv" | grep -vc '^#')
+    m3=$(zcat "$f3" | grep -v '^#' | sed 's/HG003v/HG003/g' | md5sum | cut -c1-32); mv=$(zcat "$fv" | grep -v '^#' | sed 's/HG003v/HG003/g' | md5sum | cut -c1-32)
+    printf '%s\t%s\t%s\t%s\n' "$name" "$n3" "$nv" "$([ "$m3" = "$mv" ] && echo yes || echo no)" >> "$out/compare.tsv"
+  done
+  column -t -s $'\t' "$out/compare.tsv" >&2
+  # the negative cases: a BAM whose read group is another sample is refused at registration; HG003's small-variant VCF
+  # with its contigs renamed (chr20 -> 20) must fail intake as an input error
+  local -a eugc=(python3 "$repo/bin/ugc-wgw" --project "$smoke/project-entry")
+  printf 'sample_id\tsex\taligned_bam\taligned_bam_index\n' > "$out/badrg.tsv"
+  printf 'HG003r\tMALE\t%s\t%s\n' "$b3" "$b3i" >> "$out/badrg.tsv"
+  local rrc=0
+  "${eugc[@]}" --color never samples add "$out/badrg.tsv" > "$out/HG003r.add.log" 2>&1 || rrc=$?
+  if [ "$rrc" -ne 0 ] && grep -q '@RG SM is HG003v, not the sample id' "$out/HG003r.add.log"; then
+    log "entry: HG003r (HG003v's BAM under another id) refused at registration, as expected"
+  else
+    log "entry: HG003r (HG003v's BAM under another id) was NOT refused (exit $rrc; log $out/HG003r.add.log)"; rc=1
+  fi
+  reheader_bam "$b3" HG003v HG003x "$out/HG003x.aligned.bam"
+  zcat "$smv" | sed -e 's/^chr20\t/20\t/' -e 's/ID=chr20,/ID=20,/' | apptainer exec --bind "$smoke","$repo" "$sif_dir/$sif_name" bgzip -c > "$out/HG003x.small_variants.vcf.gz"
+  apptainer exec --bind "$smoke","$repo" "$sif_dir/$sif_name" tabix -p vcf "$out/HG003x.small_variants.vcf.gz"
+  printf 'sample_id\tsex\taligned_bam\taligned_bam_index\tsmall_variant_vcf\tsmall_variant_vcf_index\tsv_vcf\tsv_vcf_index\n' > "$out/bad.tsv"
+  printf 'HG003x\tMALE\t%s\t%s\t%s\t%s\t%s\t%s\n' "$out/HG003x.aligned.bam" "$out/HG003x.aligned.bam.bai" "$out/HG003x.small_variants.vcf.gz" "$out/HG003x.small_variants.vcf.gz.tbi" "$sv" "$svi" >> "$out/bad.tsv"
+  "${eugc[@]}" samples add "$out/bad.tsv"
+  local xrc=0
+  "${eugc[@]}" --color never submit --mode standalone --stage intake --samples HG003x > "$out/HG003x.intake.log" 2>&1 || xrc=$?
+  local kind; kind=$(python3 -c 'import json,sys,glob; p=sorted(glob.glob(sys.argv[1]))[-1]; d=json.load(open(p)); print(d.get("error", {}).get("kind"), d.get("status"))' "$eres/samples/HG003x/$version/intake/attempt-*/run_manifest.json" 2>/dev/null || echo none)
+  log "entry: HG003x (contigs renamed) intake -> $kind (expected 'input failed'; the driver exited $xrc; log $out/HG003x.intake.log)"
+  case "$kind" in "input failed") ;; *) rc=1 ;; esac
+  log "entry: done, exit $rc ($out)"
+  return $rc
 }
 
 eval_compare() {  # <what> <base results> <comp results> <comp project>: truvari bench per member on the phased SV VCFs; the sawfish tasks' resources
@@ -489,6 +600,7 @@ case "$1" in
   summary) cmd_summary ;;
   sacct) cmd_sacct ;;
   eval) shift; cmd_eval "$@" ;;
+  entry) cmd_entry ;;
   -h|--help) usage ;;
   singleton|upstream|cohort_qc|cohort_call|downstream|cohort_merge|cohort_freq|assembly|assembly_call|cohort_pangenome) cmd_stage "$@" ;;
   *) die "unknown command $1" ;;

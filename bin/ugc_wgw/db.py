@@ -15,7 +15,7 @@ from typing import Iterator
 
 from .util import UgcError
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Forward-only migrations applied in order on open; each entry brings an older file to that version.
 MIGRATIONS: dict[int, tuple[str, ...]] = {
@@ -29,7 +29,27 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         "ALTER TABLE sample_inputs ADD COLUMN mtime REAL",
         "ALTER TABLE sample_inputs ADD COLUMN info_json TEXT NOT NULL DEFAULT '{}'",
     ),
+    # 4 (0.16.0): the entry kind per sample, and the input kinds of the bam and vcf entries (SQLite cannot widen a CHECK
+    # constraint in place: the table is rebuilt)
+    4: (
+        "ALTER TABLE samples ADD COLUMN entry_kind TEXT NOT NULL DEFAULT 'reads'",
+        "CREATE TABLE IF NOT EXISTS sample_inputs_v4 ("
+        "  sample_id TEXT NOT NULL REFERENCES samples(sample_id) ON DELETE CASCADE,"
+        "  kind TEXT NOT NULL CHECK (kind IN ('hifi_reads', 'fail_reads', 'aligned_bam', 'aligned_bam_index', 'small_variant_vcf',"
+        "    'small_variant_vcf_index', 'sv_vcf', 'sv_vcf_index', 'gvcf', 'gvcf_index')),"
+        "  position INTEGER NOT NULL, path TEXT NOT NULL, checksum TEXT, bytes INTEGER, mtime REAL,"
+        "  info_json TEXT NOT NULL DEFAULT '{}', PRIMARY KEY (sample_id, kind, position))",
+        "INSERT INTO sample_inputs_v4 (sample_id, kind, position, path, checksum, bytes, mtime, info_json)"
+        "  SELECT sample_id, kind, position, path, checksum, bytes, mtime, info_json FROM sample_inputs",
+        "DROP TABLE sample_inputs",
+        "ALTER TABLE sample_inputs_v4 RENAME TO sample_inputs",
+    ),
 }
+
+ENTRY_KINDS = ("reads", "bam", "vcf")
+# the single-file inputs of the bam and vcf entry kinds, as sample_inputs kinds (position 0) and SampleRecord fields
+SINGLE_INPUT_KINDS = ("aligned_bam", "aligned_bam_index", "small_variant_vcf", "small_variant_vcf_index",
+                      "sv_vcf", "sv_vcf_index", "gvcf", "gvcf_index")
 
 ACTIVE = ("pending", "submitted", "running")
 TERMINAL = ("success", "failed", "cancelled")
@@ -43,11 +63,13 @@ CREATE TABLE IF NOT EXISTS samples (
   father_id TEXT,
   mother_id TEXT,
   added_at TEXT NOT NULL,
-  meta_json TEXT NOT NULL DEFAULT '{}'
+  meta_json TEXT NOT NULL DEFAULT '{}',
+  entry_kind TEXT NOT NULL DEFAULT 'reads'
 );
 CREATE TABLE IF NOT EXISTS sample_inputs (
   sample_id TEXT NOT NULL REFERENCES samples(sample_id) ON DELETE CASCADE,
-  kind TEXT NOT NULL CHECK (kind IN ('hifi_reads', 'fail_reads')),
+  kind TEXT NOT NULL CHECK (kind IN ('hifi_reads', 'fail_reads', 'aligned_bam', 'aligned_bam_index', 'small_variant_vcf',
+    'small_variant_vcf_index', 'sv_vcf', 'sv_vcf_index', 'gvcf', 'gvcf_index')),
   position INTEGER NOT NULL,
   path TEXT NOT NULL,
   checksum TEXT,
@@ -116,7 +138,25 @@ class SampleRecord:
     hifi_reads: list[str] = field(default_factory=list)
     fail_reads: list[str] = field(default_factory=list)
     meta: dict[str, object] = field(default_factory=dict)
+    entry_kind: str = "reads"              # reads (hifi_reads), bam (aligned_bam), vcf (aligned_bam + the VCFs); derived from the sheet
+    aligned_bam: str | None = None
+    aligned_bam_index: str | None = None
+    small_variant_vcf: str | None = None
+    small_variant_vcf_index: str | None = None
+    sv_vcf: str | None = None
+    sv_vcf_index: str | None = None
+    gvcf: str | None = None
+    gvcf_index: str | None = None
     input_info: dict[str, dict[str, object]] = field(default_factory=dict)   # per path: what `bam.inspect` found at registration
+
+    def data_inputs(self) -> list[tuple[str, str]]:
+        """(kind, path) of every data file registered (the read BAMs, the aligned BAM, the VCFs); indices left out."""
+        out = [("hifi_reads", p) for p in self.hifi_reads] + [("fail_reads", p) for p in self.fail_reads]
+        for kind in ("aligned_bam", "small_variant_vcf", "sv_vcf", "gvcf"):
+            p = getattr(self, kind)
+            if p:
+                out.append((kind, p))
+        return out
 
 
 @dataclass
@@ -237,10 +277,11 @@ class DB:
                 c.execute("DELETE FROM sample_inputs WHERE sample_id = ?", (rec.sample_id,))
                 c.execute("DELETE FROM samples WHERE sample_id = ?", (rec.sample_id,))
             c.execute(
-                "INSERT INTO samples (sample_id, sex, father_id, mother_id, added_at, meta_json) VALUES (?, ?, ?, ?, ?, ?)",
-                (rec.sample_id, rec.sex, rec.father_id, rec.mother_id, rec.added_at, json.dumps(rec.meta, sort_keys=True)),
+                "INSERT INTO samples (sample_id, sex, father_id, mother_id, added_at, meta_json, entry_kind) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (rec.sample_id, rec.sex, rec.father_id, rec.mother_id, rec.added_at, json.dumps(rec.meta, sort_keys=True), rec.entry_kind or "reads"),
             )
-            for kind, paths in (("hifi_reads", rec.hifi_reads), ("fail_reads", rec.fail_reads)):
+            single = [(kind, [getattr(rec, kind)]) for kind in SINGLE_INPUT_KINDS if getattr(rec, kind)]
+            for kind, paths in (("hifi_reads", rec.hifi_reads), ("fail_reads", rec.fail_reads), *single):
                 for i, path in enumerate(paths):
                     info = rec.input_info.get(path) or {}
                     c.execute(
@@ -250,6 +291,21 @@ class DB:
                          json.dumps(info, sort_keys=True, default=str)),
                     )
 
+    def update_sample(self, rec: SampleRecord) -> None:
+        """Replace a registered sample's inputs and fields in place (the row stays: runs and cohort members refer to it)."""
+        with self.tx() as c:
+            if not c.execute("SELECT 1 FROM samples WHERE sample_id = ?", (rec.sample_id,)).fetchone():
+                raise UgcError(f"unknown sample {rec.sample_id}")
+            c.execute("UPDATE samples SET sex = ?, father_id = ?, mother_id = ?, meta_json = ?, entry_kind = ? WHERE sample_id = ?",
+                      (rec.sex, rec.father_id, rec.mother_id, json.dumps(rec.meta, sort_keys=True), rec.entry_kind or "reads", rec.sample_id))
+            c.execute("DELETE FROM sample_inputs WHERE sample_id = ?", (rec.sample_id,))
+            single = [(kind, [getattr(rec, kind)]) for kind in SINGLE_INPUT_KINDS if getattr(rec, kind)]
+            for kind, paths in (("hifi_reads", rec.hifi_reads), ("fail_reads", rec.fail_reads), *single):
+                for i, path in enumerate(paths):
+                    info = rec.input_info.get(path) or {}
+                    c.execute("INSERT INTO sample_inputs (sample_id, kind, position, path, bytes, mtime, info_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                              (rec.sample_id, kind, i, path, info.get("bytes"), info.get("mtime"), json.dumps(info, sort_keys=True, default=str)))
+
     def get_sample(self, sample_id: str) -> SampleRecord | None:
         row = self.conn.execute("SELECT * FROM samples WHERE sample_id = ?", (sample_id,)).fetchone()
         if row is None:
@@ -257,13 +313,17 @@ class DB:
         rec = SampleRecord(
             sample_id=row["sample_id"], sex=row["sex"], father_id=row["father_id"], mother_id=row["mother_id"],
             added_at=row["added_at"], meta=json.loads(row["meta_json"] or "{}"),
+            entry_kind=(row["entry_kind"] if "entry_kind" in row.keys() else None) or "reads",
         )
-        for kind in ("hifi_reads", "fail_reads"):
+        for kind in ("hifi_reads", "fail_reads", *SINGLE_INPUT_KINDS):
             rows = self.conn.execute(
                 "SELECT path, info_json FROM sample_inputs WHERE sample_id = ? AND kind = ? ORDER BY position",
                 (sample_id, kind)
             ).fetchall()
-            setattr(rec, kind, [r["path"] for r in rows])
+            if kind in SINGLE_INPUT_KINDS:
+                setattr(rec, kind, rows[0]["path"] if rows else None)
+            else:
+                setattr(rec, kind, [r["path"] for r in rows])
             for r in rows:
                 info = json.loads(r["info_json"] or "{}")
                 if info:

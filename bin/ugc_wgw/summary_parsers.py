@@ -1224,3 +1224,104 @@ def parse_mt_vcf(lines: Iterable[bytes]) -> dict[str, object]:
     return {"records": records, "samples": samples,
             "members": {sid: {"homoplasmic": hom[sid], "heteroplasmic": het[sid],
                               "het_vaf_max": max(vafs[sid]) if vafs[sid] else None} for sid in samples}}
+
+
+def parse_methbat_report(lines: Iterable[str]) -> dict[str, object]:
+    """methbat report (the imprinting regions): counts per report_summary, the regions with their result and QC
+    warnings, and the anomalous ones (a loss of imprinting without a QC warning)."""
+    cols, rows = table(lines)
+    counts = {"pass": 0, "inconclusive": 0, "anomalous": 0, "anomalous_qc": 0}
+    key = {"PASS": "pass", "Inconclusive": "inconclusive", "Anomalous": "anomalous", "AnomalousQcWarning": "anomalous_qc"}
+    regions: list[dict[str, object]] = []
+    for r in rows:
+        summary = r.get("report_summary", "")
+        if summary in key:
+            counts[key[summary]] += 1
+        regions.append({"region": r.get("region_label", ""), "summary": summary, "warnings": r.get("qc_warnings", ""),
+                        "expected": r.get("expected_category", ""), "observed": r.get("summary_label", ""),
+                        "combined": _float(r.get("mean_combined_methyl")), "delta": _float(r.get("mean_meth_delta")),
+                        "phased_sites": _int(r.get("num_phased_sites")), "coverage": _int(r.get("median_total_coverage"))})
+    return {"n": len(rows), **counts, "regions": regions,
+            "anomalous_regions": [str(x["region"]) for x in regions if x["summary"] in ("Anomalous", "AnomalousQcWarning")]}
+
+
+def parse_methyl_summary(lines: Iterable[str]) -> dict[str, dict[str, dict[str, object]]]:
+    """cohort_methyl's long-format summary (resource, metric, key, value) as nested dicts; numbers converted."""
+    out: dict[str, dict[str, dict[str, object]]] = {}
+    for p in _rows(lines):
+        if len(p) < 4 or p[0] == "resource":
+            continue
+        out.setdefault(p[0], {}).setdefault(p[1], {})[p[2]] = _num(p[3])
+    return out
+
+
+def parse_methyl_samples(lines: Iterable[str]) -> list[dict[str, object]]:
+    """cohort_methyl's samples table: one row per member, the counts as numbers."""
+    cols, rows = table(lines)
+    out: list[dict[str, object]] = []
+    for r in rows:
+        row: dict[str, object] = dict(r)
+        for c in cols:
+            if c.startswith(("n_", "imprinting_")) or c == "deconvolution_top_fraction":
+                row[c] = _num(r.get(c, ""))
+        out.append(row)
+    return out
+
+
+def parse_methyl_regions(lines: Iterable[str], top: int = 25, label: str = "ALL") -> dict[str, object]:
+    """cohort_methyl's per-region table, streamed: the regions with the most members carrying an event under `label`
+    (n_hypo + n_hyper + n_hypo_asm + n_hyper_asm), the totals per label, and the region count."""
+    cols: list[str] = []
+    best: list[tuple[int, dict[str, object]]] = []
+    totals: dict[str, dict[str, int]] = {}
+    n_regions = 0
+    for parts in _rows(lines):
+        if not cols:
+            cols = parts
+            continue
+        r = dict(zip(cols, parts))
+        lab = r.get("label", "")
+        events = sum(int(r.get(k) or 0) for k in ("n_hypo", "n_hyper", "n_hypo_asm", "n_hyper_asm"))
+        t = totals.setdefault(lab, {"regions": 0, "events": 0, "regions_with_event": 0})
+        t["regions"] += 1
+        t["events"] += events
+        if events:
+            t["regions_with_event"] += 1
+        if lab == label:
+            n_regions += 1
+            if events:
+                row = {"chrom": r.get("chrom"), "start": _int(r.get("start")), "end": _int(r.get("end")), "region": r.get("region_label"),
+                       "n_datasets": _int(r.get("n_datasets")), "n_hypo": _int(r.get("n_hypo")), "n_hyper": _int(r.get("n_hyper")),
+                       "n_hypo_asm": _int(r.get("n_hypo_asm")), "n_hyper_asm": _int(r.get("n_hyper_asm")), "events": events,
+                       "gene_symbol": r.get("gene_symbol", ""), "hgnc_id": r.get("hgnc_id", ""), "region_type": r.get("region_type", "")}
+                best.append((events, row))
+                if len(best) > top * 4:
+                    best.sort(key=lambda t: -t[0])
+                    del best[top:]
+    best.sort(key=lambda t: (-t[0], str(t[1].get("chrom")), t[1].get("start") or 0))
+    return {"n_regions": n_regions, "top": [r for _n, r in best[:top]], "totals": totals}
+
+
+def parse_methyl_events(lines: Iterable[str], genes: Iterable[str] = (), top: int = 200) -> dict[str, object]:
+    """cohort_methyl's events file, streamed: the row count, the members with an event, the events in the genes of
+    interest (HGNC ids or symbols, case-insensitive; every row when `genes` is empty, capped at `top`)."""
+    wanted = {g.strip().upper() for g in genes if g.strip()}
+    cols: list[str] = []
+    n = 0
+    members: set[str] = set()
+    hits: list[dict[str, object]] = []
+    for parts in _rows(lines):
+        if not cols:
+            cols = parts
+            continue
+        r = dict(zip(cols, parts))
+        n += 1
+        members.add(r.get("sample_id", ""))
+        symbols = {x.upper() for x in (r.get("gene_symbol", "") + ";" + r.get("hgnc_id", "")).split(";") if x}
+        if (not wanted or symbols & wanted) and len(hits) < top:
+            hits.append({"sample_id": r.get("sample_id"), "chrom": r.get("chrom"), "start": _int(r.get("start")), "end": _int(r.get("end")),
+                         "region": r.get("region_label"), "label": r.get("background_category"), "compare": r.get("compare_label"),
+                         "zscore": _float(r.get("mean_combined_methyl_zscore")), "delta": _float(r.get("mean_combined_methyl_delta")),
+                         "asm_zscore": _float(r.get("mean_abs_meth_delta_zscore")), "gene_symbol": r.get("gene_symbol", ""),
+                         "hgnc_id": r.get("hgnc_id", ""), "region_type": r.get("region_type", "")})
+    return {"n": n, "n_members": len(members), "rows": hits}

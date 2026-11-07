@@ -18,9 +18,18 @@ CONFIG_SCHEMA = 1
 DEFAULT_REGISTRY = "ghcr.io/uppsalagenomecenter"
 DEEPVARIANT_MODES = ("cpu", "gpu", "parabricks")   # small-variant caller of singleton/upstream (guide chapter 12)
 # the project keys a site profile may set (`ugc-wgw init --profile`, guide chapter 05); `description` is allowed and ignored
-PROFILE_KEYS = ("max_inflight", "poll_interval", "assembly_use_parents", "pangenome_sv_cohort", "deepvariant", "gpu_type",
+PROFILE_KEYS = ("max_inflight", "poll_interval", "assembly_use_parents", "pangenome_sv_cohort", "methyl_label_columns", "methyl_genes_of_interest", "deepvariant", "gpu_type",
                 "parabricks_gpus", "stage_inputs", "prices", "summary_thresholds", "input_thresholds",
                 "resource_retry_max", "resource_retry_factor", "learn_resources")
+
+
+def _str_list(value: object, what: str) -> list[str]:
+    """A list of non-empty strings (config.json / profile keys that name sheet columns or genes); None or [] is empty."""
+    if value in (None, "", []):
+        return []
+    if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() for v in value):
+        raise UgcError(f"{what} must be a list of non-empty strings")
+    return [v.strip() for v in value]
 
 
 @dataclass
@@ -39,6 +48,8 @@ class Config:
     poll_interval: float = 30.0
     assembly_use_parents: bool = True
     pangenome_sv_cohort: str = ""   # cohort whose cohort_merge SV VCF cohort_pangenome compares the graph with (empty: the same cohort)
+    methyl_label_columns: list[str] = field(default_factory=list)      # sample-sheet columns whose values label members in cohort_methyl's background (besides the sex group)
+    methyl_genes_of_interest: list[str] = field(default_factory=list)  # HGNC ids or symbols the cohort page lists methylation events for first
     auto_retry_max: int = 2
     backoff_seconds: float = 300.0
     resource_retry_max: int = 2        # automatic re-attempts of a task that ran out of time or memory, each with the limit multiplied
@@ -110,6 +121,8 @@ class Config:
             "poll_interval": self.poll_interval,
             "assembly_use_parents": self.assembly_use_parents,
             "pangenome_sv_cohort": self.pangenome_sv_cohort,
+            "methyl_label_columns": self.methyl_label_columns,
+            "methyl_genes_of_interest": self.methyl_genes_of_interest,
             "auto_retry_max": self.auto_retry_max,
             "resource_retry_max": self.resource_retry_max,
             "resource_retry_factor": self.resource_retry_factor,
@@ -161,6 +174,8 @@ class Config:
             poll_interval=float(doc.get("poll_interval", 30.0)),
             assembly_use_parents=bool(doc.get("assembly_use_parents", True)),
             pangenome_sv_cohort=str(doc.get("pangenome_sv_cohort") or "").strip(),
+            methyl_label_columns=_str_list(doc.get("methyl_label_columns"), "methyl_label_columns"),
+            methyl_genes_of_interest=_str_list(doc.get("methyl_genes_of_interest"), "methyl_genes_of_interest"),
             auto_retry_max=int(doc.get("auto_retry_max", 2)),
             resource_retry_max=int(doc.get("resource_retry_max", 2)),
             resource_retry_factor=float(doc.get("resource_retry_factor", 2.0)),
@@ -267,6 +282,9 @@ def load_profile(path: Path) -> dict[str, object]:
         if not isinstance(out["pangenome_sv_cohort"], str):
             raise UgcError(f"profile {path}: pangenome_sv_cohort must be a cohort ID (string)")
         out["pangenome_sv_cohort"] = out["pangenome_sv_cohort"].strip()
+    for key in ("methyl_label_columns", "methyl_genes_of_interest"):
+        if key in out:
+            out[key] = _str_list(out[key], f"profile {path}: {key}")
     for key in ("stage_inputs", "prices", "summary_thresholds", "input_thresholds"):
         if key in out and not isinstance(out[key], dict):
             raise UgcError(f"profile {path}: {key} must be an object")
@@ -300,6 +318,78 @@ def derive_from_install(install: Path) -> dict[str, Path]:
     if missing:
         raise UgcError("install prefix is incomplete; missing " + ", ".join(missing))
     return paths
+
+
+def driver_code_dir() -> Path:
+    """The code directory this driver runs from (`<code>/bin/ugc_wgw/config.py`)."""
+    return Path(__file__).resolve().parents[2]
+
+
+def installed_version_dir(code_dir: Path) -> Path | None:
+    """`<root>/versions/<v>` when `code_dir` is an installed version's code directory (its manifest.json sits next
+    to it), else None (a repository checkout: the dev machine, the tests)."""
+    code_dir = Path(code_dir).resolve()
+    if code_dir.name == "code" and (code_dir.parent / "manifest.json").exists():
+        return code_dir.parent
+    return None
+
+
+def check_engine_paths(cfg: "Config") -> str:
+    """Refuse a project whose engine paths are not this driver's version: the WDLs are read from `code_dir`, the
+    images from the `image_cache` of `miniwdl_cfg`, so a mix of versions fails late (a missing WDL, a registry pull
+    on a cluster without network). Returns the project's version. The remedy is `upgrade --install`."""
+    version = read_version(cfg.code_dir)
+    mine = driver_code_dir()
+    remedy = (f"move the project with `ugc-wgw --project {cfg.project_dir} upgrade --install <root>/current` (or "
+              f"<root>/versions/<v>), or use the project's own driver, {cfg.code_dir / 'bin' / 'ugc-wgw'}")
+    if cfg.code_dir.resolve() != mine:
+        my_version = read_version(mine)
+        if my_version != version:
+            raise UgcError(f"this driver is ugc-wgw {my_version} ({mine}) but the project's code_dir is version {version} "
+                           f"({cfg.code_dir}): {remedy}")
+    vdir = installed_version_dir(cfg.code_dir)
+    if vdir is not None:
+        stray = [f"{k} = {v}" for k, v in (("miniwdl", cfg.miniwdl), ("miniwdl_cfg", cfg.miniwdl_cfg), ("venv_dir", cfg.venv_dir))
+                 if v is not None and not Path(v).resolve().is_relative_to(vdir)]
+        if stray:
+            raise UgcError(f"the project's code_dir is {vdir.name} but " + "; ".join(stray) + f" (not under {vdir}): every "
+                           f"engine path must belong to one installed version, else miniwdl resolves images from another "
+                           f"version's SIF directory; {remedy}")
+    return version
+
+
+def upgrade_project(cfg: "Config", install: Path) -> tuple[str, str, dict[str, tuple[str, str]]]:
+    """Point a project at another installed version: the four engine paths from `install` (DESIGN §14) and the
+    reference map at the same relative place under the new code dir when it lived under the old one. Writes
+    config.json (a copy of the old one stays as config.json.<old version>). Returns (old, new, changes)."""
+    paths = derive_from_install(install)
+    old_version = read_version(cfg.code_dir)
+    new_version = read_version(paths["code"])
+    changes: dict[str, tuple[str, str]] = {}
+    ref_map = cfg.ref_map_file
+    try:
+        rel = cfg.ref_map_file.resolve().relative_to(cfg.code_dir.resolve())
+    except ValueError:
+        rel = None
+    if rel is not None:
+        candidate = paths["code"] / rel
+        if not candidate.exists():
+            raise UgcError(f"the reference map {cfg.ref_map_file} lives under the old code dir but {candidate} does not exist "
+                           f"(was the bundle installed with its references? install-bundle.sh renders it)")
+        ref_map = candidate
+    for key, old, new in (("code_dir", cfg.code_dir, paths["code"]), ("miniwdl", cfg.miniwdl, paths["miniwdl"]),
+                          ("miniwdl_cfg", cfg.miniwdl_cfg, paths["cfg"]), ("venv_dir", cfg.venv_dir, paths["venv"]),
+                          ("ref_map_file", cfg.ref_map_file, ref_map)):
+        if old is None or Path(old).resolve() != Path(new).resolve():
+            changes[key] = (str(old), str(new))
+    if changes:
+        backup = cfg.config_path.with_name(f"config.json.{old_version}")
+        if not backup.exists():
+            backup.write_bytes(cfg.config_path.read_bytes())
+        cfg.code_dir, cfg.miniwdl, cfg.miniwdl_cfg, cfg.venv_dir, cfg.ref_map_file = (
+            paths["code"], paths["miniwdl"], paths["cfg"], paths["venv"], ref_map)
+        save(cfg)
+    return old_version, new_version, changes
 
 
 def read_version(code_dir: Path) -> str:
@@ -352,6 +442,8 @@ def init_project(
     poll_interval: float = 30.0,
     assembly_use_parents: bool = True,
     pangenome_sv_cohort: str = "",
+    methyl_label_columns: list[str] | None = None,
+    methyl_genes_of_interest: list[str] | None = None,
     resource_retry_max: int = 2,
     resource_retry_factor: float = 2.0,
     learn_resources: bool = True,
@@ -383,6 +475,8 @@ def init_project(
         poll_interval=poll_interval,
         assembly_use_parents=assembly_use_parents,
         pangenome_sv_cohort=pangenome_sv_cohort.strip(),
+        methyl_label_columns=_str_list(methyl_label_columns, "methyl_label_columns"),
+        methyl_genes_of_interest=_str_list(methyl_genes_of_interest, "methyl_genes_of_interest"),
         resource_retry_max=resource_retry_max, resource_retry_factor=resource_retry_factor, learn_resources=learn_resources,
         auto_retry_max=auto_retry_max,
         backoff_seconds=backoff_seconds,

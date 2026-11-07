@@ -512,6 +512,22 @@ larger one. The worked policy above was written that way from the first
 ten samples; proposing rows from the accounting automatically stays a
 manual step.
 
+## The methylation layer and the intake stage
+
+`cohort_methyl`'s tasks are small: `ugc_wgw_methbat_build` reads every
+member's profile (about 3 MB each; `build_mem_gb`, 8 GB, covers thousands),
+each `ugc_wgw_methbat_profile_bg` reads one 5mC pileup like upstream's
+`methbat_profile` (1 cpu, `profile_mem_gb` 4 GB), `ugc_wgw_methbat_compare`
+and the summary are seconds. The one task whose size grows with the cohort
+is `ugc_wgw_methbat_joint_segment` (off by default): it loads every
+member's pileup sites into memory (343 MB for four chr20 pileups;
+`joint_segment_threads` 8, `joint_segment_mem_gb` 32 are first guesses
+until a whole-genome cohort has measured it). The per-sample
+`ugc_wgw_methbat_report` is 1 cpu, 4 GB, seconds. `intake` runs mosdepth
+(upstream's request), the somalier extract and the checks (1 cpu, 2 GB,
+minutes on a whole-genome BAM: the checks read the header and the first
+2,000 reads, the VCF headers and sample lists).
+
 ## Evaluation profiles
 
 An evaluation profile runs the production entrypoints with one tool

@@ -160,6 +160,15 @@ grep -q "^somalier_1kg_tar	$qc/1kg.somalier.tar.gz$" "$ref_map"
 [ "$(sha256sum "$qc/somalier_sites.hg38.vcf.gz" | cut -d' ' -f1)" = d1a853b8bb2e5f1a520bc67c8303be699543d225d785bce51e8335a2420489b5 ]
 [ -f "$qc/somalier_ancestry_labels_1kg.tsv" ] && [ ! -f "$qc/1kg.somalier.tar.gz" ]
 grep -q '1kg.somalier.tar.gz not in the bundle (make-bundle.sh --without-ancestry' "$scratch/install.log"
+# the methylation references (references.lock ugc-wgw-methyl): three shipped files, the map's header names its inputs
+me=$scratch/prefix/references/ugc-wgw-methyl-0.1.0
+grep -q "^methbat_report_regions_tsv	$me/methbat_report_regions.hg38.tsv$" "$ref_map"
+grep -q "^methbat_map	$me/methbat_map.GRCh38_GIABv3.tsv$" "$ref_map"
+grep -q "^methbat_atlas_tsv	$me/nanomix_39Bisulfite.methbat.tsv$" "$ref_map"
+[ "$(sha256sum "$me/methbat_report_regions.hg38.tsv" | cut -d' ' -f1)" = 7d8b0a5e9751e90e877c3bd61c651214363f3ee5920679ef4fcfe47dd21e19f3 ]
+grep -q '^##methbat_map_input=gtf	gencode.v50.annotation.gtf.gz	sha256:83fba3e9' "$me/methbat_map.GRCh38_GIABv3.tsv"
+[ "$(grep -vc '^#' "$me/methbat_map.GRCh38_GIABv3.tsv")" -eq 32039 ]   # header + 32,038 islands
+[ -f "$me/nanomix_39Bisulfite.methbat.tsv" ]
 # the assembly stages' references (references.lock ugc-wgw-asm): three shipped files, the derived fasta and its index built
 asm=$scratch/prefix/references/ugc-wgw-asm-0.1.0
 grep -q "^asm_fasta	$asm/human_GRCh38_GIABv3_asm.fasta$" "$ref_map"

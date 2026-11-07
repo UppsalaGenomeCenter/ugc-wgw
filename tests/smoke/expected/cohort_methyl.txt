@@ -1,0 +1,15 @@
+# Expected outputs of ugc_wgw_cohort_methyl in every mode, one glob per line relative to out/.
+# Four members: every compare row is InsufficientData by design (below background_min_datasets); the chr20 slices
+# carry none of the 15 imprinting regions but GNAS, so the imprinting table has 15 rows per member, mostly Inconclusive.
+cohort_background/*.methyl.*.background.tsv
+methyl_collection/*.methyl.*.collection.tsv
+scored_profiles/*/*.methbat.scored.tsv
+scored_profiles_annotated/*/*.methbat.scored.annotated.tsv
+comparisons/*/*.methyl.*.compare.XX_vs_XY.tsv
+member_reports/*/*.methbat.report.tsv
+methyl_summary/*.methyl.*.summary.tsv
+methyl_regions/*.methyl.*.regions.tsv
+methyl_events/*.methyl.*.events.tsv
+methyl_imprinting/*.methyl.*.imprinting.tsv
+methyl_samples/*.methyl.*.samples.tsv
+ugc_wgw_manifest/*.cohort_methyl.ugc_wgw_manifest.json

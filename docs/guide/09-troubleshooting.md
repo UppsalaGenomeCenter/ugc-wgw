@@ -114,7 +114,12 @@ when the site's SIF store lacks one, so a missing SIF under a version means
 the directory, or the store, was edited by hand; chapter 04.) A different registry name in the rendered inputs
 (`ugc_wgw_container_registry`) than the one the SIFs were cached under has the
 same symptom for the svx and trgt-lps tasks of `cohort_merge` and the hifiasm
-and minimap2 tasks of `assembly` and `assembly_call`.
+and minimap2 tasks of `assembly` and `assembly_call`. A pull attempt
+(`pinging container registry … i/o timeout`) for an image that the newest
+version does ship means the project's `miniwdl.cfg` is an older version's,
+whose `image_cache` predates the image: since 0.16.0 the driver refuses such
+a project before submitting (`every engine path must belong to one
+installed version`); move it with `ugc-wgw upgrade --install` (chapter 10).
 
 Apptainer runs with `--containall --no-mount hostfs`: only the task's
 working directory and the declared inputs are visible inside the container,

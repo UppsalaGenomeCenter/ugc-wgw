@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 from .config import Config
 from .db import DB, Cohort, RunRecord
-from .stages import mode_stages, stage_spec
+from .stages import ENTRY_KINDS, member_sequence, mode_stages, sample_stages, stage_spec
 from .util import UgcError, utc_now
 
 
@@ -15,6 +15,7 @@ class Selection:
     stage: str | None = None
     samples: list[str] | None = None
     cohort: str | None = None
+    allow_standalone_members: bool = False   # joint mode: a vcf member without a gVCF phases its own VCFs and skips cohort_call
 
 
 @dataclass
@@ -77,26 +78,97 @@ def _subjects(db: DB, sel: Selection, cohort: Cohort | None) -> list[str]:
     return db.list_sample_ids()
 
 
+def _kind(db: DB, sid: str) -> tuple[str, bool]:
+    """(entry kind, has a gVCF) of a registered sample; reads for an unknown one."""
+    rec = db.get_sample(sid)
+    return (rec.entry_kind or "reads", bool(rec.gvcf) or rec.entry_kind != "vcf") if rec else ("reads", True)
+
+
+def member_stages(db: DB, mode: str, sid: str, *, allow_standalone: bool = False) -> tuple[str, ...]:
+    """The stages member `sid` takes part in, by its entry kind (stages.member_sequence)."""
+    kind, has_gvcf = _kind(db, sid)
+    return member_sequence(mode, kind, has_gvcf=has_gvcf, allow_standalone=allow_standalone)
+
+
+def planned_stages(db: DB, mode: str, samples: list[str]) -> tuple[str, ...]:
+    """The mode's stages with the per-sample stages of every entry kind among `samples` in the place of the mode's
+    (reads: singleton or upstream; bam: upstream and downstream; vcf: intake and downstream), in order."""
+    kinds = sorted({_kind(db, sid)[0] for sid in samples} or {"reads"}, key=ENTRY_KINDS.index)
+    out: list[str] = []
+    for stage in mode_stages(mode):
+        if stage_spec(stage).subject_type == "sample" and stage in ("singleton", "upstream", "assembly"):
+            for kind in kinds:
+                own = sample_stages(mode, kind)
+                head = own[:1] if mode == "joint" else own
+                out.extend(s for s in head if s not in out)
+            continue
+        if stage not in out:
+            out.append(stage)
+    return tuple(out)
+
+
+def gvcf_blockers(db: DB, mode: str, cohort: Cohort | None) -> list[str]:
+    """Joint mode: the vcf members without a gVCF (cohort_call needs one from every member)."""
+    if mode != "joint" or cohort is None:
+        return []
+    return [sid for sid in cohort.members if _kind(db, sid) == ("vcf", False)]
+
+
 def prerequisites(db: DB, mode: str, stage: str, subject_type: str, subject_id: str,
-                  cohort: Cohort | None, version: str | None) -> str | None:
-    """None when every earlier stage of the mode is satisfied, else the reason it is not."""
+                  cohort: Cohort | None, version: str | None, *, allow_standalone: bool = False) -> str | None:
+    """None when every earlier stage is satisfied, else the reason it is not. A sample's earlier stages are those of
+    its own sequence (its entry kind's per-sample stages, the mode's cohort stages); a cohort stage waits for every
+    member's per-sample stages before it and for the cohort stages before it (cohort_qc never gates)."""
+    if subject_type == "sample":
+        seq = member_stages(db, mode, subject_id, allow_standalone=allow_standalone)
+        if stage not in seq:
+            kind, _ = _kind(db, subject_id)
+            return f"{stage} is not a stage of a {kind} sample in {mode} mode ({' -> '.join(seq) or 'none'})"
+        for earlier in seq:
+            if earlier == stage:
+                break
+            espec = stage_spec(earlier)
+            if espec.optional:
+                continue
+            if espec.subject_type == "sample":
+                if db.latest_success("sample", subject_id, earlier, version) is None:
+                    return f"waiting for {earlier} of {subject_id}"
+            else:
+                if cohort is None:
+                    return f"{earlier} needs --cohort"
+                if db.latest_success("cohort", cohort.cohort_id, earlier, version) is None:
+                    return f"waiting for {earlier} of cohort {cohort.cohort_id}"
+        return None
+    if cohort is None:
+        return f"{stage} needs --cohort"
+    if stage == "cohort_call" and not allow_standalone:
+        blockers = gvcf_blockers(db, mode, cohort)
+        if blockers:
+            shown = ", ".join(blockers[:5]) + (f" (+{len(blockers) - 5} more)" if len(blockers) > 5 else "")
+            return (f"joint mode needs a gVCF from every member; vcf member(s) without one: {shown} (register the gvcf column, "
+                    "or submit with --allow-standalone-members to phase them from their own VCFs outside the joint call)")
+    missing: list[str] = []
+    for sid in cohort.members:
+        seq = member_stages(db, mode, sid, allow_standalone=allow_standalone)
+        if stage not in seq:
+            continue   # a member with no place in this cohort stage (a vcf member left out of cohort_call)
+        for earlier in seq:
+            if earlier == stage:
+                break
+            if stage_spec(earlier).subject_type == "sample" and db.latest_success("sample", sid, earlier, version) is None:
+                missing.append(f"{earlier} of {sid}")
+                break
+    if missing:
+        shown = ", ".join(missing[:5]) + (f" (+{len(missing) - 5} more)" if len(missing) > 5 else "")
+        return f"waiting for {shown}"
     for earlier in mode_stages(mode):
         if earlier == stage:
             break
         espec = stage_spec(earlier)
-        if espec.optional:   # cohort_qc never gates: a cohort stage after it runs whether it ran or not
+        if espec.subject_type != "cohort" or espec.optional:
             continue
-        if espec.subject_type == "sample":
-            members = [subject_id] if subject_type == "sample" else (cohort.members if cohort else [])
-            missing = [m for m in members if db.latest_success("sample", m, earlier, version) is None]
-            if missing:
-                shown = ", ".join(missing[:5]) + (f" (+{len(missing) - 5} more)" if len(missing) > 5 else "")
-                return f"waiting for {earlier} of {shown}"
-        else:
-            if cohort is None:
-                return f"{earlier} needs --cohort"
-            if db.latest_success("cohort", cohort.cohort_id, earlier, version) is None:
-                return f"waiting for {earlier} of cohort {cohort.cohort_id}"
+        if db.latest_success("cohort", cohort.cohort_id, earlier, version) is None:
+            return f"waiting for {earlier} of cohort {cohort.cohort_id}"
     return None
 
 
@@ -104,24 +176,31 @@ def compute(db: DB, cfg: Config, sel: Selection, ugc_wgw_version: str, *, any_ve
             retry_failed: bool = False, max_attempts: int | None = None, now: str | None = None) -> Plan:
     """`now` (UTC_FMT) decides whether a backoff has elapsed; tests inject it."""
     now = now or utc_now()
-    stages = mode_stages(sel.mode)
-    if sel.stage:
-        if sel.stage not in stages:
-            raise UgcError(f"stage {sel.stage} is not part of mode {sel.mode} ({' -> '.join(stages)})")
-        selected = (sel.stage,)
-    else:
-        selected = stages
     cohort = _cohort(db, sel)
     if sel.mode == "joint" and cohort is None:
         raise UgcError("joint mode needs --cohort (cohort_call and downstream run in a cohort context)")
     samples = _subjects(db, sel, cohort)
+    stages = planned_stages(db, sel.mode, samples)
+    if sel.stage:
+        if sel.stage not in stages:
+            raise UgcError(f"stage {sel.stage} is not part of mode {sel.mode} for these samples ({' -> '.join(stages)})")
+        selected = (sel.stage,)
+    else:
+        selected = stages
     lookup_version = None if any_version else ugc_wgw_version
     plan = Plan()
 
+    allow = sel.allow_standalone_members
     for stage in selected:
         spec = stage_spec(stage)
         if spec.subject_type == "sample":
-            candidates = [Candidate(stage, "sample", s, cohort.cohort_id if cohort else None) for s in samples]
+            candidates = [Candidate(stage, "sample", s, cohort.cohort_id if cohort else None) for s in samples
+                          if stage in member_stages(db, sel.mode, s, allow_standalone=allow)]
+            for s_id in samples:
+                if stage not in member_stages(db, sel.mode, s_id, allow_standalone=allow) and sel.stage:
+                    kind, _ = _kind(db, s_id)
+                    plan.blocked.append(Blocked(Candidate(stage, "sample", s_id, cohort.cohort_id if cohort else None),
+                                                f"not a stage of a {kind} sample in {sel.mode} mode"))
         elif cohort is None:
             plan.blocked.append(Blocked(Candidate(stage, "cohort", "?", None), f"{stage} needs --cohort <id>"))
             continue
@@ -146,7 +225,7 @@ def compute(db: DB, cfg: Config, sel: Selection, ugc_wgw_version: str, *, any_ve
                         # the task ran out of time or memory and failures/escalate planned a bigger request: no backoff
                         cand.note = (f"escalation: {esc['task']} {esc['resource']} ×{float(esc['factor']):g} "
                                      f"(escalation {esc['n']} of {esc['max']})")
-                        reason = prerequisites(db, sel.mode, stage, cand.subject_type, cand.subject_id, cohort, lookup_version)
+                        reason = prerequisites(db, sel.mode, stage, cand.subject_type, cand.subject_id, cohort, lookup_version, allow_standalone=allow)
                         if reason:
                             plan.blocked.append(Blocked(cand, reason))
                         else:
@@ -166,7 +245,7 @@ def compute(db: DB, cfg: Config, sel: Selection, ugc_wgw_version: str, *, any_ve
                         continue
                     cand.note = (f"auto-retry after transient {latest.error_class} "
                                  f"(attempt {latest.attempt} of {cfg.auto_retry_max + 1})")
-            reason = prerequisites(db, sel.mode, stage, cand.subject_type, cand.subject_id, cohort, lookup_version)
+            reason = prerequisites(db, sel.mode, stage, cand.subject_type, cand.subject_id, cohort, lookup_version, allow_standalone=allow)
             if reason:
                 plan.blocked.append(Blocked(cand, reason))
             else:

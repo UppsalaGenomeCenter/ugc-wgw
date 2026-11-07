@@ -29,8 +29,8 @@ COPY_DOMAINS: dict[str, tuple[str, tuple[tuple[str, str], ...]]] = {
                                ("qc_members", "members"), ("qc_related_pairs", "related_pairs"), ("qc_ancestry", "ancestry"))),
     "tr": ("cohort_tr", (("tr_allele_spectrum", "spectrum"), ("tr_locus_summary", "loci"), ("tr_outlier_pairs", "outliers"),
                          ("tr_pathogenic_screen", "screen"), ("tr_dropout_table", "dropouts"), ("tr_summary", "summary"))),
-    "methyl": ("cohort_methyl", (("cohort_background", "background"), ("methyl_summary", "summary"), ("methyl_imprinting", "imprinting"),
-                                 ("methyl_samples", "samples"), ("methyl_events", "events"))),
+    "methyl": ("cohort_methyl", (("cohort_background", "background"), ("methyl_summary", "summary"), ("methyl_regions", "regions"),
+                                 ("methyl_imprinting", "imprinting"), ("methyl_samples", "samples"), ("methyl_events", "events"))),
 }
 ANCESTRY_SOURCE = ("cohort_qc", "qc_ancestry")   # somalier's ancestry TSV: `#sample_id`, `predicted_ancestry`, probabilities, PCs
 ANCESTRY_NOTE = "ancestry is somalier's projection onto the 1000 Genomes superpopulations (AFR, AMR, EAS, EUR, SAS): a description of structure, not an origin"

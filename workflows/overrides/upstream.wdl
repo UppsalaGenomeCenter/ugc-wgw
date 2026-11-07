@@ -17,6 +17,7 @@ import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/parab
 import "pbmm2.wdl" as Pbmm2  # ugc-wgw override of the alignment subworkflow: prebuilt reference index
 import "../ugc_wgw/qc/somalier.wdl" as Somalier  # ugc-wgw: somalier extract and the sex resolution
 import "../ugc_wgw/mito/collapse.wdl" as Mito  # ugc-wgw: mitorsaw's chrM genotypes collapsed, haplogroups
+import "../ugc_wgw/intake/checks.wdl" as Checks  # ugc-wgw: the checks of an aligned BAM given instead of reads (the bam entry kind)
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl" as Pbmm2Tasks  # upstream's tasks for the fail-reads path
 
 workflow upstream {
@@ -195,6 +196,12 @@ workflow upstream {
       },
       msg: {
         description: "Messages from the workflow"
+      },
+      input_checks: {
+        description: "ugc-wgw: with aligned_bam_in, the checks table of the given BAM (check, target, status, detail)"
+      },
+      input_provenance: {
+        description: "ugc-wgw: with aligned_bam_in, the given BAM's @PG and @RG fields"
       }
     }
   }
@@ -251,6 +258,15 @@ workflow upstream {
     use_alignment_chunking: {
       description: "Whether to chunk BAM files for alignment. If false, all reads will be aligned in a single chunk."
     }
+    aligned_bam_in: {
+      description: "ugc-wgw: an aligned BAM given instead of hifi_reads (the bam entry kind): alignment and merging are skipped and this BAM, checked against the reference first, feeds every caller; hifi_reads is then empty"
+    }
+    aligned_bam_in_index: {
+      description: "Its index"
+    }
+    require_methylation_tags: {
+      description: "ugc-wgw: with aligned_bam_in, fail when its first reads carry no MM/ML tags (true); false notes it"
+    }
     single_sample: {
       description: "Single sample workflow",
       group: "Common"
@@ -299,6 +315,9 @@ workflow upstream {
     String ref_name
     File ref_fasta
     File? pbmm2_index
+    File? aligned_bam_in
+    File? aligned_bam_in_index
+    Boolean require_methylation_tags = true
     File ref_index
     Float max_norm_female_chrY_depth
     String paraphase_genome_build
@@ -321,35 +340,58 @@ workflow upstream {
     RuntimeAttributes default_runtime_attributes
   }
 
-  scatter (hifi_read_bam in hifi_reads) {
-    call Pbmm2.pbmm2 as pbmm2 { input:
+  # ugc-wgw: an aligned BAM given instead of reads (the bam entry kind) is checked against the reference and used as is
+  if (defined(aligned_bam_in)) {
+    call Checks.ugc_wgw_input_checks as bam_in_checks { input:
       sample_id = sample_id,
-      bam = hifi_read_bam,
-      use_alignment_chunking = use_alignment_chunking,
-      ref_fasta = ref_fasta,
-      pbmm2_index = pbmm2_index,
-      ref_name = ref_name,
-      default_runtime_attributes = default_runtime_attributes
-    }
-  }
-
-  # merge aligned bams if there are multiple
-  if (length(flatten(pbmm2.aligned_bams)) > 1) {
-    call Pbsamoa.pbsamoa_merge as merge_hifi_reads { input:
-      bams = flatten(pbmm2.aligned_bams),
-      out_prefix = "~{sample_id}.~{ref_name}.hifi_reads",
+      aligned_bam = select_first([aligned_bam_in]),
+      aligned_bam_index = select_first([aligned_bam_in_index]),
+      ref_index = ref_index,
+      require_methylation_tags = require_methylation_tags,
       runtime_attributes = default_runtime_attributes
     }
   }
 
-  # select the merged bam if it exists, otherwise select the first (only) aligned bam
+  if (!defined(aligned_bam_in)) {
+    scatter (hifi_read_bam in hifi_reads) {
+      call Pbmm2.pbmm2 as pbmm2 { input:
+        sample_id = sample_id,
+        bam = hifi_read_bam,
+        use_alignment_chunking = use_alignment_chunking,
+        ref_fasta = ref_fasta,
+        pbmm2_index = pbmm2_index,
+        ref_name = ref_name,
+        default_runtime_attributes = default_runtime_attributes
+      }
+    }
+
+    # merge aligned bams if there are multiple
+    if (length(flatten(pbmm2.aligned_bams)) > 1) {
+      call Pbsamoa.pbsamoa_merge as merge_hifi_reads { input:
+        bams = flatten(pbmm2.aligned_bams),
+        out_prefix = "~{sample_id}.~{ref_name}.hifi_reads",
+        runtime_attributes = default_runtime_attributes
+      }
+    }
+
+    # select the merged bam if it exists, otherwise select the first (only) aligned bam
+    File aligned_from_reads = select_first([
+      merge_hifi_reads.merged_bam,
+      flatten(pbmm2.aligned_bams)[0]
+    ])
+    File aligned_from_reads_index = select_first([
+      merge_hifi_reads.merged_bam_index,
+      flatten(pbmm2.aligned_bam_indices)[0]
+    ])
+  }
+
   File aligned_bam_data = select_first([
-    merge_hifi_reads.merged_bam,
-    flatten(pbmm2.aligned_bams)[0]
+    aligned_bam_in,
+    aligned_from_reads
   ])
   File aligned_bam_index = select_first([
-    merge_hifi_reads.merged_bam_index,
-    flatten(pbmm2.aligned_bam_indices)[0]
+    aligned_bam_in_index,
+    aligned_from_reads_index
   ])
 
   call Mosdepth.mosdepth { input:
@@ -652,6 +694,8 @@ workflow upstream {
     String somalier_sex = ugc_wgw_resolve_sex.somalier_sex
     File somalier_extract = ugc_wgw_somalier_extract.somalier
     File somalier_sex_tsv = ugc_wgw_resolve_sex.sex_tsv
+    File? input_checks = bam_in_checks.checks  # ugc-wgw: with aligned_bam_in
+    File? input_provenance = bam_in_checks.provenance
 
     # per sample sv signatures
     File discover_tar = sawfish_discover.discover_tar
@@ -712,7 +756,8 @@ workflow upstream {
 
     # qc messages
     Array[String] msg = flatten([
-      flatten(pbmm2.msg),
+      flatten(select_first([pbmm2.msg, []])),
+      select_first([bam_in_checks.msg, []]),
       [
         include_fail_reads
       ],

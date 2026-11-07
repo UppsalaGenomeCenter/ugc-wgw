@@ -409,7 +409,7 @@ def identity_pass(d: dict[str, object], sheet_order: dict[str, int]) -> tuple[li
 
 
 def build_cohort_digest(cohort: Cohort, members: dict[str, dict[str, object]], cruns: dict[str, RunRecord], mode: str,
-                        thr: dict[str, float]) -> dict[str, object]:
+                        thr: dict[str, float], *, genes_of_interest: list[str] | None = None) -> dict[str, object]:
     warnings: list[str] = []
     rows: list[dict[str, object]] = []
     for sid in cohort.members:
@@ -515,6 +515,28 @@ def build_cohort_digest(cohort: Cohort, members: dict[str, dict[str, object]], c
                     p = outs.opt(name)
                     if isinstance(p, str) and Path(p).exists():
                         entry[name] = {"path": p, "bytes": Path(p).stat().st_size}
+            elif stage == "cohort_methyl":
+                p = outs.opt("methyl_summary")
+                if isinstance(p, str) and Path(p).exists():
+                    entry["summary"] = sp.parse_methyl_summary(sp.read_lines(Path(p)))
+                p = outs.opt("methyl_samples")
+                if isinstance(p, str) and Path(p).exists():
+                    entry["samples"] = sp.parse_methyl_samples(sp.read_lines(Path(p)))
+                p = outs.opt("methyl_imprinting")
+                if isinstance(p, str) and Path(p).exists():
+                    entry["imprinting"] = sp.table(sp.read_lines(Path(p)))[1]
+                p = outs.opt("methyl_regions")
+                if isinstance(p, str) and Path(p).exists():
+                    entry["regions"] = sp.parse_methyl_regions(sp.read_lines(Path(p)))
+                p = outs.opt("methyl_events")
+                if isinstance(p, str) and Path(p).exists():
+                    entry["events"] = sp.parse_methyl_events(sp.read_lines(Path(p)), genes=genes_of_interest or ())
+                    entry["events"]["bytes"] = Path(p).stat().st_size  # type: ignore[index]
+                for name in ("cohort_background", "methyl_collection", "joint_segments"):
+                    p = outs.opt(name)
+                    if isinstance(p, str) and Path(p).exists():
+                        entry[name] = {"path": p, "bytes": Path(p).stat().st_size}
+                entry["genes_of_interest"] = list(genes_of_interest or [])
             elif stage == "cohort_freq":
                 p = outs.opt("freq_summary")
                 if isinstance(p, str) and Path(p).exists():
@@ -558,6 +580,36 @@ def build_cohort_digest(cohort: Cohort, members: dict[str, dict[str, object]], c
                          "n_fail": sum(1 for r in present if r.get("identity_status") == "fail"),
                          "legacy_extracted": qc_entry.get("legacy_extracted", [])})
 
+    # methylation: cohort_methyl's samples table joined to the member rows (events per member, the MAD outliers)
+    me_entry: dict[str, object] = callsets.get("cohort_methyl") if isinstance(callsets.get("cohort_methyl"), dict) else {}  # type: ignore[assignment]
+    methylation: dict[str, object] = {"available": bool(me_entry.get("samples") is not None)}
+    if methylation["available"]:
+        mrows: list[dict[str, object]] = me_entry.get("samples", [])  # type: ignore[assignment]
+        by_id_m = {str(r.get("sample_id")): r for r in mrows}
+        values = {sid: float(r["n_events"]) for sid, r in by_id_m.items() if isinstance(r.get("n_events"), (int, float)) and sid in present_members}
+        mflags: dict[str, list[dict[str, object]]] = {}
+        med, mad, _ = _outliers(values) if values else (None, None, [])
+        limit = (med + thr.get("methyl_events_mad_max", 3.0) * mad) if (med is not None and mad is not None and len(values) >= 4) else None
+        for sid, v in values.items():
+            if limit is not None and v > limit and mad:   # a constant cohort (mad 0) flags nobody
+                mflags.setdefault(sid, []).append({"code": "methyl_outlier", "severity": "warn",
+                                                   "message": f"{int(v)} methylation events against the cohort background, above the cohort's median {sv.fmt(med)} + "
+                                                              f"{sv.fmt(thr.get('methyl_events_mad_max', 3.0), 1)} MAD ({sv.fmt(limit, 1)})", "value": v, "threshold": limit})
+        for r in present:
+            fl = mflags.get(str(r["id"]), [])
+            if fl:
+                r["flags"] = sorted(set(r["flags"]) | {str(f["code"]) for f in fl})  # type: ignore[arg-type]
+                r["qc_status"] = _worst([str(r.get("qc_status", "pass"))] + [str(f["severity"]) for f in fl])
+            mr = by_id_m.get(str(r["id"]))
+            r["methyl_events"] = _num(mr.get("n_events")) if mr else None
+            r["imprinting_anomalous"] = _num(mr.get("imprinting_anomalous")) if mr else None
+        if values:
+            distributions["methyl_events"] = {"label": "methylation events (cohort_methyl)", "digits": 0, "unit": "", "values": values, "median": med, "mad": mad,
+                                              "outliers": sorted(mflags), "threshold": None, "direction": "max", "beyond_threshold": [], "below_threshold": []}
+        methylation.update({"flags": mflags, "counts": {"methyl_outlier": len(mflags)},
+                            "members": {sid: by_id_m.get(sid, {"sample_id": sid}) for sid in cohort.members},
+                            "legacy_reported": [sid for sid, r in by_id_m.items() if str(r.get("report_source")) == "stage"]})
+
     sex: dict[str, object] = {"sheet": {}, "inferred": {}, "somalier": {}, "used": {}, "karyotype": {},
                               "mismatches": [r["id"] for r in present if "sex_mismatch" in r["flags"]],  # type: ignore[operator]
                               "karyotype_mismatches": [r["id"] for r in present if "asm_karyotype_mismatch" in r["flags"]],  # type: ignore[operator]
@@ -591,7 +643,8 @@ def build_cohort_digest(cohort: Cohort, members: dict[str, dict[str, object]], c
             "cohort": {"id": cohort.cohort_id, "frozen_at": cohort.frozen_at, "sha256": cohort.sample_list_sha256, "n": len(cohort.members)},
             "runs": {s: {"run_id": r.run_id, "ugc_wgw_version": r.ugc_wgw_version, "attempt": r.attempt, "finished_at": r.finished_at} for s, r in cruns.items()},
             "members": rows, "missing_members": [r["id"] for r in rows if not r.get("present")],
-            "distributions": distributions, "sex": sex, "identity": identity, "callsets": callsets, "targeted": targeted, "assembly": assembly,
+            "distributions": distributions, "sex": sex, "identity": identity, "methylation": methylation, "callsets": callsets, "targeted": targeted,
+            "assembly": assembly,
             "versions": versions,
             "thresholds": dict(thr), "provenance": prov, "warnings": warnings}
 
@@ -669,6 +722,97 @@ def _identity_html(ident: dict[str, object], cq: dict[str, object], present: lis
                  + ", ".join(_esc(x) for x in legacy[:50]) + ("…" if len(legacy) > 50 else "") + ".</p>")
     if cq.get("qc_html"):
         body += f"<p class='small muted'>somalier's own interactive report: <code>{_esc((cq.get('qc_html') or {}).get('path'))}</code>.</p>"  # type: ignore[union-attr]
+    return body
+
+
+def _methyl_html(meth: dict[str, object], cme: dict[str, object], events_dist: dict[str, object] | None, thr: dict[str, float], link) -> str:  # type: ignore[no-untyped-def]
+    """The Methylation section: the background and its labels, events per member, the recurrent regions and genes, the
+    imprinting screen, the comparisons, deconvolution when run."""
+    summ: dict[str, dict[str, dict[str, object]]] = cme.get("summary", {}) or {}  # type: ignore[assignment]
+    cohort_s = summ.get("cohort", {})
+    val = lambda metric: (cohort_s.get(metric) or {}).get("")  # noqa: E731
+    labels: dict[str, object] = (summ.get("labels", {}).get("n_members") or {})
+    notes = summ.get("notes", {})
+    below = notes.get("label_below_min", {}) or {}
+    body = _cards([("members", val("n_members")), ("regions", val("n_regions")), ("events (Hypo/Hyper rows)", val("n_events")),
+                   ("labels", len(labels)), ("reports made in the stage", val("reports_made_in_stage")),
+                   ("members flagged methyl_outlier", (meth.get("counts") or {}).get("methyl_outlier", 0))])  # type: ignore[union-attr]
+    body += ("<h3>Background labels</h3>"
+             + _table(["label", "members", "note"], [[lab, sv.fmt(n), ("below the minimum: " + str(below[lab])) if lab in below else ""] for lab, n in labels.items()], cls="")
+             + f"<p class='small muted'>Every member is in <code>ALL</code>; its sex group and the project's <code>methyl_label_columns</code> add labels. A label needs "
+               f"{sv.fmt(val('background_min_datasets'))} members before a member can be Hypo- or Hyper-methylated against it (MethBat's --min-datasets); "
+               "below that every comparison is <code>InsufficientData</code>.</p>")
+    if events_dist:
+        body += ("<h3>Events per member</h3>"
+                 + sv.strip_or_band([{"label": "methylation events", "points": sorted(events_dist["values"].items()), "outliers": events_dist.get("outliers", []),  # type: ignore[union-attr, attr-defined]
+                                      "threshold": None, "beyond": [], "digits": 0, "unit": ""}], width=700)
+                 + "<p class='small muted'>Rows of a member's scored profile whose compare_label is HypoMethylated, HyperMethylated, HypoASM or HyperASM, over "
+                   "every label the member carries; red points lie beyond median + 3 MAD (<code>methyl_outlier</code>, warn). A member with many events "
+                   "against a healthy background is the one to look at; a region flagged in many members is a cohort artefact, not many events.</p>")
+    genes = summ.get("genes", {}).get("members_with_event", {}) or {}
+    types = summ.get("region_type", {}).get("n_events", {}) or {}
+    regions_entry: dict[str, object] = cme.get("regions", {}) or {}  # type: ignore[assignment]
+    top_regions: list[dict[str, object]] = regions_entry.get("top", []) or []  # type: ignore[assignment]
+    if genes or types or top_regions:
+        body += '<div class="grid"><div><h3>Genes with the most members carrying an event</h3>'
+        body += (sv.bars_h(sorted(((g, float(n), "") for g, n in genes.items()), key=lambda t: -t[1])[:25], width=300, label_w=120, cls="m3") if genes
+                 else "<p class='muted'>No event.</p>")
+        body += "</div><div><h3>Events by region type</h3>"
+        body += (sv.bars_h(sorted(((t, float(n), "") for t, n in types.items()), key=lambda t: -t[1]), width=300, label_w=100, cls="m5") if types else "<p class='muted'>None.</p>")
+        body += "</div></div>"
+        if top_regions:
+            body += ("<h3>Recurrent regions (label ALL)</h3>"
+                     + big_table(["region", "position", "genes", "type", "members with an event", "hypo", "hyper", "hypo ASM", "hyper ASM", "datasets"],
+                                 [[r.get("region"), f"{r.get('chrom')}:{sv.fmt(r.get('start'))}-{sv.fmt(r.get('end'))}", r.get("gene_symbol"), r.get("region_type"),
+                                   sv.fmt(r.get("events")), sv.fmt(r.get("n_hypo")), sv.fmt(r.get("n_hyper")), sv.fmt(r.get("n_hypo_asm")), sv.fmt(r.get("n_hyper_asm")),
+                                   sv.fmt(r.get("n_datasets"))] for r in top_regions],
+                                 what=f"{len(top_regions)} regions with the most members carrying an event", open_below=30)
+                     + "<p class='small muted'>A region flagged in a large share of members is a reference or mappability artefact to exclude, not a shared rare event; "
+                       "the full table is <code>methyl_regions</code> and the export's <code>methyl.regions.tsv</code>.</p>")
+    ev: dict[str, object] = cme.get("events", {}) or {}  # type: ignore[assignment]
+    goi: list[str] = cme.get("genes_of_interest", []) or []  # type: ignore[assignment]
+    if goi:
+        rows: list[dict[str, object]] = ev.get("rows", []) or []  # type: ignore[assignment]
+        body += (f"<h3>Events in the genes of interest</h3><p class='small muted'>methyl_genes_of_interest: {_esc(', '.join(goi))}.</p>"
+                 + (big_table(["sample", "region", "genes", "type", "label", "call", "methylation z", "delta %", "ASM z"],
+                              [[link(r.get("sample_id")), r.get("region"), r.get("gene_symbol"), r.get("region_type"), r.get("label"), r.get("compare"),
+                                sv.fmt(r.get("zscore"), 2), sv.fmt(r.get("delta"), 1), sv.fmt(r.get("asm_zscore"), 2)] for r in rows],
+                              what=f"{len(rows)} events in the genes of interest", open_below=50) if rows else "<p class='muted'>None.</p>"))
+    imp_rows: list[dict[str, str]] = cme.get("imprinting", []) or []  # type: ignore[assignment]
+    if imp_rows:
+        per_region: dict[str, dict[str, int]] = {}
+        anomalous_members: dict[str, list[str]] = {}
+        for r in imp_rows:
+            reg = r.get("region_label", "")
+            c = per_region.setdefault(reg, {"PASS": 0, "Inconclusive": 0, "Anomalous": 0, "AnomalousQcWarning": 0})
+            c[r.get("report_summary", "")] = c.get(r.get("report_summary", ""), 0) + 1
+            if r.get("report_summary") in ("Anomalous", "AnomalousQcWarning"):
+                anomalous_members.setdefault(reg, []).append(r.get("sample_id", ""))
+        imp_summary = summ.get("imprinting", {})
+        n_anom = sum(1 for sid, v in (imp_summary.get("Anomalous") or {}).items() if isinstance(v, (int, float)) and v > 0)
+        body += ("<h3>Imprinting screen (methbat report)</h3>"
+                 + _cards([("regions", len(per_region)), ("members with an Anomalous region", n_anom),
+                           ("reports made in the stage", len(meth.get("legacy_reported", []) or []))])  # type: ignore[arg-type]
+                 + _table(["region", "PASS", "inconclusive", "anomalous", "anomalous with QC warning", "members anomalous"],
+                          [[reg, c["PASS"], c["Inconclusive"], c["Anomalous"], c["AnomalousQcWarning"],
+                            Raw(", ".join(str(link(m)) for m in anomalous_members.get(reg, [])[:12]) + (" …" if len(anomalous_members.get(reg, [])) > 12 else ""))]
+                           for reg, c in per_region.items()], cls="")
+                 + "<p class='small muted'>Expected allele-specific methylation at every region; <code>Inconclusive</code> mostly means low haplotype coverage "
+                   "or few phased sites. The member table is <code>methyl_imprinting</code>; each member's page lists its regions.</p>")
+    comp = summ.get("compare", {})
+    if comp:
+        crow = [[pair, ", ".join(f"{lab} {sv.fmt(n)}" for lab, n in sorted(counts.items())), str((notes.get("compare") or {}).get(pair, ""))] for pair, counts in comp.items()]
+        body += "<h3>Group comparisons (methbat compare)</h3>" + _table(["pair (baseline:compare)", "summary_comparison counts", "note"], crow, cls="")
+        body += ("<p class='small muted'>The default <code>XX:XY</code> pair is a check as much as a result: chrX regions should differ and little else. "
+                 "Each comparison file is an output of the stage.</p>")
+    dec = summ.get("deconvolution", {}).get("top_cell_type", {}) or {}
+    if dec:
+        counts_c: dict[str, int] = {}
+        for cell in dec.values():
+            counts_c[str(cell)] = counts_c.get(str(cell), 0) + 1
+        body += ("<h3>Cell-type deconvolution (methbat deconvolve, nanomix 39Bisulfite atlas, an example)</h3>"
+                 + sv.bars_h(sorted(((c, float(n), "") for c, n in counts_c.items()), key=lambda t: -t[1]), width=300, label_w=140)
+                 + "<p class='small muted'>Each member's largest estimated fraction; the atlas is not validated for our tissue.</p>")
     return body
 
 
@@ -829,6 +973,13 @@ def render_cohort(d: dict[str, object], tools: list[dict[str, object]], *, proje
                                [[link(r.get("sample_id")), r.get("group"), r.get("sex_source"), r.get("in_small_variant_vcf"), r.get("in_sv_vcf")]
                                 + ([r.get("in_mt_vcf")] if has_mt else []) for r in fs]) + "</details>")
     add("sec-freq", "Allele frequencies (cohort_freq)", fbody or "<p class='muted'>cohort_freq has not run.</p>")
+
+    # methylation (cohort_methyl)
+    meth: dict[str, object] = d.get("methylation", {}) or {}  # type: ignore[assignment]
+    cme: dict[str, object] = callsets.get("cohort_methyl", {}) or {}
+    if d.get("mode") != "assembly":
+        add("sec-methyl", "Methylation (cohort_methyl)", _methyl_html(meth, cme, dist.get("methyl_events"), thr, link) if cme else
+            "<p class='muted'>cohort_methyl has not run for this cohort (<code>ugc-wgw submit --cohort " + _esc(cid) + " --stage cohort_methyl</code>).</p>")
 
     # targeted callers across the cohort (export.targeted_summary: the same tables `ugc-wgw export` writes)
     tg: dict[str, object] = d.get("targeted", {}) or {}  # type: ignore[assignment]

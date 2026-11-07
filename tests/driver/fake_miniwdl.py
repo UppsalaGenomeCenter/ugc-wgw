@@ -33,6 +33,7 @@ Environment knobs:
                           cohort_qc inputs declare as parent-child gets expected 0.5 in the tables
   UGC_WGW_FAKE_FAIL_STAGES=cohort_qc   stages that fail (every subject), on top of UGC_WGW_FAKE_FAIL
   seed key "haplogroup" (default H5a7): the sample's mitochondrial haplogroup in the 0.15.0 outputs (omitted with "legacy")
+  seed key "imprinting" ("anomalous"): the sample's methbat report (0.16.0; omitted with "legacy") carries an Anomalous region
 """
 from __future__ import annotations
 
@@ -152,8 +153,13 @@ def make_outputs(stage: str, inputs: dict[str, object], run_dir: pathlib.Path,
         strings["stat_depth_mean"] = "30.1"
         _sex_outputs(sid, v, inferred, files, strings)
         _mito_outputs(sid, v, files, strings)
+        if not v.get("legacy"):
+            files["methbat_report"] = f"{sid}.{REF}.methbat.report.tsv"
     elif stage == "upstream":
         f("aligned_hifi_reads", f"{sid}.{REF}.hifi_reads.bam")
+        if v.get("aligned_bam_in"):
+            files["input_checks"] = f"{sid}.input_checks.tsv"
+            files["input_provenance"] = f"{sid}.input_provenance.tsv"
         if v.get("fail_reads"):
             f("aligned_fail_reads", f"{sid}.{REF}.fail_reads.bam")
         f("small_variant_vcf", f"{sid}.{REF}.small_variants.vcf.gz")
@@ -183,6 +189,8 @@ def make_outputs(stage: str, inputs: dict[str, object], run_dir: pathlib.Path,
             files["split_sv_vcfs"] = [f"{m}.{sid}.joint.{REF}.structural_variants.vcf.gz" for m in members]
             files["split_sv_vcf_indices"] = [x + ".tbi" for x in files["split_sv_vcfs"]]  # type: ignore[union-attr]
     elif stage == "downstream":
+        if not v.get("legacy"):
+            files["methbat_report"] = f"{sid}.{REF}.methbat.report.tsv"
         f("merged_haplotagged_bam", f"{sid}.{REF}.haplotagged.bam")
         f("phased_small_variant_vcf", f"{sid}.{REF}.small_variants.phased.vcf.gz")
         f("phased_sv_vcf", f"{sid}.{REF}.structural_variants.phased.vcf.gz")
@@ -303,6 +311,32 @@ def make_outputs(stage: str, inputs: dict[str, object], run_dir: pathlib.Path,
             files["qc_ancestry"] = f"{sid}.qc.{REF}.somalier-ancestry.tsv"
             files["qc_ancestry_html"] = f"{sid}.qc.{REF}.somalier-ancestry.html"
         files["somalier_extracts"] = [f"{m}.somalier" for m in members]
+    elif stage == "intake":
+        f("aligned_hifi_reads", f"{sid}.{REF}.hifi_reads.bam")
+        f("small_variant_vcf", f"{sid}.{REF}.small_variants.vcf.gz")
+        f("sv_vcf", f"{sid}.{REF}.structural_variants.vcf.gz")
+        if v.get("gvcf_in"):
+            f("small_variant_gvcf", f"{sid}.{REF}.small_variants.g.vcf.gz")
+        f("mosdepth_region_bed", f"{sid}.{REF}.mosdepth.regions.bed.gz")
+        files["mosdepth_summary"] = f"{sid}.{REF}.mosdepth.summary.txt"
+        files["mosdepth_depth_distribution_plot"] = f"{sid}.{REF}.mosdepth.depth_distribution.png"
+        files["input_checks"] = f"{sid}.input_checks.tsv"
+        files["input_provenance"] = f"{sid}.input_provenance.tsv"
+        inferred = _inferred_sex(sid, v)
+        strings.update({"inferred_sex": inferred, "stat_depth_mean": "30.1", "msg": []})
+        _sex_outputs(sid, v, inferred, files, strings)
+    elif stage == "cohort_methyl":
+        members = [str(m) for m in v.get("sample_ids", [])]  # type: ignore[union-attr]
+        files["cohort_background"] = f"{sid}.methyl.{REF}.background.tsv"
+        files["methyl_collection"] = f"{sid}.methyl.{REF}.collection.tsv"
+        files["scored_profiles"] = [f"{m}.{REF}.methbat.scored.tsv" for m in members]
+        files["scored_profiles_annotated"] = [f"{m}.{REF}.methbat.scored.annotated.tsv" for m in members]
+        files["comparisons"] = [f"{sid}.methyl.{REF}.compare.{str(pair).replace(':', '_vs_')}.tsv" for pair in (v.get("compare_pairs") or ["XX:XY"])]  # type: ignore[union-attr]
+        files["member_reports"] = [f"{m}.{REF}.methbat.report.tsv" for m in members]
+        for name in ("methyl_summary", "methyl_regions", "methyl_events", "methyl_imprinting", "methyl_samples"):
+            files[name] = f"{sid}.methyl.{REF}.{name[7:]}.tsv"
+        if v.get("run_joint_segment"):
+            files["joint_segments"] = f"{sid}.methyl.{REF}.joint.meth_regions.bed"
     else:
         raise SystemExit(f"fake miniwdl: unknown stage {stage}")
 
@@ -322,11 +356,14 @@ def make_outputs(stage: str, inputs: dict[str, object], run_dir: pathlib.Path,
                 "resolved": str(strings.get("resolved_sex") or ""), "source": str(strings.get("resolved_sex_source") or "")}
     # cohort_merge: the members collapsed in the stage (a non-null mitorsaw VCF input); cohort_freq: whether the mt sets came
     legacy_members = [m for m, x in zip(members_of, v.get("mitorsaw_vcfs") or []) if x] if isinstance(v.get("mitorsaw_vcfs"), list) else []
+    if stage == "cohort_methyl":   # the members whose report the stage made (a null methbat_reports entry)
+        legacy_members = [m for m, x in zip(members_of, v.get("methbat_reports") or []) if x is None]
     has_mt = bool(v.get("mt_small_variant_vcf")) or bool(v.get("merge_mitochondria"))
 
     def write_fixture(p: pathlib.Path, name: str, index: int, placeholder: str) -> None:
         content = fixture_bytes(name, sid, stage, inferred_for_fixture, index=index, members=members_of, pedigree=pedigree, sex=sex_info,
-                                legacy=legacy_members, mt=has_mt, haplogroup=str(strings.get("mt_haplogroup") or "H5a7"))
+                                legacy=legacy_members, mt=has_mt, haplogroup=str(strings.get("mt_haplogroup") or "H5a7"),
+                                imprinting=str(v.get("imprinting") or ""), labels=[str(x) for x in (v.get("sample_labels") or [])])
         if content is None:
             p.write_text(placeholder)
         elif p.name.endswith(".gz"):

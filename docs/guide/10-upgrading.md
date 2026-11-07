@@ -60,13 +60,38 @@ touched.
 
 ## Moving a project to a new version
 
-Either create a new project against the new install (chapter 05) and register
-the same sample sheet and cohort list, or edit the four engine paths in
-`.ugc-wgw/config.json` (`code_dir`, `miniwdl`, `miniwdl_cfg`, `venv_dir`) and
-the one reference map path (`ref_map_file`) to the new version's
-directories. The driver reads `VERSION` from `code_dir` on every command, so
-after the edit every subject is "not done" at the new version and `submit`
-starts from the first stage.
+A project is pinned to the version it was initialised with: the four engine
+paths in `.ugc-wgw/config.json` (`code_dir`, `miniwdl`, `miniwdl_cfg`,
+`venv_dir`) and the reference map (`ref_map_file`) name one
+`versions/<v>/` directory, and installing a newer version changes nothing in
+existing projects. Move a project with
+
+```bash
+ugc-wgw --project /proj/ugc/projects/cohort2026 upgrade --install /proj/ugc/current
+```
+
+(or `--install <root>/versions/<v>`): it rewrites the four engine paths to
+that version, moves the reference map to the same place under the new code
+directory when it lived under the old one (a reference map elsewhere is
+kept as it is), keeps the previous file as `config.json.<old version>`,
+migrates the state database and records a `project.upgraded` event. The
+driver reads `VERSION` from `code_dir` on every command, so after the move
+every subject is "not done" at the new version and `submit` starts from the
+first stage (or takes the old results with `--any-version`, below).
+
+The driver refuses a project whose engine paths are not its own version's,
+before it opens anything: `this driver is ugc-wgw 0.15.0 … but the
+project's code_dir is version 0.12.6` when `current/bin/ugc-wgw` is run on
+a project that was never moved (the WDLs are read from `code_dir`, so a
+stage that did not exist at the old version has no workflow file there),
+and `every engine path must belong to one installed version` when the paths
+mix versions (then miniwdl resolves images from another version's
+`image_cache`, finds a newer image missing and tries the registry, which
+the cluster cannot reach). Both messages name the `upgrade` command; the
+alternative is always the project's own driver,
+`<root>/versions/<v>/code/bin/ugc-wgw`. A new project against the new
+install (chapter 05) with the same sheet and cohort list also works, at the
+price of the run history in the database.
 
 What actually re-runs is decided by miniwdl's call cache, not by the driver:
 a task whose inputs, command and image digest are unchanged replays from the
@@ -114,6 +139,32 @@ or `upstream` for an old member replays every task but the two new ones
 from the call cache. The cohort small-variant VCF loses its chrM records at
 0.15 (GLnexus skips the shard): a result change for anyone who read chrM
 from it.
+
+## Members from before 0.16 in `cohort_methyl`
+
+`cohort_methyl` tabulates the imprinting report (`methbat report`) that
+`singleton` and `downstream` make since 0.16. For a member whose latest run
+predates it the driver passes a null and the stage makes the report from
+the member's 5mC pileup itself (seconds), marking it `stage` in
+`report_source`; the background, the scoring and the comparisons read the
+pileups and profiles every run since v4.0.0 has. So a cohort run through
+`cohort_methyl` at 0.16 with `--any-version` gets the whole methylation
+layer without any per-sample re-run. Re-running `singleton` or `downstream`
+for an old member replays every task but the report from the call cache.
+
+## Re-processing a member from its own earlier results
+
+A tool change after alignment (HiPhase, TRGT, MethBat) used to cost the
+whole per-sample stage, replayed from the call cache but re-planned and
+re-recorded. `ugc-wgw samples rebase <id> --from-run <run_id>` registers
+the aligned BAM of one of the member's successful `singleton`, `upstream`
+or `intake` runs as its input (the `bam` entry kind; `--with-vcfs` takes its
+small-variant and SV VCFs and gVCF too: the `vcf` kind), and records the
+reads it replaced in the sample's metadata. The next `submit` runs the
+member's new sequence (`upstream` and `downstream`, or `intake` and
+`downstream`) and reuses the files by path; the manifests name them with
+their size and modification time. The member's older runs stay on disk and
+in the database; its summaries read the new runs.
 
 ## Assemblies across versions
 

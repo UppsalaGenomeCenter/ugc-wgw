@@ -6,14 +6,18 @@ import re
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import bam
-from .db import DB, SampleRecord
+from . import bam, vcf
+from .db import DB, SINGLE_INPUT_KINDS, SampleRecord
 from .log import LOGGER, Events
-from .stages import mode_stages, stage_spec
+from .outputs import Outputs
+from .stages import ENTRY_KINDS, mode_stages, stage_spec
 from .util import UgcError, utc_now
 
-COLUMNS = ("sample_id", "sex", "hifi_reads", "fail_reads", "father_id", "mother_id")
-REQUIRED_COLUMNS = ("sample_id", "hifi_reads")
+ENTRY_COLUMNS = ("aligned_bam", "aligned_bam_index", "small_variant_vcf", "small_variant_vcf_index", "sv_vcf", "sv_vcf_index",
+                 "gvcf", "gvcf_index")   # the bam and vcf entry kinds (docs/guide/05-project-setup.md)
+COLUMNS = ("sample_id", "sex", "hifi_reads", "fail_reads", "father_id", "mother_id") + ENTRY_COLUMNS
+REQUIRED_COLUMNS = ("sample_id",)
+INDEX_SUFFIXES = {"bam": (".bai", ".csi"), "vcf": (".tbi", ".csi")}
 SEX_VALUES = ("MALE", "FEMALE")
 SEX_ALIASES = {"MALE": "MALE", "M": "MALE", "XY": "MALE", "1": "MALE", "FEMALE": "FEMALE", "F": "FEMALE", "XX": "FEMALE", "2": "FEMALE"}
 ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -54,6 +58,8 @@ def parse_tsv(path: Path) -> list[SampleRecord]:
         missing = [c for c in REQUIRED_COLUMNS if c not in header]
         if missing:
             raise UgcError(f"{path}: header lacks required column(s): {', '.join(missing)}")
+        if "hifi_reads" not in header and "aligned_bam" not in header:
+            raise UgcError(f"{path}: header lacks an input column: hifi_reads (unaligned reads) or aligned_bam (an aligned BAM, with or without VCFs)")
         for n, row in enumerate(reader, start=2):
             sid = (row.get("sample_id") or "").strip()
             if not sid:
@@ -61,21 +67,73 @@ def parse_tsv(path: Path) -> list[SampleRecord]:
             sex_raw = (row.get("sex") or "").strip().upper()
             sex_raw = SEX_ALIASES.get(sex_raw, sex_raw)   # M/F, XX/XY and PLINK's 1/2 are accepted spellings
             meta = {k: v for k, v in row.items() if k and k not in COLUMNS and v not in (None, "")}
-            records.append(
-                SampleRecord(
-                    sample_id=sid,
-                    sex=sex_raw or None,
-                    father_id=(row.get("father_id") or "").strip() or None,
-                    mother_id=(row.get("mother_id") or "").strip() or None,
-                    added_at=added_at,
-                    hifi_reads=_split_paths(row.get("hifi_reads")),
-                    fail_reads=_split_paths(row.get("fail_reads")),
-                    meta={"tsv_line": n, **meta},
-                )
+            rec = SampleRecord(
+                sample_id=sid,
+                sex=sex_raw or None,
+                father_id=(row.get("father_id") or "").strip() or None,
+                mother_id=(row.get("mother_id") or "").strip() or None,
+                added_at=added_at,
+                hifi_reads=_split_paths(row.get("hifi_reads")),
+                fail_reads=_split_paths(row.get("fail_reads")),
+                meta={"tsv_line": n, **meta},
             )
+            for col in ENTRY_COLUMNS:
+                setattr(rec, col, (row.get(col) or "").strip() or None)
+            rec.entry_kind = derive_kind(rec)[0] or "reads"
+            records.append(rec)
     if not records:
         raise UgcError(f"{path}: no samples")
     return records
+
+
+def derive_kind(rec: SampleRecord) -> tuple[str | None, list[str]]:
+    """(entry kind, problems) from which input columns the record fills: reads (hifi_reads), bam (aligned_bam
+    alone), vcf (aligned_bam with small_variant_vcf and sv_vcf; gvcf optional). One source of truth per sample:
+    reads with an aligned BAM, VCFs without the BAM, one VCF without the other, a gVCF without the VCFs and fail
+    reads with a non-reads kind are refused (nallo's entry-point rules made explicit)."""
+    problems: list[str] = []
+    has_reads, has_bam = bool(rec.hifi_reads), bool(rec.aligned_bam)
+    vcfs = [k for k in ("small_variant_vcf", "sv_vcf") if getattr(rec, k)]
+    if has_reads and has_bam:
+        problems.append("hifi_reads and aligned_bam are both given; one source of truth per sample (reads are aligned here; an aligned BAM is used as is)")
+    if (vcfs or rec.gvcf) and not has_bam:
+        problems.append("VCFs need the aligned_bam they were called from (phasing, repeats and methylation read it)")
+    if len(vcfs) == 1:
+        problems.append(f"{vcfs[0]} without {'sv_vcf' if vcfs[0] == 'small_variant_vcf' else 'small_variant_vcf'}: both VCFs or neither")
+    if rec.gvcf and len(vcfs) < 2:
+        problems.append("gvcf given without small_variant_vcf and sv_vcf")
+    if not has_reads and not has_bam:
+        problems.append("no input: give hifi_reads, or aligned_bam (with small_variant_vcf and sv_vcf for a pre-called sample)")
+    if problems:
+        return None, problems
+    if has_reads:
+        kind = "reads"
+    elif len(vcfs) == 2:
+        kind = "vcf"
+    else:
+        kind = "bam"
+    if rec.fail_reads and kind != "reads":
+        problems.append("fail_reads are only taken with hifi_reads (they are aligned and used at the TRGT fail-reads loci)")
+    for col in ENTRY_COLUMNS:
+        if col.endswith("_index") and getattr(rec, col) and not getattr(rec, col[:-6]):
+            problems.append(f"{col} without {col[:-6]}")
+    return (kind if not problems else None), problems
+
+
+def resolve_index(path: str, given: str | None, kind: str, check_paths: bool) -> tuple[str | None, str | None]:
+    """(index path, problem) for a BAM or VCF: the given one, else by convention (<file>.bai/.csi or <file>.tbi/.csi,
+    and <stem>.bai for a BAM). Without check_paths the conventional name is taken on trust."""
+    candidates = [given] if given else [path + ext for ext in INDEX_SUFFIXES[kind]]
+    if kind == "bam" and not given and path.endswith(".bam"):
+        candidates.append(path[:-4] + ".bai")
+    if not check_paths:
+        return candidates[0], None
+    for c in candidates:
+        if Path(c).expanduser().exists():
+            return str(Path(c).expanduser().resolve()), None
+    if given:
+        return None, f"index not found: {given}"
+    return None, f"no index next to {Path(path).name} (looked for {', '.join(Path(c).name for c in candidates)}); give the _index column"
 
 
 def validate(records: list[SampleRecord], db: DB, check_paths: bool = True, *, inspect: bool = True,
@@ -96,8 +154,22 @@ def validate(records: list[SampleRecord], db: DB, check_paths: bool = True, *, i
         seen.add(rec.sample_id)
         if rec.sex is not None and rec.sex not in SEX_VALUES:
             problems.append(f"{rec.sample_id}: sex must be MALE or FEMALE (also M/F, XY/XX, 1/2) or blank, not {rec.sex!r}")
-        if not rec.hifi_reads:
-            problems.append(f"{rec.sample_id}: at least one hifi_reads path is required")
+        kind, kind_problems = derive_kind(rec)
+        problems.extend(f"{rec.sample_id}: {p}" for p in kind_problems)
+        rec.entry_kind = kind or rec.entry_kind
+        for col in ("aligned_bam", "small_variant_vcf", "sv_vcf", "gvcf"):
+            p = getattr(rec, col)
+            if not p:
+                continue
+            pp = Path(p).expanduser()
+            if check_paths and not pp.exists():
+                problems.append(f"{rec.sample_id}: {col} path not found: {p}")
+            setattr(rec, col, str(pp.resolve()) if pp.exists() else str(pp.absolute()))
+            if not (check_paths and not pp.exists()):
+                idx, problem = resolve_index(getattr(rec, col), getattr(rec, col + "_index"), "bam" if col == "aligned_bam" else "vcf", check_paths)
+                if problem:
+                    problems.append(f"{rec.sample_id}: {col}: {problem}")
+                setattr(rec, col + "_index", idx)
         for kind in ("hifi_reads", "fail_reads"):
             paths = getattr(rec, kind)
             resolved = []
@@ -138,12 +210,15 @@ def inspect_inputs(records: list[SampleRecord], thresholds: dict[str, float], *,
     problems; a truncated or unreadable file is always a problem."""
     problems: list[str] = []
     warnings: list[str] = []
-    n_files = sum(len(r.hifi_reads) + len(r.fail_reads) for r in records)
+    n_files = sum(len(r.data_inputs()) for r in records)
     done = 0
     for rec in records:
         total_reads = total_bases = 0
         exact = True
         dropped: list[dict[str, object]] = []
+        if rec.entry_kind != "reads":
+            done += _inspect_entry_files(rec, problems, warnings, progress, done, n_files)
+            continue
         for kind in ("hifi_reads", "fail_reads"):
             kept: list[str] = []
             for p in getattr(rec, kind):
@@ -187,6 +262,52 @@ def inspect_inputs(records: list[SampleRecord], thresholds: dict[str, float], *,
     return problems, warnings
 
 
+def _inspect_entry_files(rec: SampleRecord, problems: list[str], warnings: list[str], progress: Optional[Progress],
+                         done: int, n_files: int) -> int:
+    """The bam and vcf entry kinds: the aligned BAM (must be aligned, i.e. have @SQ lines) and every VCF (BGZF, one
+    sample). Fills rec.input_info and rec.meta["input_check"]; returns the number of files looked at."""
+    seen = 0
+    check: dict[str, object] = {"checked_at": utc_now(), "entry_kind": rec.entry_kind}
+    for kind, p in rec.data_inputs():
+        seen += 1
+        if progress:
+            progress(done + seen, n_files, f"{rec.sample_id} {Path(p).name}")
+        if kind == "aligned_bam":
+            info = bam.inspect(Path(p))
+            if info.ok and not info.aligned:
+                info.problems.append("not aligned (no @SQ lines in the header): an aligned BAM is expected under aligned_bam; unaligned reads go under hifi_reads")
+            info.warnings = [w for w in info.warnings if not w.startswith("aligned input")]
+            if info.problems:
+                problems.extend(f"{rec.sample_id}: {kind} {p}: {pr}" for pr in info.problems)
+                continue
+            rec.input_info[p] = info.to_dict()
+            warnings.extend(f"{rec.sample_id}: {kind} {Path(p).name}: {w}" for w in info.warnings)
+            check["bam"] = {"reads": info.reads, "reads_exact": info.reads_exact, "gbases": round(info.gb, 3), "coverage": round(info.coverage, 2),
+                            "n_ref": info.n_ref, "samples": info.samples, "movies": info.movies}
+            # the callers name their outputs after the read group (sawfish its sample directory and VCF column, TRGT its
+            # VCF column; HiPhase is told the sample id): an aligned BAM's read-group sample name must be the sample id
+            if not info.samples:
+                problems.append(f"{rec.sample_id}: aligned_bam {p}: no @RG SM in the header; the callers name their outputs after it "
+                                "(samtools addreplacerg adds a read group)")
+            elif info.samples != [rec.sample_id]:
+                problems.append(f"{rec.sample_id}: aligned_bam {p}: @RG SM is {', '.join(info.samples)}, not the sample id: register the "
+                                "sample under that name, or rewrite the header first (samtools reheader)")
+        else:
+            vinfo = vcf.inspect(Path(p))
+            if vinfo.problems:
+                problems.extend(f"{rec.sample_id}: {kind} {p}: {pr}" for pr in vinfo.problems)
+                continue
+            rec.input_info[p] = vinfo.to_dict()
+            warnings.extend(f"{rec.sample_id}: {kind} {Path(p).name}: {w}" for w in vinfo.warnings)
+            check.setdefault("vcfs", {})[kind] = {"samples": vinfo.samples, "n_contigs": vinfo.n_contigs, "fileformat": vinfo.fileformat, "sources": vinfo.sources[:5]}  # type: ignore[index]
+            if vinfo.samples and vinfo.samples[0] != rec.sample_id:
+                warnings.append(f"{rec.sample_id}: {kind} {Path(p).name}: sample column {vinfo.samples[0]} is renamed to the sample id by the intake stage")
+    if not any(pr.startswith(rec.sample_id + ":") for pr in problems):
+        LOGGER.info("inspected %s (%s entry): %d file(s)", rec.sample_id, rec.entry_kind, seen)
+        rec.meta["input_check"] = check
+    return seen
+
+
 def add_samples(db: DB, events: Events, path: Path, check_paths: bool = True, replace: bool = False, *,
                 inspect: bool = True, thresholds: dict[str, object] | None = None, drop_empty: bool = False,
                 progress: Optional[Progress] = None) -> int:
@@ -203,7 +324,7 @@ def add_samples(db: DB, events: Events, path: Path, check_paths: bool = True, re
         check = rec.meta.get("input_check") or {}
         for d in check.get("dropped", []):   # type: ignore[union-attr]
             events.emit("sample.input_dropped", level="warning", sample_id=rec.sample_id, **d)   # type: ignore[arg-type]
-        events.emit("sample.added", sample_id=rec.sample_id, hifi_reads=len(rec.hifi_reads),
+        events.emit("sample.added", sample_id=rec.sample_id, entry_kind=rec.entry_kind, hifi_reads=len(rec.hifi_reads),
                     fail_reads=len(rec.fail_reads), replaced=replace,
                     gbases=check.get("gbases"), reads=check.get("reads"))   # type: ignore[union-attr]
     return len(records)
@@ -223,17 +344,35 @@ def check_samples(db: DB, ids: list[str], thresholds: dict[str, object] | None, 
     if unknown:
         raise UgcError("unknown sample(s): " + ", ".join(unknown))
     recs = {sid: db.get_sample(sid) for sid in sample_ids}
-    n_files = sum(len(r.hifi_reads) + len(r.fail_reads) for r in recs.values() if r is not None)
+    n_files = sum(len(r.data_inputs()) for r in recs.values() if r is not None)
     done = 0
     for sid in sample_ids:
         rec = recs[sid]
         assert rec is not None
         total_bases = 0
-        for kind in ("hifi_reads", "fail_reads"):
-            for p in getattr(rec, kind):
+        for kind, p in rec.data_inputs():
+            if True:
                 done += 1
                 if progress and not stored:
                     progress(done, n_files, f"{sid} {Path(p).name}")
+                if kind in ("small_variant_vcf", "sv_vcf", "gvcf"):
+                    if stored:
+                        vd = rec.input_info.get(p)
+                        vinfo = vcf.VcfInfo.from_dict(vd) if vd else None
+                    else:
+                        vinfo = vcf.inspect(Path(p))
+                        if update and vinfo.ok:
+                            db.update_input_info(sid, p, vinfo.to_dict())
+                    if vinfo is None:
+                        rows.append({"sample_id": sid, "kind": kind, "file": Path(p).name, "status": "not inspected"})
+                        continue
+                    if vinfo.problems:
+                        problems.extend(f"{sid}: {kind} {p}: {pr}" for pr in vinfo.problems)
+                    rows.append({"sample_id": sid, "kind": kind, "file": Path(p).name, "size": bam.fmt_bytes(vinfo.bytes),
+                                 "reads": "", "bases": "", "movie": ",".join(vinfo.samples),
+                                 "status": ("problem: " + "; ".join(vinfo.problems)) if vinfo.problems else ("warning: " + "; ".join(vinfo.warnings) if vinfo.warnings else "ok")})
+                    warnings.extend(f"{sid}: {kind} {Path(p).name}: {w}" for w in vinfo.warnings)
+                    continue
                 if stored:
                     info_d = rec.input_info.get(p)
                     if not info_d:
@@ -242,6 +381,8 @@ def check_samples(db: DB, ids: list[str], thresholds: dict[str, object] | None, 
                     info = bam.BamInfo.from_dict(info_d)
                 else:
                     info = bam.inspect(Path(p))
+                    if kind == "aligned_bam":
+                        info.warnings = [w for w in info.warnings if not w.startswith("aligned input")]
                     if update and info.ok:
                         db.update_input_info(sid, p, info.to_dict())
                 findings = [] if info.problems else _file_findings(sid, kind, info, thr)
@@ -304,7 +445,7 @@ def list_samples(db: DB, mode: str, ugc_wgw_version: str | None, stage: str | No
     latest = db.latest_per_stage(ugc_wgw_version)
     rows: list[dict[str, object]] = []
     for rec in db.list_samples():
-        row: dict[str, object] = {"sample_id": rec.sample_id, "sex": rec.sex or ""}
+        row: dict[str, object] = {"sample_id": rec.sample_id, "sex": rec.sex or "", "entry_kind": rec.entry_kind}
         for s in stages:
             run = latest.get(("sample", rec.sample_id, s))
             row[s] = run.status if run else "-"
@@ -312,3 +453,54 @@ def list_samples(db: DB, mode: str, ugc_wgw_version: str | None, stage: str | No
             continue
         rows.append(row)
     return rows
+
+
+REBASE_STAGES = ("singleton", "upstream", "intake")
+
+
+def rebase_sample(db: DB, events: Events, sample_id: str, run_id: str, *, with_vcfs: bool = False) -> SampleRecord:
+    """Register a member's own earlier outputs as its inputs: the aligned BAM of a successful singleton, upstream or
+    intake run (singleton: the haplotagged BAM), and with with_vcfs its small-variant and SV VCFs (and gVCF when the
+    run has one). The entry kind becomes bam or vcf; the reads stay recorded in meta["rebase"]. The next stage run
+    reuses the files by path, so a tool bump after alignment costs one downstream per member."""
+    rec = db.get_sample(sample_id)
+    if rec is None:
+        raise UgcError(f"unknown sample {sample_id}")
+    run = db.get_run(run_id)
+    if run is None or run.subject_type != "sample" or run.subject_id != sample_id:
+        raise UgcError(f"{run_id} is not a run of sample {sample_id}")
+    if run.status != "success" or run.stage not in REBASE_STAGES:
+        raise UgcError(f"{run_id} is a {run.status} {run.stage} run; rebase takes a successful {', '.join(REBASE_STAGES)} run")
+    outs = Outputs.load(run)
+    bam_path = outs.opt("aligned_hifi_reads") or outs.opt("merged_haplotagged_bam")
+    bam_index = outs.opt("aligned_hifi_reads_index") or outs.opt("merged_haplotagged_bam_index")
+    if not isinstance(bam_path, str) or not isinstance(bam_index, str):
+        raise UgcError(f"{run_id} has no aligned BAM output")
+    new = SampleRecord(sample_id=rec.sample_id, sex=rec.sex, father_id=rec.father_id, mother_id=rec.mother_id, added_at=utc_now(),
+                       meta={k: v for k, v in rec.meta.items() if k != "input_check"})
+    new.aligned_bam, new.aligned_bam_index = bam_path, bam_index
+    if with_vcfs:
+        small = outs.opt("small_variant_vcf") or outs.opt("phased_small_variant_vcf")
+        small_i = outs.opt("small_variant_vcf_index") or outs.opt("phased_small_variant_vcf_index")
+        sv = outs.opt("sv_vcf") or outs.opt("phased_sv_vcf")
+        sv_i = outs.opt("sv_vcf_index") or outs.opt("phased_sv_vcf_index")
+        if not all(isinstance(x, str) for x in (small, small_i, sv, sv_i)):
+            raise UgcError(f"{run_id} has no small-variant and SV VCF outputs to rebase on")
+        new.small_variant_vcf, new.small_variant_vcf_index, new.sv_vcf, new.sv_vcf_index = small, small_i, sv, sv_i  # type: ignore[assignment]
+        g, gi = outs.opt("small_variant_gvcf"), outs.opt("small_variant_gvcf_index")
+        if isinstance(g, str) and isinstance(gi, str):
+            new.gvcf, new.gvcf_index = g, gi
+    kind, problems = derive_kind(new)
+    if problems or kind is None:
+        raise UgcError("rebase: " + "; ".join(problems))
+    new.entry_kind = kind
+    missing = [p for _k, p in new.data_inputs() if not Path(p).exists()]
+    if missing:
+        raise UgcError("rebase: output file(s) no longer on disk: " + ", ".join(missing))
+    new.meta["rebase"] = {"run_id": run_id, "stage": run.stage, "ugc_wgw_version": run.ugc_wgw_version, "at": utc_now(),
+                          "previous_entry_kind": rec.entry_kind, "previous_hifi_reads": list(rec.hifi_reads), "previous_fail_reads": list(rec.fail_reads),
+                          "previous_aligned_bam": rec.aligned_bam}
+    new.added_at = rec.added_at
+    db.update_sample(new)
+    events.emit("sample.rebased", sample_id=sample_id, run_id=run_id, stage=run.stage, entry_kind=kind, with_vcfs=with_vcfs)
+    return new

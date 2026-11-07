@@ -28,6 +28,15 @@ workflow ugc_wgw_upstream {
     fail_reads: {
       description: "Unaligned fail_reads BAMs (used only for TRGT at INCLUDE_FAIL_READS loci, in the downstream stage)"
     }
+    aligned_bam_in: {
+      description: "An aligned BAM given instead of hifi_reads (the bam entry kind: the driver sets it from the sheet's aligned_bam): alignment is skipped, the BAM is checked against the reference and feeds every caller; hifi_reads is empty then"
+    }
+    aligned_bam_in_index: {
+      description: "Its index"
+    }
+    require_methylation_tags: {
+      description: "With aligned_bam_in: fail when its first reads carry no MM/ML tags (true); false notes it instead"
+    }
     ref_map_file: {
       description: "ugc-wgw reference map (docs/DESIGN.md §10.4): the files and scalars of upstream's workflow data container for one reference build, plus scatter_regions and pbmm2_index (ugc-wgw-extras)"
     }
@@ -95,6 +104,9 @@ workflow ugc_wgw_upstream {
     String sample_id
     Array[File] hifi_reads
     Array[File]? fail_reads
+    File? aligned_bam_in
+    File? aligned_bam_in_index
+    Boolean require_methylation_tags = true
     File ref_map_file
     Boolean use_alignment_chunking = true
     Boolean run_sawfish_call = true
@@ -158,6 +170,9 @@ workflow ugc_wgw_upstream {
     sample_id = sample_id,
     hifi_reads = hifi_reads,
     fail_reads = fail_reads,
+    aligned_bam_in = aligned_bam_in,
+    aligned_bam_in_index = aligned_bam_in_index,
+    require_methylation_tags = require_methylation_tags,
     fail_reads_bed = process_trgt_catalog.include_fail_reads_bed,
     fail_reads_bait_index = process_trgt_catalog.fail_reads_bait_index,
     ref_name = ref_name,
@@ -209,6 +224,8 @@ workflow ugc_wgw_upstream {
     File aligned_hifi_reads_index = upstream.aligned_hifi_reads_index
     File? aligned_fail_reads = upstream.aligned_fail_reads
     File? aligned_fail_reads_index = upstream.aligned_fail_reads_index
+    File? input_checks = upstream.input_checks  # with aligned_bam_in: the checks table of the given BAM
+    File? input_provenance = upstream.input_provenance  # ... and its @PG/@RG fields
 
     # mosdepth outputs
     File mosdepth_summary = upstream.mosdepth_summary

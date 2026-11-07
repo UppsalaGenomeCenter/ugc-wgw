@@ -52,7 +52,23 @@ _PER_SAMPLE = "singleton (standalone) or upstream (joint) outputs of the members
 
 SOURCES: dict[str, dict[str, Source]] = {
     "singleton": {**_COMMON, **_SAMPLE, **_DEEPVARIANT, **_SEX, **_REGISTRY},
-    "upstream": {**_COMMON, **_SAMPLE, **_DEEPVARIANT, **_SEX, **_REGISTRY},
+    "upstream": {
+        **_COMMON, **_SAMPLE, **_DEEPVARIANT, **_SEX, **_REGISTRY,
+        "aligned_bam_in": (DRIVER, "sample sheet aligned_bam (the bam entry kind; hifi_reads is empty then)"),
+        "aligned_bam_in_index": (DRIVER, "sample sheet aligned_bam_index, or the index found next to the BAM"),
+    },
+    "intake": {
+        **_COMMON, **_SEX, **_REGISTRY,
+        "sample_id": (DRIVER, "sample sheet"),
+        "aligned_bam": (DRIVER, "sample sheet aligned_bam (the vcf entry kind)"),
+        "aligned_bam_index": (DRIVER, "sample sheet aligned_bam_index, or the index found next to the BAM"),
+        "small_variant_vcf_in": (DRIVER, "sample sheet small_variant_vcf"),
+        "small_variant_vcf_in_index": (DRIVER, "sample sheet small_variant_vcf_index, or the index found next to the VCF"),
+        "sv_vcf_in": (DRIVER, "sample sheet sv_vcf"),
+        "sv_vcf_in_index": (DRIVER, "sample sheet sv_vcf_index, or the index found next to the VCF"),
+        "gvcf_in": (DRIVER, "sample sheet gvcf, when given"),
+        "gvcf_in_index": (DRIVER, "sample sheet gvcf_index, or the index found next to the gVCF, when given"),
+    },
     "cohort_qc": {
         **_COMMON, **_COHORT, **_REGISTRY,
         "somalier_files": (DRIVER, _PER_SAMPLE + " (somalier_extract; null for a member whose run predates it)"),
@@ -123,6 +139,14 @@ SOURCES: dict[str, dict[str, Source]] = {
         "mt_sv_vcf_index": (DRIVER, "cohort_merge outputs, when it merged the mitochondrial sets"),
         "sample_sexes": (DRIVER, "the resolved sex of each member's run (declared, else coverage, else somalier), as XX/XY"),
         "sample_sex_sources": (DRIVER, "declared, coverage, somalier or empty, per member"),
+        "sample_entry_kinds": (DRIVER, "reads, bam or vcf per member (the sheet-derived entry kind)"),
+    },
+    "cohort_methyl": {
+        **_COMMON, **_COHORT,
+        "sample_labels": (DRIVER, "per member: the resolved sex group (XX/XY) and the values of the project's methyl_label_columns as column=value, ';'-joined"),
+        "cpg_pileup_beds": (DRIVER, _MEMBER_VCFS.replace("outputs", "outputs (cpg_pileup_bed)")),
+        "methbat_profiles": (DRIVER, _MEMBER_VCFS.replace("outputs", "outputs (methbat_profile)")),
+        "methbat_reports": (DRIVER, _MEMBER_VCFS.replace("outputs", "outputs (methbat_report; null for a member whose run predates it: the stage makes it)")),
     },
     "assembly": {
         **_COMMON, **_REGISTRY,

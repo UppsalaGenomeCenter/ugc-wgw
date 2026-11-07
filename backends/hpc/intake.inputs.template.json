@@ -1,0 +1,18 @@
+{
+  "ugc_wgw_intake.ugc_wgw_version": "<ugc_wgw_version>",
+  "ugc_wgw_intake.sample_id": "String",
+  "ugc_wgw_intake.declared_sex": "String? (MALE or FEMALE from the sample sheet; omit when blank)",
+  "ugc_wgw_intake.aligned_bam": "File (the sheet's aligned_bam)",
+  "ugc_wgw_intake.aligned_bam_index": "File",
+  "ugc_wgw_intake.small_variant_vcf_in": "File (the sheet's small_variant_vcf, one sample)",
+  "ugc_wgw_intake.small_variant_vcf_in_index": "File",
+  "ugc_wgw_intake.sv_vcf_in": "File (the sheet's sv_vcf, one sample)",
+  "ugc_wgw_intake.sv_vcf_in_index": "File",
+  "ugc_wgw_intake.gvcf_in": "File? (the sheet's gvcf; joint mode needs it)",
+  "ugc_wgw_intake.gvcf_in_index": "File?",
+  "ugc_wgw_intake.require_methylation_tags": true,
+  "ugc_wgw_intake.ref_map_file": "<local_path_prefix>/ugc_wgw_ref_map.GRCh38_GIABv3.tsv",
+  "ugc_wgw_intake.ugc_wgw_container_registry": "<ugc_wgw_container_registry>",
+  "ugc_wgw_intake.backend": "HPC",
+  "ugc_wgw_intake.preemptible": true
+}

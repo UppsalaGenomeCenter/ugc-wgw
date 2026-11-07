@@ -98,8 +98,13 @@ reference map. A later install finds the tree, verifies it and reuses it. The
 installer also copies the files of the lock's other entries from
 `<prefix>/versions/<v>/code/references/` when the directory is writable, and
 warns otherwise: `scatter_regions.GRCh38_GIABv3.tsv` into
-`<references>/ugc-wgw-extras-0.3.0/`, and the assembly stages' contig lists
-and PAR BED into `<references>/ugc-wgw-asm-0.1.0/`.
+`<references>/ugc-wgw-extras-0.3.0/`, the assembly stages' contig lists
+and PAR BED into `<references>/ugc-wgw-asm-0.1.0/`, somalier's sites and
+labels into `<references>/ugc-wgw-qc-0.1.0/`, and the methylation layer's
+files into `<references>/ugc-wgw-methyl-0.1.0/`: MethBat's imprinting
+regions (`methbat_report_regions_tsv`), the CpG-island gene map
+(`methbat_map`, generated from GENCODE 50 by `scripts/make-methbat-map.py`)
+and the nanomix 39Bisulfite cell-type atlas (`methbat_atlas_tsv`).
 
 In those directories it builds the derived reference files once, each with
 the image and the exact command the lock names, verified against the lock's
@@ -346,7 +351,8 @@ for a SIF of that name under `current`'s `sif/`, the other
 `versions/*/sif/` (newest first) and any `--sif-source DIR`, hashes it, and
 links a match into the store (copying it when the directory is on another
 file system). The old version is untouched; the pass reads every SIF once
-(26 GB, a few minutes on the login node) and prints how long it took.
+(26.85 GB in 74 s on the production login node, November 2026) and prints
+how long it took.
 
 Disk: a version from a delta costs its code, wheels and venv (about 100 MB)
 plus the images that changed. Removing `versions/<old>/` frees what no
@@ -356,7 +362,8 @@ it is gone, after which `find <prefix>/sif -maxdepth 1 -name '*.sif'
 that still carry their own copies are deduplicated by
 `install-bundle.sh --prefix <prefix> --dedupe-sif` (no `--bundle`): every
 `versions/*/sif/*.sif` with no other link is hashed and replaced by a
-hardlink into the store, or adopted; it prints the bytes freed. Deleting
+hardlink into the store, or adopted; it prints the bytes freed (a prefix
+holding four pre-store releases gave back 94 GB from 109 copies). Deleting
 the store itself is safe when every version holds hardlinks (the next
 install re-adopts what it needs) and breaks every version that holds
 symlinks, which the installer warned about.

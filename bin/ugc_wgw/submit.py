@@ -183,7 +183,8 @@ class Submitter:
     def _context(self, cand: Candidate) -> inputs.BuildContext:
         cohort = self.db.get_cohort(cand.cohort_id) if cand.cohort_id else None
         return inputs.BuildContext(self.cfg, self.db, self.sel.mode, self.ugc_wgw_version, cand.subject_type,
-                                   cand.subject_id, cohort=cohort, any_version=self.any_version)
+                                   cand.subject_id, cohort=cohort, any_version=self.any_version,
+                                   allow_standalone=self.sel.allow_standalone_members)
 
     def create_run(self, cand: Candidate) -> tuple[RunRecord, dict[str, object]]:
         """Insert the pending run and write its inputs.json; returns the run and the inputs document."""
@@ -204,7 +205,9 @@ class Submitter:
             cohort_id=cand.cohort_id, inputs_path=str(files.inputs), inputs_sha256=sha, host=hostname(),
             meta={"members": members, "resource_policy": resources.policy_ref(self.cfg),
                   **({"gpu_type": self.cfg.gpu_type} if self.cfg.deepvariant != "cpu" else {}),
-                  **({"escalations": escalations} if escalations else {})},
+                  **({"escalations": escalations} if escalations else {}),
+                  **({"entry": inputs.entry_record(ctx)} if cand.subject_type == "sample" else {}),
+                  **({"allow_standalone_members": True} if self.sel.allow_standalone_members and cand.subject_type == "cohort" else {})},
         )
         self.db.insert_run(run)
         self.events.emit("run.created", run_id=run.run_id, subject=run.subject_id, stage=run.stage, attempt=attempt,

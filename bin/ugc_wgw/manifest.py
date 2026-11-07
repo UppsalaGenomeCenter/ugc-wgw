@@ -83,6 +83,8 @@ def build(run: RunRecord, result: RunResult, code: CodeInfo, engine: dict[str, s
         "gpu_type": run.meta.get("gpu_type"),  # the gres type the plugin applied to GPU tasks ('' = any); None for the cpu flavour
         "escalations": run.meta.get("escalations"),  # task -> {time_factor, memory_factor} this attempt ran with (escalate.py); None without
         "escalation_next": run.meta.get("escalation"),  # what the next attempt carries after a time/memory failure; None otherwise
+        "entry": run.meta.get("entry"),  # sample runs: {kind, inputs: [{role, path, bytes, mtime, info}]}; the bam/vcf kinds name their external files (0.16.0)
+        "allow_standalone_members": run.meta.get("allow_standalone_members"),  # cohort_call: members without a gVCF were left out
     }
     if status != "success":
         doc["error"] = {

@@ -1,0 +1,15 @@
+# Expected outputs of ugc_wgw_intake (the vcf entry kind; run.sh entry), one glob per line relative to out/.
+aligned_hifi_reads/*.bam
+aligned_hifi_reads_index/*.bam.bai
+mosdepth_summary/*.mosdepth.summary.txt
+mosdepth_region_bed/*.mosdepth.regions.bed.gz
+somalier_extract/*.somalier
+sex_tsv/*.sex.tsv
+small_variant_vcf/*.small_variants.vcf.gz
+small_variant_vcf_index/*.small_variants.vcf.gz.tbi
+sv_vcf/*.structural_variants.vcf.gz
+sv_vcf_index/*.structural_variants.vcf.gz.tbi
+small_variant_gvcf/*.small_variants.g.vcf.gz
+input_checks/*.input_checks.tsv
+input_provenance/*.input_provenance.tsv
+ugc_wgw_manifest/*.intake.ugc_wgw_manifest.json

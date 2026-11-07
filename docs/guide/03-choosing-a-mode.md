@@ -77,6 +77,15 @@ from that sample's own record, never opening a BAM. A site that no sample
 called on its own cannot appear, so the union of the per-sample calls is
 the ceiling in both read-based modes.
 
+Joint mode therefore needs a gVCF from every member. A member registered
+from its own VCFs (the `vcf` entry kind, chapter 05) brings one through the
+sheet's `gvcf` column; without it the driver refuses the cohort's
+`cohort_call` and names the member. `submit --allow-standalone-members`
+runs it anyway: that member is phased from its own VCFs, stays out of the
+joint small-variant VCF (and so out of `cohort_freq`'s small-variant
+counts) and joins the SV, repeat and methylation steps like the others; the
+cohort_call manifest records the choice.
+
 The local smoke test (four chr20 samples, the harness under `tests/smoke/`)
 shows the consequence: the cohort GLnexus VCF of `cohort_merge` in standalone
 mode and the one of `cohort_call` in joint mode are byte-identical (219,547

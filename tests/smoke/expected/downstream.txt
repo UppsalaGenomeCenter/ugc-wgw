@@ -16,5 +16,7 @@ trgt_vcf_index/*.tbi
 trgt_spanning_reads/*.bam
 trgt_coverage_dropouts/*
 cpg_pileup_bed/*
+# 0.16.0: the imprinting report (methbat report on the 5mC pileup; header-only on chr20 data, which carries none of the 15 regions)
+methbat_report/*
 pbstarphase_json/*
 ugc_wgw_manifest/*.downstream.ugc_wgw_manifest.json

@@ -23,19 +23,63 @@ STAGES: dict[str, StageSpec] = {
     "upstream": StageSpec("upstream", "sample", "ugc_wgw_upstream.wdl", "build_upstream"),
     "cohort_qc": StageSpec("cohort_qc", "cohort", "ugc_wgw_cohort_qc.wdl", "build_cohort_qc", optional=True),
     "cohort_call": StageSpec("cohort_call", "cohort", "ugc_wgw_cohort_call.wdl", "build_cohort_call"),
+    "intake": StageSpec("intake", "sample", "ugc_wgw_intake.wdl", "build_intake"),
     "downstream": StageSpec("downstream", "sample", "ugc_wgw_downstream.wdl", "build_downstream"),
     "cohort_merge": StageSpec("cohort_merge", "cohort", "ugc_wgw_cohort_merge.wdl", "build_cohort_merge"),
     "cohort_freq": StageSpec("cohort_freq", "cohort", "ugc_wgw_cohort_freq.wdl", "build_cohort_freq"),
+    "cohort_methyl": StageSpec("cohort_methyl", "cohort", "ugc_wgw_cohort_methyl.wdl", "build_cohort_methyl"),
     "assembly": StageSpec("assembly", "sample", "ugc_wgw_assembly.wdl", "build_assembly"),
     "assembly_call": StageSpec("assembly_call", "sample", "ugc_wgw_assembly_call.wdl", "build_assembly_call"),
     "cohort_pangenome": StageSpec("cohort_pangenome", "cohort", "ugc_wgw_cohort_pangenome.wdl", "build_cohort_pangenome"),
 }
 
 MODES: dict[str, tuple[str, ...]] = {
-    "standalone": ("singleton", "cohort_qc", "cohort_merge", "cohort_freq"),
-    "joint": ("upstream", "cohort_qc", "cohort_call", "downstream", "cohort_merge", "cohort_freq"),
+    "standalone": ("singleton", "cohort_qc", "cohort_merge", "cohort_freq", "cohort_methyl"),
+    "joint": ("upstream", "cohort_qc", "cohort_call", "downstream", "cohort_merge", "cohort_freq", "cohort_methyl"),
     "assembly": ("assembly", "assembly_call", "cohort_pangenome"),
 }
+
+
+ENTRY_KINDS = ("reads", "bam", "vcf")
+# the per-sample stages a member of each entry kind runs, per mode (the sample stage(s) of MODES stand for the reads kind)
+_SAMPLE_STAGES: dict[str, dict[str, tuple[str, ...]]] = {
+    "standalone": {"reads": ("singleton",), "bam": ("upstream", "downstream"), "vcf": ("intake", "downstream")},
+    "joint": {"reads": ("upstream", "downstream"), "bam": ("upstream", "downstream"), "vcf": ("intake", "downstream")},
+    "assembly": {"reads": ("assembly", "assembly_call"), "bam": (), "vcf": ()},
+}
+
+
+def sample_stages(mode: str, kind: str = "reads") -> tuple[str, ...]:
+    """The per-sample stages a member of entry kind `kind` runs in `mode` (empty: it has no place in that mode,
+    e.g. an assembly needs reads)."""
+    mode_stages(mode)
+    try:
+        return _SAMPLE_STAGES[mode][kind]
+    except KeyError:
+        raise UgcError(f"unknown entry kind {kind!r}; known: {', '.join(ENTRY_KINDS)}") from None
+
+
+def member_sequence(mode: str, kind: str = "reads", *, has_gvcf: bool = True, allow_standalone: bool = False) -> tuple[str, ...]:
+    """The ordered stages a member of `kind` takes part in: its own per-sample stages in the place of the mode's
+    (upstream or intake where the mode has upstream or singleton; downstream right after them in standalone mode, in
+    its own place in joint mode), the cohort stages as the mode orders them. A vcf member without a gVCF in joint
+    mode is left out of cohort_call when allow_standalone is on (its downstream phases its own VCFs); without the
+    flag the planner refuses the cohort instead."""
+    own = sample_stages(mode, kind)
+    out: list[str] = []
+    for stage in mode_stages(mode):
+        spec = stage_spec(stage)
+        if spec.subject_type == "sample":
+            if stage in ("singleton", "upstream", "assembly"):   # the head of the per-sample work
+                head = own[:1] if mode == "joint" else own       # joint: downstream keeps its place after cohort_call
+                out.extend(s for s in head if s not in out)
+            elif stage in own and stage not in out:
+                out.append(stage)
+            continue
+        if stage == "cohort_call" and kind == "vcf" and not has_gvcf and allow_standalone:
+            continue
+        out.append(stage)
+    return tuple(out)
 
 
 def stage_spec(name: str) -> StageSpec:

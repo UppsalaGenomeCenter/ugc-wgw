@@ -184,7 +184,7 @@ task ugc_wgw_freq_summary {
         description: "Long-format TSV: resource, metric, key, value"
       },
       samples: {
-        description: "Per member: group (XX, XY, unknown), sex source, presence in each VCF"
+        description: "Per member: group (XX, XY, unknown), sex source, presence in each VCF, entry kind (reads, bam, vcf)"
       }
     }
   }
@@ -232,6 +232,9 @@ task ugc_wgw_freq_summary {
     sample_sex_sources: {
       description: "sheet, inferred or empty per member"
     }
+    sample_entry_kinds: {
+      description: "reads, bam or vcf per member, aligned with sample_ids, for the samples table (empty: every member reads)"
+    }
     out_prefix: {
       description: "Output prefix"
     }
@@ -255,6 +258,7 @@ task ugc_wgw_freq_summary {
     Array[String] sample_ids
     Array[String] sample_sexes
     Array[String] sample_sex_sources
+    Array[String] sample_entry_kinds = []
     String out_prefix
     RuntimeAttributes runtime_attributes
   }
@@ -306,12 +310,12 @@ task ugc_wgw_freq_summary {
 
     python3 - "~{out_prefix}" "~{have_small_variants}" small.tsv sv.tsv small_samples.txt "~{sv_samples}" \
       "~{write_lines(sample_ids)}" "~{write_lines(sample_sexes)}" "~{write_lines(sample_sex_sources)}" \
-      "~{have_mt}" mt_small.tsv "~{have_mt_svs}" mt_sv.tsv mt_samples.txt <<'PYEOF'
+      "~{have_mt}" mt_small.tsv "~{have_mt_svs}" mt_sv.tsv mt_samples.txt "~{write_lines(sample_entry_kinds)}" <<'PYEOF'
     import collections
     import sys
 
     (out_prefix, have_small, small_tsv, sv_tsv, small_samples, sv_samples,
-     ids_file, sexes_file, sources_file, have_mt, mt_small_tsv, have_mt_svs, mt_sv_tsv, mt_samples) = sys.argv[1:15]
+     ids_file, sexes_file, sources_file, have_mt, mt_small_tsv, have_mt_svs, mt_sv_tsv, mt_samples, kinds_file) = sys.argv[1:16]
 
     def lines(path):
         try:
@@ -325,6 +329,8 @@ task ugc_wgw_freq_summary {
     sources = lines(sources_file)
     sexes += [""] * (len(ids) - len(sexes))
     sources += [""] * (len(ids) - len(sources))
+    kinds = lines(kinds_file)
+    kinds += ["reads"] * (len(ids) - len(kinds))
     in_small = set(lines(small_samples)) if have_small == "true" else set()
     in_sv = set(lines(sv_samples))
     in_mt = set(lines(mt_samples)) if have_mt == "true" else set()
@@ -344,13 +350,15 @@ task ugc_wgw_freq_summary {
     add("samples", "n_in_vcf", "small_variants", sum(1 for s in ids if s in in_small))
     add("samples", "n_in_vcf", "structural_variants", sum(1 for s in ids if s in in_sv))
     add("samples", "n_in_vcf", "mt_small_variants", sum(1 for s in ids if s in in_mt))
+    for kind in ("reads", "bam", "vcf"):
+        add("samples", "n_entry_kind", kind, sum(1 for k in kinds if k == kind))
 
     with open(out_prefix + ".samples.tsv", "w") as fh:
-        fh.write("sample_id\tgroup\tsex_source\tin_small_variant_vcf\tin_sv_vcf\tin_mt_vcf\n")
-        for sid, sex, src in zip(ids, sexes, sources):
+        fh.write("sample_id\tgroup\tsex_source\tin_small_variant_vcf\tin_sv_vcf\tin_mt_vcf\tentry_kind\n")
+        for sid, sex, src, kind in zip(ids, sexes, sources, kinds):
             fh.write("\t".join([sid, sex if sex in ("XX", "XY") else "unknown", src or "none",
                                 "yes" if sid in in_small else "no", "yes" if sid in in_sv else "no",
-                                "yes" if sid in in_mt else ("no" if have_mt == "true" else "none")]) + "\n")
+                                "yes" if sid in in_mt else ("no" if have_mt == "true" else "none"), kind or "reads"]) + "\n")
 
     def contig_class(chrom):
         c = chrom[3:] if chrom.lower().startswith("chr") else chrom

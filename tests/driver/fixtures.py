@@ -411,10 +411,64 @@ def _mt_haplogroups(haplogroup: str) -> list[str]:
     return [f"hap_0\t0.9700\t{haplogroup}\t1.0000\t1-16569\t263G 750G\t", f"hap_1\t0.0300\t{haplogroup}\t0.9500\t1-16569\t263G 750G\t152C (localPrivateMutation)"]
 
 
+METHBAT_REPORT_COLS = ("chrom\tstart\tend\tregion_label\treport_summary\tqc_warnings\texpected_category\tsummary_label\tmean_combined_methyl\tmean_meth_delta\t"
+                       "mean_hap1_methyl\tmean_hap2_methyl\tasm_fishers_pvalue\tnum_phased_sites\tnum_partial_sites\tnum_unphased_sites\tmedian_total_coverage\t"
+                       "median_hap1_coverage\tmedian_hap2_coverage\n")
+
+
+def _methbat_report(imprinting: str) -> str:
+    """methbat report with three regions: two PASS, the third Inconclusive (low haplotype coverage) or, with
+    imprinting = "anomalous", Anomalous without a QC warning."""
+    third = ("Anomalous", "PASS", "Methylated", "92.0", "4.0") if imprinting == "anomalous" else ("Inconclusive", "LowHaplotypeCoverage", "NoData", "", "")
+    return ("##methbat_version=1.1.0-fbf4686\n" + METHBAT_REPORT_COLS
+            + "chr6\t144006940\t144008751\tPLAGL1:alt-TSS-DMR\tPASS\tPASS\tAlleleSpecificMethylation\tAlleleSpecificMethylation\t46.0\t83.5\t13.2\t96.7\t0.0\t143\t0\t0\t41\t25\t16\n"
+            + "chr20\t58853849\t58856408\tGNAS-XL:Ex1-DMR\tPASS\tPASS\tAlleleSpecificMethylation\tAlleleSpecificMethylation\t54.0\t50.7\t28.5\t79.2\t0.0\t201\t0\t0\t34\t17\t17\n"
+            + f"chr14\t100824186\t100827641\tMEG3:TSS-DMRb\t{third[0]}\t{third[1]}\tAlleleSpecificMethylation\t{third[2]}\t{third[3]}\t{third[4]}\t\t\t1.000000e0\t0\t0\t0\t0\t0\t0\n")
+
+
+def _methyl_samples(members: list[str], legacy: list[str], labels: list[str]) -> str:
+    rows = []
+    for i, m in enumerate(members):
+        lab = labels[i] if i < len(labels) else ""
+        n_hypo = 0 if i == 0 else 1
+        anomalous = 1 if m in legacy else 0
+        rows.append(f"{m}\t{lab}\t{n_hypo}\t0\t0\t0\t{n_hypo}\t{3 - n_hypo}\t3\t1\t1\t1\t0\t0\t2\t{1 - anomalous}\t{anomalous}\t0\t{'stage' if m in legacy else 'run'}\t\t\n")
+    return ("sample_id\tlabels\tn_hypo\tn_hyper\tn_hypo_asm\tn_hyper_asm\tn_events\tn_insufficient\tn_regions_scored\tn_methylated\tn_unmethylated\tn_asm\t"
+            "n_uncategorized\tn_nodata\timprinting_pass\timprinting_inconclusive\timprinting_anomalous\timprinting_anomalous_qc\treport_source\t"
+            "deconvolution_top_cell_type\tdeconvolution_top_fraction\n" + "".join(rows))
+
+
+def _methyl_summary(members: list[str], legacy: list[str], labels: list[str]) -> str:
+    rows = ["resource\tmetric\tkey\tvalue"]
+    n_events = max(0, len(members) - 1)
+    for i, m in enumerate(members):
+        n = 0 if i == 0 else 1
+        rows += [f"members\tn_events\t{m}\t{n}", f"members\tn_hypo\t{m}\t{n}", f"members\tn_regions_scored\t{m}\t3",
+                 f"imprinting\tPASS\t{m}\t2", f"imprinting\tInconclusive\t{m}\t{0 if m in legacy else 1}", f"imprinting\tAnomalous\t{m}\t{1 if m in legacy else 0}",
+                 f"imprinting\tAnomalousQcWarning\t{m}\t0"]
+    rows += [f"cohort\tn_members\t\t{len(members)}", "cohort\tn_regions\t\t4", f"cohort\tn_events\t\t{n_events}", "cohort\tbackground_min_datasets\t\t10",
+             f"cohort\treports_made_in_stage\t\t{sum(1 for m in members if m in legacy)}", f"labels\tn_members\tALL\t{len(members)}"]
+    counts: dict[str, int] = {}
+    for lab in labels:
+        for part in lab.split(";"):
+            if part:
+                counts[part] = counts.get(part, 0) + 1
+    for lab, n in sorted(counts.items()):
+        rows.append(f"labels\tn_members\t{lab}\t{n}")
+        if n < 10:
+            rows.append(f"notes\tlabel_below_min\t{lab}\t{n} member(s): comparisons against {lab} are InsufficientData")
+    if len(members) < 10:
+        rows.append(f"notes\tlabel_below_min\tALL\t{len(members)} member(s): comparisons against ALL are InsufficientData")
+    if n_events:
+        rows += [f"genes\tmembers_with_event\tGENEA\t{n_events}", f"genes\tmembers_with_event\tGENEB\t{n_events}", f"region_type\tn_events\tpromoter\t{n_events}"]
+    rows += ["compare\tXX:XY\tInsufficientData\t4", "notes\tcompare\tXX:XY\tcompare XX:XY: 1 vs 1 members, below min_samples 10: every row is InsufficientData"]
+    return "\n".join(rows) + "\n"
+
+
 def fixture_bytes(name: str, sid: str, stage: str, inferred_sex: str = "", index: int = 0,
                   members: list[str] | None = None, pedigree: dict[str, set[str]] | None = None,
                   sex: dict[str, str] | None = None, legacy: list[str] | None = None, mt: bool = False,
-                  haplogroup: str = "H5a7") -> bytes | None:
+                  haplogroup: str = "H5a7", imprinting: str = "", labels: list[str] | None = None) -> bytes | None:
     """The content of output `name` for sample/cohort `sid`, or None for outputs that stay placeholders. `pedigree`
     (child -> parents in the cohort) shapes cohort_qc's expectations; `sex` (declared, coverage, somalier, resolved,
     source) the sex resolution table of a per-sample run."""
@@ -548,6 +602,44 @@ def fixture_bytes(name: str, sid: str, stage: str, inferred_sex: str = "", index
         ms = members or []
         n = len(ms) * (len(ms) - 1) // 2
         text = f"section\tmetric\tkey\tvalue\npairs\tn\ttotal\t{n}\npairs\tn\tkept\t0\npairs\thist\t0.00\t{n}\nmembers\tn\ttotal\t{len(ms)}\nmembers\tn\textracted_here\t0\nmembers\tn\twith_ancestry\t{len(ms)}\n"
+    elif name == "methbat_report" or name == "member_reports":
+        text = _methbat_report(imprinting if name == "methbat_report" else ("anomalous" if (members or []) and index < len(members or []) and (members or [])[index] in (legacy or []) else ""))
+    elif name == "methyl_samples":
+        text = _methyl_samples(members or [], legacy or [], labels or [])
+    elif name == "methyl_summary":
+        text = _methyl_summary(members or [], legacy or [], labels or [])
+    elif name == "methyl_regions":
+        text = ("chrom\tstart\tend\tregion_label\tlabel\tn_datasets\tn_nodata\tn_uncategorized\tn_methylated\tn_unmethylated\tn_asm\tavg_combined_methyl\t"
+                "stdev_combined_methyl\tavg_abs_meth_delta\tstdev_abs_meth_delta\tn_hypo\tn_hyper\tn_hypo_asm\tn_hyper_asm\thgnc_id\tgene_symbol\tregion_type\n"
+                + "".join(f"chr1\t{100 + 200 * i}\t{200 + 200 * i}\tCpG:_{i + 1}\t{lab}\t{len(members or [])}\t0\t0\t{len(members or [])}\t0\t0\t80.0\t4.0\t1.5\t0.5\t"
+                          f"{(len(members or []) - 1 if i == 0 and lab == 'ALL' else 0)}\t0\t0\t0\t{'HGNC:1;HGNC:2' if i == 0 else ''}\t{'GENEA;GENEB' if i == 0 else ''}\t{'promoter' if i == 0 else 'intergenic'}\n"
+                          for i in range(4) for lab in ("ALL",)))
+    elif name == "methyl_events":
+        ms = members or []
+        text = ("sample_id\tchrom\tstart\tend\tregion_label\tsummary_label\tcompare_label\tbackground_category\tcategory_pop_count\tcategory_pop_freq\t"
+                "asm_fishers_pvalue\tmean_hap1_methyl\tmean_hap2_methyl\tmean_meth_delta\tmean_abs_meth_delta_zscore\tmean_combined_methyl\tmean_combined_methyl_delta\t"
+                "mean_combined_methyl_zscore\tnum_phased_sites\tnum_partial_sites\tnum_unphased_sites\tmedian_total_coverage\tmedian_hap1_coverage\tmedian_hap2_coverage\t"
+                "hgnc_id\tgene_symbol\tregion_type\n"
+                + "".join(f"{m}\tchr1\t100\t200\tCpG:_1\tUnmethylated\tHypoMethylated\tALL\t{len(ms)}\t0.9\t0.5\t10\t12\t2\t0.1\t11\t-60\t-4.2\t20\t0\t0\t30\t15\t15\t"
+                          f"HGNC:1;HGNC:2\tGENEA;GENEB\tpromoter\n" for m in ms[1:]))
+    elif name == "methyl_imprinting":
+        ms = members or []
+        rows = []
+        for m in ms:
+            for region, summ, warn in (("PLAGL1:alt-TSS-DMR", "PASS", "PASS"), ("GNAS-XL:Ex1-DMR", "PASS", "PASS"),
+                                       ("MEG3:TSS-DMRb", "Anomalous" if m in (legacy or []) else "Inconclusive", "PASS" if m in (legacy or []) else "LowHaplotypeCoverage")):
+                rows.append(f"{m}\tchr6\t1\t2\t{region}\t{summ}\t{warn}\tAlleleSpecificMethylation\tAlleleSpecificMethylation\t50.0\t70.0\t15.0\t85.0\t0.0\t100\t0\t0\t30\t15\t15\t"
+                            f"{'stage' if m in (legacy or []) else 'run'}\n")
+        text = ("sample_id\tchrom\tstart\tend\tregion_label\treport_summary\tqc_warnings\texpected_category\tsummary_label\tmean_combined_methyl\tmean_meth_delta\t"
+                "mean_hap1_methyl\tmean_hap2_methyl\tasm_fishers_pvalue\tnum_phased_sites\tnum_partial_sites\tnum_unphased_sites\tmedian_total_coverage\t"
+                "median_hap1_coverage\tmedian_hap2_coverage\treport_source\n" + "".join(rows))
+    elif name in ("cohort_background", "methyl_collection", "scored_profiles", "scored_profiles_annotated", "comparisons"):
+        text = None
+    elif name == "input_checks":
+        text = ("check\ttarget\tstatus\tdetail\nbam_index\tbam\tpass\tx.bam.bai\nbam_sorted\tbam\tpass\t@HD SO:coordinate\n"
+                "bam_reference\tbam\tpass\t25 contigs match the reference\nbam_methylation_tags\tbam\tpass\t1990 of 2000 first reads carry MM/ML\n")
+    elif name == "input_provenance":
+        text = "source\tkey\tvalue\nbam\tPG.pbmm2.PN\tpbmm2\nbam\tPG.pbmm2.VN\t1.13.1\nbam\tRG.rg1.SM\t" + sid + "\n"
     elif name == "qc_ancestry":
         ms = members or []
         text = ("#sample_id\tpredicted_ancestry\tgiven_ancestry\tEAS_prob\tAFR_prob\tAMR_prob\tSAS_prob\tEUR_prob\tPC1\tPC2\tPC3\tPC4\tPC5\n"

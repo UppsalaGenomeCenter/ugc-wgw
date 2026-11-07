@@ -101,7 +101,7 @@ class SubmitTest(unittest.TestCase):
         runs it alone, and the cohort's status shows it."""
         code, out, err = run_cli(["--project", self.proj, "submit", "--mode", "standalone", "--cohort", "C1"], env={"UGC_WGW_FAKE_FAIL_STAGES": "cohort_qc"})
         self.assertEqual(code, 1, err)                       # a failure is still reported ...
-        self.assertIn("5 done, 1 blocked", err)              # ... but the stages after cohort_qc ran
+        self.assertIn("6 done, 1 blocked", err)              # ... but the stages after cohort_qc ran
         db = self.db()
         try:
             self.assertEqual(db.latest_run("cohort", "C1", "cohort_qc", VERSION).status, "failed")

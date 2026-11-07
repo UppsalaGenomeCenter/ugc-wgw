@@ -188,17 +188,43 @@ is a complete example.
 | Column | Required | Content |
 |---|---|---|
 | `sample_id` | yes | Matches `[A-Za-z0-9._-]+`; it becomes a directory name and the sample name in every VCF and BAM. |
-| `hifi_reads` | yes | One or more unaligned HiFi BAM paths, comma-separated. All are aligned and merged. |
+| `hifi_reads` | one of the two | One or more unaligned HiFi BAM paths, comma-separated. All are aligned and merged (the `reads` entry kind). |
+| `aligned_bam` | one of the two | An aligned, coordinate-sorted and indexed BAM to the installed reference, used as is: alignment is skipped and everything after it runs (the `bam` entry kind). Index from `aligned_bam_index` or `<file>.bai`/`.csi` next to it. |
+| `small_variant_vcf`, `sv_vcf` | no (together, with `aligned_bam`) | The sample's pre-called small-variant and SV VCFs (one sample column each, BGZF, indexed: `<column>_index` or `.tbi`/`.csi` next to the file): calling is skipped too and the sample enters at phasing (the `vcf` entry kind, stage `intake`). |
+| `gvcf` | no (with the VCFs) | The sample's gVCF, so it can join a joint-mode cohort's `cohort_call`; without it the member is refused in joint mode unless `--allow-standalone-members`. |
 | `sex` | no | `MALE`/`FEMALE`, `M`/`F`, `XX`/`XY` or PLINK's `1`/`2`, case-insensitive; blank = unknown (PLINK's `0` is not accepted: leave the cell empty). Stored as `MALE`/`FEMALE`. The first source of the sex a run uses (chapter 02); a disagreement with the coverage or somalier evidence is a QC flag, not a correction. |
 | `fail_reads` | no | Fail-reads BAMs, comma-separated, for upstream's TRGT baiting. |
 | `father_id`, `mother_id` | no | Pedigree. Drive trio binning in assembly mode; otherwise informational. |
 | anything else | no | Kept as metadata on the sample record (`meta_json`), not used by any stage. |
 
+A sample's **entry kind** is derived from which of those columns are filled,
+never declared: `reads` (`hifi_reads`), `bam` (`aligned_bam` alone) or `vcf`
+(`aligned_bam` with both VCFs). The sheet is refused when a row gives reads
+and an aligned BAM, VCFs without the BAM, one VCF without the other, a gVCF
+without the VCFs, or fail reads with a non-reads kind. `samples list` shows
+the kind; a `bam` member runs `upstream` and `downstream` in both cohort
+modes, a `vcf` member `intake` and `downstream` (chapter 08), and both join
+the cohort stages like any member. The checks that need the reference
+(contigs, methylation tags) are the stages' first task, before any job is
+spent (chapter 08, `intake`). `samples rebase <id> --from-run RUN_ID
+[--with-vcfs]` registers a member's own earlier aligned BAM (and VCFs) as its
+inputs, so that a tool change after alignment costs one `downstream` per
+member (chapter 10).
+
 Rules:
 
 - Paths are made absolute and symlinks resolved. Every path must exist unless
   `--no-check` is given (useful for a sheet prepared before the data lands).
-- Every BAM is opened (below). A file that is empty, truncated or has no
+- Every BAM is opened (below); an aligned BAM must have `@SQ` lines and a
+  read group whose sample name (`@RG SM`) is the `sample_id`: sawfish and
+  TRGT name their outputs after the read group, HiPhase and pbmm2 after the
+  sample id, and upstream's per-sample tree takes the two for one name.
+  Register the sample under the read group's name, or rewrite the header
+  first (`samtools reheader -c 'sed s/SM:old/SM:new/' in.bam > out.bam`,
+  a header-only pass, then `samtools index`). Every VCF is opened too
+  (BGZF, complete, exactly one sample column, renamed to the `sample_id` by
+  `intake` when it differs; its header's contigs and `##source` lines are
+  recorded). A file that is empty, truncated or has no
   reads is an error and nothing is registered; `--drop-empty` registers the
   sample without its empty or read-less files instead (a truncated file is
   always refused); `--no-inspect` skips the inspection but keeps the

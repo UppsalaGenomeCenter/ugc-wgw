@@ -69,6 +69,9 @@ workflow ugc_wgw_cohort_freq {
     sample_sex_sources: {
       description: "sheet, inferred or empty per member, for the samples table"
     }
+    sample_entry_kinds: {
+      description: "reads, bam or vcf per member, aligned with sample_ids, for the samples table (the driver: the sheet-derived entry kind; empty = every member reads)"
+    }
     small_variant_vcf: {
       description: "Cohort joint small-variant VCF (GLnexus): cohort_call in joint mode, cohort_merge with run_glnexus in standalone mode; omit when there is none"
     }
@@ -134,6 +137,7 @@ workflow ugc_wgw_cohort_freq {
     Array[String] sample_ids
     Array[String] sample_sexes
     Array[String] sample_sex_sources = []
+    Array[String] sample_entry_kinds = []
 
     File? small_variant_vcf
     File? small_variant_vcf_index
@@ -317,6 +321,7 @@ workflow ugc_wgw_cohort_freq {
     sample_ids = sample_ids,
     sample_sexes = sample_sexes,
     sample_sex_sources = sample_sex_sources,
+    sample_entry_kinds = sample_entry_kinds,
     out_prefix = out_prefix,
     runtime_attributes = default_runtime_attributes
   }

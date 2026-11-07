@@ -1,0 +1,28 @@
+{
+  "ugc_wgw_cohort_methyl.ugc_wgw_version": "<ugc_wgw_version>",
+  "ugc_wgw_cohort_methyl.cohort_id": "String",
+  "ugc_wgw_cohort_methyl.sample_ids": [
+    "String"
+  ],
+  "ugc_wgw_cohort_methyl.sample_labels": [
+    "String (the member's labels ';'-joined: XX or XY, then column=value of the project's methyl_label_columns; may be empty)"
+  ],
+  "ugc_wgw_cohort_methyl.cpg_pileup_beds": [
+    "File (cpg_pileup_bed of singleton or downstream per member)"
+  ],
+  "ugc_wgw_cohort_methyl.methbat_profiles": [
+    "File (methbat_profile of singleton or downstream per member)"
+  ],
+  "ugc_wgw_cohort_methyl.methbat_reports": [
+    "File? (methbat_report of singleton or downstream per member; null for a run from before 0.16: the stage makes it)"
+  ],
+  "ugc_wgw_cohort_methyl.compare_pairs": [
+    "XX:XY"
+  ],
+  "ugc_wgw_cohort_methyl.leave_one_out": false,
+  "ugc_wgw_cohort_methyl.run_joint_segment": false,
+  "ugc_wgw_cohort_methyl.run_deconvolve": false,
+  "ugc_wgw_cohort_methyl.ref_map_file": "<local_path_prefix>/ugc_wgw_ref_map.GRCh38_GIABv3.tsv",
+  "ugc_wgw_cohort_methyl.backend": "HPC",
+  "ugc_wgw_cohort_methyl.preemptible": true
+}

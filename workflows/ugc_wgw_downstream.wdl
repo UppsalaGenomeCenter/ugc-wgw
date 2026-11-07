@@ -10,6 +10,7 @@ import "../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/utilities.wd
 import "../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/backend_configuration/backend_configuration.wdl" as BackendConfiguration
 import "../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/filter_messages/filter_messages.wdl" as FilterMessages
 import "ugc_wgw/provenance.wdl" as Provenance
+import "ugc_wgw/methyl/report.wdl" as MethylReport
 
 workflow ugc_wgw_downstream {
   meta {
@@ -88,6 +89,9 @@ workflow ugc_wgw_downstream {
     preemptible: {
       description: "Where possible, run tasks preemptibly (no effect on HPC)"
     }
+    run_methbat_report: {
+      description: "methbat report: label the imprinting regions of the reference map's methbat_report_regions_tsv against their expected state (ugc_wgw_methbat_report, after the MethBat profile; off = no methbat_report output)"
+    }
   }
 
   input {
@@ -105,6 +109,7 @@ workflow ugc_wgw_downstream {
     File ref_map_file
     String? stat_depth_mean
     Array[String] upstream_msg = []
+    Boolean run_methbat_report = true
 
     # Backend configuration
     String backend = "HPC"
@@ -138,6 +143,7 @@ workflow ugc_wgw_downstream {
   File sawfish_expected_bed_male = ref_map["sawfish_expected_bed_male"]  # !FileCoercion
   File sawfish_expected_bed_female = ref_map["sawfish_expected_bed_female"]  # !FileCoercion
   File methbat_region_tsv = ref_map["methbat_region_tsv"]  # !FileCoercion
+  File methbat_report_regions_tsv = ref_map["methbat_report_regions_tsv"]  # !FileCoercion
   Boolean run_starphase = ref_map["run_starphase"] == "true"
 
   # the same flag-stripped catalog process_trgt_catalog gives singleton.wdl (the bait index is not needed here)
@@ -169,6 +175,18 @@ workflow ugc_wgw_downstream {
     methbat_region_tsv = methbat_region_tsv,
     run_starphase = run_starphase,
     default_runtime_attributes = default_runtime_attributes
+  }
+
+  # ugc-wgw: the imprinting report on the 5mC pileup (none when methbat_pileup wrote no 5mC sites)
+  if (run_methbat_report && defined(downstream.cpg_pileup_bed)) {
+    call MethylReport.ugc_wgw_methbat_report as methbat_report_task { input:
+      cpg_pileup_bed = select_first([
+        downstream.cpg_pileup_bed
+      ]),
+      report_regions_tsv = methbat_report_regions_tsv,
+      out_prefix = "~{sample_id}.~{ref_name}",
+      runtime_attributes = default_runtime_attributes
+    }
   }
 
   # singleton.wdl's stats table; depth_mean and inferred_sex come from the upstream stage's outputs
@@ -406,6 +424,7 @@ workflow ugc_wgw_downstream {
     String stat_cpg_hap2_count = downstream.stat_cpg_hap2_count
     String stat_cpg_combined_count = downstream.stat_cpg_combined_count
     File? methbat_profile = downstream.methbat_profile
+    File? methbat_report = methbat_report_task.report  # ugc-wgw: imprinting regions labelled (run_methbat_report)
     String stat_methbat_methylated_count = downstream.stat_methbat_methylated_count
     String stat_methbat_unmethylated_count = downstream.stat_methbat_unmethylated_count
     String stat_methbat_asm_count = downstream.stat_methbat_asm_count

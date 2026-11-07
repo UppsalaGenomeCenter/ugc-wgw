@@ -28,10 +28,10 @@ from .outputs import Outputs
 from .report import CSS as REPORT_CSS
 from .report import JS as REPORT_JS
 from .report import Raw, _bytes, _esc, _table
-from .stages import namespace
+from .stages import mode_stages, namespace, sample_stages, stage_spec
 from .util import UgcError, diag, read_json, utc_now, write_json
 
-DIGEST_SCHEMA = 4   # 4 (0.15.0): the mitorsaw block gains the collapsed chrM counts and the haplogroups; every per-sample digest rebuilds once
+DIGEST_SCHEMA = 5   # 5 (0.16.0): the methylation block gains the imprinting report; 4 (0.15.0): the mitorsaw block gained the collapsed chrM counts and the haplogroups; every per-sample digest rebuilds once per bump
 # The public repository (scripts/export-public.sh fills the owner); `project_url` in config.json overrides it.
 DEFAULT_PROJECT_URL = "https://github.com/UppsalaGenomeCenter/ugc-wgw"
 
@@ -55,26 +55,30 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "pedigree_relatedness_max": 0.65,     # ... as does one above this (a "parent" that is a duplicate)
     "related_relatedness_max": 0.2,       # an undeclared pair at or above this warns `related`
     "het_ratio_mad_max": 3.0,             # het/(het+hom-alt) beyond median ± this many MADs across the cohort warns `het_outlier`
+    "methyl_events_mad_max": 3.0,         # a member's methylation events (cohort_methyl) beyond median + this many MADs across the cohort warns `methyl_outlier`
     "sex_unknown_fails": 1,               # 1: a sample no source could sex fails `sex_not_inferred`; 0: it warns
 }
 
-STAGE_ORDER = ("singleton", "downstream", "upstream", "assembly_call", "assembly")  # which stage's file wins when several carry it
+STAGE_ORDER = ("singleton", "downstream", "upstream", "intake", "assembly_call", "assembly")  # which stage's file wins when several carry it
 PASS_ON = ("assembly", "identity", "all")   # what `summary --pass-list` gates on (docs/guide/06-running.md)
 SOURCE_MAP: dict[str, dict[str, str]] = {  # logical name -> {stage: output name}
     "stats_file": {"singleton": "stats_file", "downstream": "stats_file"},
     "msg_file": {"singleton": "msg_file", "downstream": "msg_file"},
-    "mosdepth_summary": {"singleton": "mosdepth_summary", "upstream": "mosdepth_summary"},
-    "mosdepth_region_bed": {"singleton": "mosdepth_region_bed", "upstream": "mosdepth_region_bed"},
+    "mosdepth_summary": {"singleton": "mosdepth_summary", "upstream": "mosdepth_summary", "intake": "mosdepth_summary"},
+    "mosdepth_region_bed": {"singleton": "mosdepth_region_bed", "upstream": "mosdepth_region_bed", "intake": "mosdepth_region_bed"},
     "sv_copynum_summary": {"singleton": "sv_copynum_summary", "upstream": "sv_copynum_summary"},
     "sv_copynum_bedgraph": {"singleton": "sv_copynum_bedgraph", "upstream": "sv_copynum_bedgraph"},
     "small_variant_stats": {"singleton": "small_variant_stats", "downstream": "small_variant_stats"},
     "bcftools_roh_out": {"singleton": "bcftools_roh_out", "downstream": "bcftools_roh_out"},
-    "sv_vcf": {"singleton": "phased_sv_vcf", "downstream": "phased_sv_vcf", "upstream": "sv_vcf"},
+    "sv_vcf": {"singleton": "phased_sv_vcf", "downstream": "phased_sv_vcf", "upstream": "sv_vcf", "intake": "sv_vcf"},
     "phase_stats": {"singleton": "phase_stats", "downstream": "phase_stats"},
     "phase_blocks": {"singleton": "phase_blocks", "downstream": "phase_blocks"},
     "trgt_vcf": {"singleton": "phased_trgt_vcf", "downstream": "trgt_vcf"},
     "trgt_coverage_dropouts": {"singleton": "trgt_coverage_dropouts", "downstream": "trgt_coverage_dropouts"},
     "methbat_profile": {"singleton": "methbat_profile", "downstream": "methbat_profile"},
+    "methbat_report": {"singleton": "methbat_report", "downstream": "methbat_report"},
+    "input_checks": {"upstream": "input_checks", "intake": "input_checks"},
+    "input_provenance": {"upstream": "input_provenance", "intake": "input_provenance"},
     "paraphase_json": {"singleton": "paraphase_summary", "upstream": "paraphase_output_json"},
     "mitorsaw_hap_stats": {"singleton": "mitorsaw_hap_stats", "upstream": "mitorsaw_hap_stats"},
     "pbstarphase_tsv": {"singleton": "pbstarphase_tsv", "downstream": "pbstarphase_tsv"},
@@ -156,6 +160,7 @@ class Sources:
     sheet_sex: str | None = None
     father_id: str | None = None
     mother_id: str | None = None
+    entry_kind: str = "reads"
 
     def _stages(self) -> list[str]:
         return [s for s in STAGE_ORDER if s in self.docs]
@@ -254,7 +259,11 @@ def latest_success_in_mode(db: DB, subject_type: str, subject_id: str, stage: st
 
 def resolve_sources(db: DB, sample_id: str, mode: str, version: str | None) -> Sources | None:
     """The latest successful runs of a sample in `mode` (plus assembly and assembly_call); None when it has none."""
-    stages: tuple[str, ...] = ("singleton",) if mode == "standalone" else ("upstream", "downstream") if mode == "joint" else ()
+    rec = db.get_sample(sample_id)
+    kind = (rec.entry_kind if rec else None) or "reads"
+    stages: tuple[str, ...] = sample_stages(mode, kind) if mode in ("standalone", "joint") else ()
+    if mode == "standalone" and kind != "reads":   # a member rebased after a singleton run keeps that run's summary too
+        stages = stages + ("singleton",)
     runs: dict[str, RunRecord] = {}
     docs: dict[str, dict[str, object]] = {}
     for stage in stages + ("assembly", "assembly_call"):
@@ -269,16 +278,15 @@ def resolve_sources(db: DB, sample_id: str, mode: str, version: str | None) -> S
         runs[stage] = run
     if not runs:   # a sample with only an assembly gets a summary too (its assembly section and QC)
         return None
-    rec = db.get_sample(sample_id)
     return Sources(sample_id=sample_id, mode=mode, runs=runs, docs=docs,
                    sheet_sex=(rec.sex or None) if rec else None,
                    father_id=(rec.father_id or None) if rec else None,
-                   mother_id=(rec.mother_id or None) if rec else None)
+                   mother_id=(rec.mother_id or None) if rec else None,
+                   entry_kind=kind)
 
 
 def resolve_cohort_runs(db: DB, cohort_id: str, mode: str, version: str | None) -> dict[str, RunRecord]:
-    stages = (("cohort_qc", "cohort_call", "cohort_merge", "cohort_freq") if mode == "joint"
-              else ("cohort_pangenome",) if mode == "assembly" else ("cohort_qc", "cohort_merge", "cohort_freq"))
+    stages = tuple(s for s in mode_stages(mode) if stage_spec(s).subject_type == "cohort")   # the mode's cohort stages, in order
     out: dict[str, RunRecord] = {}
     for stage in stages:
         run = latest_success_in_mode(db, "cohort", cohort_id, stage, mode, version)
@@ -382,6 +390,11 @@ def qc_flags(digest: dict[str, object], thr: dict[str, float]) -> dict[str, obje
     if isinstance(uf, (int, float)) and uf > thr["mito_unexplained_max"]:
         flag("mito_unexplained_high", "warn", f"mitorsaw's haplotypes leave {sv.fmt(100 * uf, 1)}% of the fingerprint reads unexplained, above "
              f"{sv.fmt(100 * thr['mito_unexplained_max'], 1)}% (a contamination or NUMT signal)", uf, thr["mito_unexplained_max"])
+    imp: dict[str, object] = (digest.get("methylation", {}) or {}).get("imprinting", {}) or {}  # type: ignore[union-attr, assignment]
+    if isinstance(imp.get("anomalous"), (int, float)) and imp["anomalous"] > 0:  # type: ignore[operator]
+        regions = ", ".join(str(r["region"]) for r in imp.get("regions", []) if r.get("summary") == "Anomalous")  # type: ignore[union-attr]
+        flag("imprinting_anomalous", "warn", f"methbat report: {imp['anomalous']} imprinting region(s) have lost their expected allele-specific "
+             f"methylation without a QC warning: {regions}", imp["anomalous"], 0)
     asm: dict[str, object] = digest.get("assembly", {}) or {}  # type: ignore[assignment]
     if asm:
         fl: dict[str, object] = asm.get("flagger") or {}  # type: ignore[assignment]
@@ -420,6 +433,10 @@ def qc_flags(digest: dict[str, object], thr: dict[str, float]) -> dict[str, obje
         elif kar == "unknown":
             flag("asm_karyotype_unknown", "warn", "the assembly's karyotype is unknown (too little non-PAR chrX assembled): the sample is in no sex "
                  "stratum of the pangenome frequencies", kar)
+    entry_kind = str((digest.get("sample") or {}).get("entry_kind") or "reads")  # type: ignore[union-attr]
+    if entry_kind != "reads":
+        flag("external_input", "info", "the alignment" + (" and the small-variant and SV calls" if entry_kind == "vcf" else "")
+             + f" came from outside this project (the {entry_kind} entry kind); the manifest names the files", entry_kind)
     if digest.get("messages"):
         flag("messages", "info", f"{len(digest['messages'])} workflow message(s)")  # type: ignore[arg-type]
     if digest.get("warnings"):
@@ -615,7 +632,7 @@ def build_digest(src: Sources, thr: dict[str, float], y_threshold: float = 0.1) 
     """Read the sample's result files once into plain numbers. A file that cannot be read becomes a warning."""
     d: dict[str, object] = {"schema": DIGEST_SCHEMA, "generated_at": utc_now(), "mode": src.mode,
                             "sample": {"id": src.sample_id, "sex_sheet": src.sheet_sex, "father_id": src.father_id,
-                                       "mother_id": src.mother_id},
+                                       "mother_id": src.mother_id, "entry_kind": src.entry_kind},
                             "runs": {s: {"run_id": r.run_id, "ugc_wgw_version": r.ugc_wgw_version, "attempt": r.attempt,
                                          "finished_at": r.finished_at, "run_dir": r.run_dir} for s, r in src.runs.items()},
                             "warnings": []}
@@ -703,7 +720,8 @@ def build_digest(src: Sources, thr: dict[str, float], y_threshold: float = 0.1) 
     mb = text("methbat_profile", sp.parse_methbat_profile) or {}
     d["methylation"] = {"cpg": {k: _stat_num(stats, f"cpg_{k}_count") for k in ("combined", "hap1", "hap2")},
                         "methbat": {k: _stat_num(stats, f"methbat_{k}_count") for k in ("methylated", "unmethylated", "asm")},
-                        "profile": mb}
+                        "profile": mb,
+                        "imprinting": text("methbat_report", sp.parse_methbat_report) or {}}
 
     # targeted callers; the mitorsaw block carries the collapsed chrM counts and the haplogroups (0.15.0) when the run has them
     mitorsaw: dict[str, object] = jsonf("mitorsaw_hap_stats", sp.parse_mitorsaw) or {}
@@ -838,6 +856,24 @@ def _clip(text: str, n: int) -> Raw:
 
 def _status_badge(status: str) -> Raw:
     return Raw(f'<span class="status status-{_esc(status)}">{_esc(status)}</span>')
+
+
+def _imprinting_html(imp: dict[str, object]) -> str:
+    """The methbat report of the sample's imprinting regions (0.16.0), or a note when the run predates it."""
+    if not imp:
+        return "<p class='small muted'>No imprinting report (methbat report) in this run: a run from before 0.16; cohort_methyl makes one for the cohort.</p>"
+    regions: list[dict[str, object]] = imp.get("regions", []) or []  # type: ignore[assignment]
+    badge = {"PASS": "pass", "Inconclusive": "info", "Anomalous": "warn", "AnomalousQcWarning": "warn"}
+    rows = [[r.get("region"), Raw(f"<span class='flag-{badge.get(str(r.get('summary')), 'info')}'>{_esc(r.get('summary'))}</span>"),
+             r.get("warnings"), r.get("observed"), sv.fmt(r.get("combined"), 1), sv.fmt(r.get("delta"), 1), sv.fmt(r.get("phased_sites")), sv.fmt(r.get("coverage"))]
+            for r in regions]
+    return ("<h3>Imprinting regions (methbat report)</h3>"
+            + _cards([("regions", imp.get("n")), ("PASS", imp.get("pass")), ("inconclusive", imp.get("inconclusive")),
+                      ("anomalous", imp.get("anomalous")), ("anomalous with a QC warning", imp.get("anomalous_qc"))])
+            + _table(["region", "result", "QC warnings", "observed", "combined methylation %", "haplotype delta", "phased sites", "coverage"], rows)
+            + "<p class='small muted'>Expected: allele-specific methylation at every region (MethBat's imprinting targets, Mackay et al. 2022). "
+            "<code>Inconclusive</code> with <code>LowHaplotypeCoverage</code> or <code>LowPhasedSites</code> is a phasing or coverage question, not biology; "
+            "<code>Anomalous</code> without a warning is a loss of imprinting worth a look (<code>imprinting_anomalous</code>).</p>")
 
 
 def _flags_table(qc: dict[str, object]) -> str:
@@ -1180,7 +1216,11 @@ def render_sample(d: dict[str, object], tools: list[dict[str, object]], *, proje
         f"mother {_esc(s.get('mother_id') or '–')} · generated {_esc(d.get('generated_at'))}</p>"
         + _cards(cards) + "<h3>QC flags</h3>" + _flags_table(qc)
         + "<p class='small muted'>Thresholds: " + _esc(", ".join(f"{k} = {v:g}" for k, v in sorted(qc.get("thresholds", {}).items()))) + "</p>"  # type: ignore[union-attr]
-        + "<h3>Runs summarised</h3>" + _table(["stage", "run", "ugc-wgw version", "attempt", "finished"], run_rows, cls=""))
+        + "<h3>Runs summarised</h3>" + _table(["stage", "run", "ugc-wgw version", "attempt", "finished"], run_rows, cls="")
+        + (f"<p class='small'><b>External input</b>: this sample entered as the <code>{_esc(s.get('entry_kind'))}</code> kind: "
+           + ("its aligned BAM" if s.get("entry_kind") == "bam" else "its aligned BAM and its small-variant and SV calls")
+           + " were made outside this project; the run manifest names the files and the producing programs.</p>"
+           if s.get("entry_kind", "reads") != "reads" else ""))
 
     # reads
     add("sec-reads", "Reads", '<div class="grid"><div>' + _kv([
@@ -1291,7 +1331,7 @@ def render_sample(d: dict[str, object], tools: list[dict[str, object]], *, proje
                 ("allele-specific", sv.fmt(mbt.get("asm"))), ("profile regions", sv.fmt(prof.get("n_regions")))])
         + '<div class="grid"><div><h3>Region categories (MethBat profile)</h3>' + sv.bars_h([(k, sv.finite(v), "") for k, v in sorted(prof.get("labels", {}).items())], width=250, label_w=170)  # type: ignore[union-attr]
         + "</div><div><h3>Combined methylation per region (%)</h3>" + sv.hist([(str(l), sv.finite(v)) for l, v in prof.get("hist", [])], width=420, y_label="regions")  # type: ignore[union-attr]
-        + "</div></div>")
+        + "</div></div>" + _imprinting_html(me.get("imprinting", {}) or {}))  # type: ignore[arg-type]
 
     # targeted callers
     para: dict[str, object] = tg.get("paraphase", {})  # type: ignore[assignment]
@@ -1490,7 +1530,8 @@ def run(cfg: Config, db: DB, code: CodeInfo, *, sample_ids: list[str] | None, co
     if cohort:
         from .summary_cohort import build_cohort_digest  # noqa: PLC0415 - keeps the cohort page optional
         cruns = resolve_cohort_runs(db, cohort.cohort_id, mode, version)
-        cdigest = build_cohort_digest(cohort, {sid: digests[sid] for sid in cohort.members if sid in digests}, cruns, mode, thr)
+        cdigest = build_cohort_digest(cohort, {sid: digests[sid] for sid in cohort.members if sid in digests}, cruns, mode, thr,
+                                      genes_of_interest=cfg.methyl_genes_of_interest)
         ident: dict[str, object] = cdigest.get("identity", {}) or {}  # type: ignore[assignment]
         identity_rows = ident.get("members", {}) or {}  # type: ignore[assignment]
     asm_passed: list[str] = []

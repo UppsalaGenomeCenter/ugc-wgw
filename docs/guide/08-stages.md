@@ -60,7 +60,8 @@ prebuilt reference index of the reference map (upstream would build the
 5.8 GB index once per BAM), pbsamoa merge,
 mosdepth, DeepVariant (8 shards), sawfish discover and call, Paraphase,
 mitorsaw, kivvi (KIV-2 and D4Z4), optional fail-reads baiting, HiPhase, TRGT,
-pbjam BAM stats, variant stats, MethBat pileup and profile, StarPhase,
+pbjam BAM stats, variant stats, MethBat pileup and profile, then our
+`methbat report` (below, `downstream`), StarPhase,
 consolidate stats. An aligned input BAM is realigned as one chunk, with its
 haplotype tags stripped and a message in `msg_file`.
 
@@ -145,6 +146,19 @@ and the string `mt_haplogroup`. Both tasks hang off mitorsaw, so a re-run
 of an older sample replays everything else from the call cache. On
 chr20-only data (the smoke) mitorsaw sees no chrM read: the files are
 empty but valid and the haplogroup is empty.
+
+With `aligned_bam_in` (the driver sets it for a `bam`-kind sample, chapter
+05) the alignment and the merge are skipped: `ugc_wgw_input_checks` first
+checks the given BAM against the installed reference (coordinate-sorted,
+indexed, every `@SQ` contig in the FASTA index with the same length, the
+read group's sample name equal to the sample id, MM/ML methylation tags in
+the first 2,000 reads; a failure stops the stage as an
+input error, and `require_methylation_tags = false` turns the missing tags
+into a note), writes `input_checks` and `input_provenance` (the header's
+`@PG` and `@RG` fields), and every caller reads the given BAM unchanged.
+`hifi_reads` is empty then. A `reads`-kind sample whose BAM happens to be
+aligned still goes through upstream's own `samtools reset` path; the `bam`
+kind is the deliberate opt-out of realignment.
 
 ## `cohort_qc`
 
@@ -278,7 +292,65 @@ flowchart TD
 | `sample_id`, `sex` (from `upstream.inferred_sex`), `aligned_hifi_reads` (+ index), `aligned_fail_reads` (+ index, when present), `small_variant_vcf` and `sv_vcf` (+ indices; from `cohort_call` slices in joint mode, from `upstream` otherwise), `stat_depth_mean`, `upstream_msg` | nothing beyond the shared inputs |
 
 Outputs: the 62 `downstream` outputs plus `stats_file` and `msg_file`, so
-that `upstream` plus `downstream` equals `singleton`.
+that `upstream` plus `downstream` equals `singleton`, plus `methbat_report`.
+
+> `methbat report` labels the imprinting regions of
+> `methbat_report_regions_tsv` (`PLAGL1`, `GRB10`, `MEST`, `H19/IGF2`,
+> `KCNQ1OT1`, `MEG3`, `SNRPN`, `PEG3`, the `GNAS` cluster and the others of
+> MethBat's `hg38_imprinting_targets`) as `PASS`, `Inconclusive`, `Anomalous`
+> or `AnomalousQcWarning` against their expected allele-specific methylation
+> (`ugc_wgw_methbat_report`, 1 CPU, 4 GB, seconds). Output `methbat_report`,
+> in `singleton` and `downstream` alike. Off with `run_methbat_report =
+> false`. A run from before 0.16 has none: `cohort_methyl` makes it for the
+> cohort.
+
+## `intake`
+
+Per sample, the `vcf` entry kind only (chapter 05): a sample registered from
+an aligned BAM and its small-variant and SV VCFs (and optionally a gVCF)
+gets what `downstream` needs from `upstream` without alignment or calling.
+
+```mermaid
+flowchart TD
+  bam[/"aligned BAM"/] --> ck["input checks against the reference"]
+  v1[/"small-variant VCF"/] --> ck
+  v2[/"SV VCF"/] --> ck
+  g[/"gVCF, if given"/] --> ck
+  bam --> md["mosdepth: depth, inferred sex"]
+  bam --> se["somalier extract"] --> rs["sex resolution: declared > coverage > somalier"]
+  md --> rs
+  v1 --> rn1["sample column renamed to the sample id"]
+  v2 --> rn2["same"]
+  g --> rn3["same"]
+```
+
+Text version: `ugc_wgw_input_checks` first (the BAM is coordinate-sorted,
+indexed, aligned to the installed reference with the same contig lengths,
+its read group's sample name is the sample id, and it carries MM/ML tags in
+its first reads; every VCF is BGZF-compressed,
+indexed, has exactly one sample column and only reference contigs); a
+failed check exits with `INPUT CHECK FAILED` lines and the driver records
+an input error (the sample blocks, no retry). Then upstream's `mosdepth`,
+our `ugc_wgw_somalier_extract`, the one-sample relate and
+`ugc_wgw_resolve_sex` as in `upstream`, and `ugc_wgw_vcf_sample_rename` per
+VCF (`bcftools reheader` when the column is not the sample id; the file is
+copied otherwise) under upstream's file names. Minutes.
+
+| Driver fills | You may override |
+| --- | --- |
+| `sample_id`, `declared_sex`, `aligned_bam` (+ index), `small_variant_vcf_in` (+ index), `sv_vcf_in` (+ index), `gvcf_in` (+ index, when the sheet has one), `ugc_wgw_container_registry` | `require_methylation_tags` (true), `somalier_sex_min_x_sites` (50), `somalier_sex_min_x_depth` (5.0) |
+
+Outputs carry upstream's names for the fields `downstream` reads
+(`aligned_hifi_reads`, `inferred_sex`, `resolved_sex`, `stat_depth_mean`,
+`small_variant_vcf`, `sv_vcf`, `small_variant_gvcf`, `somalier_extract`,
+`msg`) plus `input_checks` (check, target, status, detail),
+`input_provenance` (the BAM header's `@PG` and `@RG` fields, the VCF
+headers' `##source` and tool version lines) and the manifest, which names
+the external files with their size and modification time. The member's
+page and the cohort's members table mark it `external_input`
+(informational), and `cohort_freq`'s samples file carries the kind. Such a
+member has no mitorsaw call: `cohort_merge` leaves the mitochondrial merge
+out for a cohort that holds one, and says so.
 
 ## `cohort_merge`
 
@@ -466,6 +538,114 @@ Counts from cohorts that share no samples can be summed (`AC`, `AN`, `NS`
 per record); a driver command for that is not written yet. Sample names of
 fewer than three characters cannot be stratified by sex (a limit of
 `bcftools +fill-tags --samples-file`); the stage fails and names them.
+
+## `cohort_methyl`
+
+The cohort's methylation layer, from the per-sample MethBat outputs: a
+background profile of the cohort, every member scored against it, group
+comparisons, the imprinting anomalies tabulated, every region annotated
+with its genes, and optionally a joint segmentation and a cell-type
+deconvolution. Nothing here is upstream's; the tools are MethBat 1.1.0 from
+upstream's `methbat` image. Independent of `cohort_merge` and `cohort_freq`;
+last in both cohort modes.
+
+```mermaid
+flowchart TD
+  pf[/"per-member MethBat profiles"/] --> build["methbat build: the cohort background, one row per region and label"]
+  sheet[/"sheet sex, methyl_label_columns"/] --> build
+  subgraph m["per member"]
+    pp[/"5mC pileup"/] --> prof["methbat profile against the background"] --> ann["gene annotation, events, counts"]
+    pp --> rep["methbat report, for a run without one"]
+  end
+  build --> prof
+  subgraph c["per compare pair"]
+    build --> comp["methbat compare"]
+  end
+  subgraph j["if run_joint_segment / run_deconvolve"]
+    pp --> jseg["methbat joint-segment"]
+    pp --> dec["methbat deconvolve"]
+  end
+  ann --> sum["summary, regions, events, imprinting, samples"]
+  rep --> sum
+  comp --> sum
+```
+
+Text version: one `ugc_wgw_methbat_build` (or N with `leave_one_out`);
+per member `ugc_wgw_methbat_report` when its run has none, then
+`ugc_wgw_methbat_profile_bg`; per pair `ugc_wgw_methbat_compare`;
+optionally `ugc_wgw_methbat_joint_segment` and, per member,
+`ugc_wgw_methbat_deconvolve`; one `ugc_wgw_methyl_summary`; the manifest.
+
+Why the labels matter: the background's statistics are per label, and a
+member is compared against each label it carries (`ALL` always, its sex
+group as `cohort_freq` resolves it, and `column=value` for every sheet
+column named in `config.json`'s `methyl_label_columns`). Without the sex
+label every XX member looks hyper-methylated on chrX against an `ALL`
+background that is half XY, and real events drown. A label group needs at
+least `background_min_datasets` (10) members or every comparison against
+it is `InsufficientData`; the summary notes the labels below that.
+
+| Driver fills | You may override |
+| --- | --- |
+| `cohort_id`, `sample_ids`, `cpg_pileup_beds`, `methbat_profiles`, `methbat_reports` (null for a member whose run predates the report), `sample_labels` (`;`-joined per member: the sex group, then `column=value` of `methyl_label_columns`) | `compare_pairs` (`["XX:XY"]`, `baseline:compare`; empty = none), `leave_one_out` (false), `background_min_datasets` (10), `zscore_min` (3.0), `methyl_delta_min` (20), `run_joint_segment` (false), `run_deconvolve` (false), `build_mem_gb` (8), `profile_mem_gb` (4), `joint_segment_threads` (8), `joint_segment_mem_gb` (32), `summary_mem_gb` (4) |
+
+Resources: chapter 12. The whole stage is minutes on the smoke cohort and
+well under an hour at 800 members without the joint segmentation.
+
+Outputs (`<cohort_id>.methyl.GRCh38_GIABv3.`): the background TSV, the
+collection file it was built from, per member the scored profile as MethBat
+writes it and the same with `hgnc_id`, `gene_symbol` and `region_type`
+appended, one comparison TSV per pair, the per-region table, the events
+file, the imprinting table, the samples table, the long summary, and with
+the switches the joint segments (BED and two bedGraphs) and the
+deconvolution estimates (chapter 07).
+
+#### Reading the scores
+
+- A member's scored profile is MethBat's single-dataset profile with the
+  background columns filled: `compare_label` (`HypoMethylated`,
+  `HyperMethylated`, `HypoASM`, `HyperASM`, `Uncategorized`,
+  `InsufficientData`), `background_category` (one row per region per
+  label), `mean_combined_methyl_zscore` and `mean_abs_meth_delta_zscore`,
+  and the population counts (`category_pop_count`, `category_pop_freq`). In
+  MethBat 1.1.0 a `Hyper`/`Hypo` label also requires the matching
+  `summary_label` (`Methylated`/`Unmethylated`); 1.2.0 drops that coupling,
+  so the next MethBat bump changes these counts and the sync procedure must
+  say so.
+- With `leave_one_out = false` (default) the member is one of the N datasets
+  behind the mean and stdev it is compared against. At N ≥ 100 this is
+  negligible; below that it makes z-scores conservative at exactly the
+  regions where the member is an outlier. `leave_one_out = true` builds a
+  background per member from the other N−1.
+- Every per-region row carries `hgnc_id`, `gene_symbol` and `region_type`
+  from `methbat_map` (the reference map key of the same name): the genes
+  whose TSS is within 10 kb of the island or whose body overlaps it, and
+  `imprinted`, `promoter`, `gene_body` or `intergenic`. The events file
+  lists every member's Hypo/Hyper rows with those columns, sorted by gene
+  then member: the file to filter by a gene list (`methyl_genes_of_interest`
+  in `config.json` puts those genes first on the cohort page). Regions
+  without a gene keep their rows. PacBio's review rule: genes within ±10 kb,
+  then the genes of interest; this leaves tens of regions per sample.
+- The per-region table (`n_hypo`, `n_hyper`, `n_hypo_asm`, `n_hyper_asm`
+  across members, next to the background's dataset counts) separates
+  recurrent cohort artefacts (a region flagged in 30 % of members is a
+  reference or mappability problem, not 30 % rare events) from singletons.
+- `compare` output: per region `summary_comparison`, z-scores and deltas,
+  and the member counts per side; `InsufficientData` below 10 per side. The
+  default `XX:XY` pair is a check as much as a result: chrX should light up
+  and little else.
+- Imprinting table: `PASS`, `Inconclusive`, `Anomalous`, `AnomalousQcWarning`
+  per member per region from `methbat report`, with `report_source` (`run`,
+  or `stage` for a member whose run predates the task).
+  `LowHaplotypeCoverage` and `WeakASM` are phasing-quality signals as well
+  as biology; a member with many QC warnings is a candidate for the phasing
+  section of its sample page. `Anomalous` without a warning flags the
+  member `imprinting_anomalous` (warn) on its own page.
+- The cohort page's Methylation section draws the labels, the events per
+  member (beyond median + 3 MAD: `methyl_outlier`, warn), the genes with
+  the most members carrying an event, the events by region type, the
+  recurrent regions, the imprinting screen, the comparisons and, when run,
+  the deconvolution's top cell type per member (chapter 07).
 
 ## `assembly`
 

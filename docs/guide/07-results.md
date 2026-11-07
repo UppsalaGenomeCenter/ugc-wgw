@@ -61,6 +61,7 @@ name comes from the map (`name`). Cohort files are named
 | `phased_trgt_vcf` (`trgt_vcf` in `downstream`), `_index`, `trgt_spanning_reads` | Tandem repeat genotypes and the reads spanning them. |
 | `small_variant_gvcf`, `_index` (`singleton`) | The gVCF; input to GLnexus in `cohort_merge`. |
 | `cpg_pileup_bed`, `hmcpg_pileup_bed` (+ indices), `methbat_profile` | 5mCpG and 5hmCpG methylation per site (MethBat pileup) and per region (MethBat profile). |
+| `methbat_report` | `<sample_id>.GRCh38_GIABv3.methbat.report.tsv`: MethBat's imprinting regions labelled `PASS`, `Inconclusive`, `Anomalous` or `AnomalousQcWarning` against their expected allele-specific methylation, with QC warnings (since 0.16; `cohort_methyl` makes it for older runs). |
 | `pbstarphase_summary` (`pbstarphase_json` in `downstream`), `pbstarphase_tsv` | Pharmacogenomic star alleles (StarPhase) and its PharmCAT-style TSV. |
 | `kivvi_kiv2_*`, `kivvi_d4z4_*` (`singleton`; in `upstream` for joint) | LPA KIV-2 and DUX4 D4Z4 repeat genotypes. The JSON records `call_status` (`failed_due_to_no_reads` when the region is empty); the allele plots exist only when an allele was called; all six are absent, with a `msg` line, when kivvi fails on low coverage. |
 | `paraphase_*`, `mitorsaw_*` (`singleton`; in `upstream` for joint) | Paralog and mitochondrial calls. |
@@ -80,6 +81,7 @@ name comes from the map (`name`). Cohort files are named
 | `sv_vcf`, `sv_supporting_reads`, `sv_copynum_*`, `sv_depth_bw`, `sv_gc_bias_corrected_depth_bw` | Per-sample sawfish call and CNV tracks (with `run_sawfish_call`). |
 | `discover_tar` | sawfish discover directory, for a later multi-sample call. |
 | `inferred_sex`, `stat_depth_mean`, `mosdepth_*` | Coverage and the inferred karyotype the driver passes on. |
+| `input_checks`, `input_provenance` (with `aligned_bam_in`: a `bam`-kind sample) | `<sample_id>.input_checks.tsv` (check, target, status, detail) and `<sample_id>.input_provenance.tsv` (the given BAM's `@PG` and `@RG` fields). |
 | `paraphase_*`, `mitorsaw_*` | Paralog and mitochondrial calls. |
 | `mt_small_variant_vcf`, `mt_sv_vcf`, `mt_haplotypes_vcf` (+ indices), `mt_haplotypes_tsv`, `mt_summary`, `mt_haplogroups`, `mt_haplogroup` | mitorsaw's chrM calls collapsed to a diploid genotype (`0/1` heteroplasmic, `1/1` homoplasmic, `VAF` the read fraction), split at 50 bp into small variants and SVs; one haploid column per haplotype; a summary row; haplogrep3's haplogroup per haplotype and the sample's (its most abundant haplotype's). |
 
@@ -111,7 +113,7 @@ name comes from the map (`name`). Cohort files are named
 | `sv_freq_vcf`, `_index` | The same over the merged SV VCF, `<cohort_id>.freq.GRCh38.structural_variants.vcf.gz`, plus `SUPP` (carrier samples) and `CF` (carrier frequency). |
 | `mt_small_variant_freq_vcf`, `mt_sv_freq_vcf` (+ indices; when `cohort_merge` merged the mitochondrial sets) | Sites-only counts of the merged mitochondrial sets, `<cohort_id>.freq.GRCh38.mt_small_variants.vcf.gz` and `…mt_svs.vcf.gz`: `AC`, `AN`, `AF`, `NS`, `AC_Hom` (homoplasmic members), `AC_Het` (heteroplasmic members); no sex strata. |
 | `freq_summary` | `<cohort_id>.freq.GRCh38.summary.tsv`: records by type, contig class, filter and AF bin; singletons; call rate; strata; the `mt_small_variants` and `mt_svs` resources when present. Long format, `resource metric key value`. |
-| `freq_samples` | `<cohort_id>.freq.GRCh38.samples.tsv`: each member's sex group, where it came from, and presence in each VCF (`in_mt_vcf` since 0.15). |
+| `freq_samples` | `<cohort_id>.freq.GRCh38.samples.tsv`: each member's sex group, where it came from, presence in each VCF (`in_mt_vcf` since 0.15) and its entry kind (`entry_kind` since 0.16: `reads`, `bam`, `vcf`). |
 
 The `##ugc_wgw_cohort_freq_*` header lines of both VCFs say how the counts were
 made (chapter 08).
@@ -129,6 +131,35 @@ made (chapter 08).
 The flags (`duplicate`, `pedigree_mismatch`, `related`, `het_outlier`) are
 the driver's, computed on the cohort page from these tables ("Analysis
 summary" below); `ugc-wgw export --domains identity` copies the tables.
+
+### `cohort_methyl`
+
+| Output | What it is |
+|---|---|
+| `cohort_background` | `<cohort_id>.methyl.GRCh38_GIABv3.background.tsv`: MethBat's cohort profile, one row per CpG island and label (`data_category`): dataset counts per summary label, the means and standard deviations of combined methylation and of the haplotype delta. |
+| `methyl_collection` | `.collection.tsv`: identifier, filename, labels per member, as `methbat build` read it. |
+| `scored_profiles`, `scored_profiles_annotated` | Per member, cohort order: `<sample_id>.GRCh38_GIABv3.methbat.scored.tsv` (MethBat's profile against the background: `compare_label`, `background_category`, z-scores, population counts; one row per region per label) and `.scored.annotated.tsv` (the same rows with `hgnc_id`, `gene_symbol`, `region_type`). |
+| `comparisons` | One `.compare.<baseline>_vs_<compare>.tsv` per `compare_pairs` entry (`summary_comparison`, z-scores, deltas, members per side); header-only when a side has no member. |
+| `methyl_summary` | `.summary.tsv`, long format `resource metric key value`: cohort counts, labels and their member counts (with the ones below the minimum under `notes`), events and summary labels per member, imprinting counts per member and per region, the genes with the most members carrying an event, events by region type, the comparisons' label counts, deconvolution's top cell type. |
+| `methyl_regions` | `.regions.tsv`: every background row with `n_datasets`, the summary-label counts, the means, the event counts across members (`n_hypo`, `n_hyper`, `n_hypo_asm`, `n_hyper_asm`) and the gene columns. |
+| `methyl_events` | `.events.tsv`: every member's Hypo/Hyper rows (the scored row with `sample_id` first, the gene columns last), sorted by gene, position, member: the file to filter by a gene list. |
+| `methyl_imprinting` | `.imprinting.tsv`: member × imprinting region from `methbat report`, with `report_source` (`run` or `stage`). |
+| `methyl_samples` | `.samples.tsv`: one row per member: labels, event counts, summary-label counts, imprinting counts, `report_source`, deconvolution's top cell type. |
+| `member_reports` | The `methbat report` used per member, cohort order. |
+| `joint_segments`, `joint_combined_methyl`, `joint_asm` (with `run_joint_segment`) | `.joint.meth_regions.bed` (segments: Methylated, Unmethylated, AlleleSpecificMethylation), `.joint.combined_methyl.bedgraph`, `.joint.asm.bedgraph`. |
+| `deconvolution` (with `run_deconvolve`) | `<sample_id>.GRCh38_GIABv3.methbat.deconvolution.json` per member: `metrics.normalized_fraction` per cell type of the atlas (nanomix 39Bisulfite, an example). |
+
+`ugc-wgw export --domains methyl` copies the background, summary, regions,
+imprinting, samples and events tables.
+
+### `intake`
+
+| Output | What it is |
+|---|---|
+| `aligned_hifi_reads`, `_index` | The given aligned BAM, passed through under upstream's name. |
+| `small_variant_vcf`, `sv_vcf`, `small_variant_gvcf` (+ indices) | The given VCFs with their sample column named after the sample id, `<sample_id>.GRCh38_GIABv3.small_variants.vcf.gz`, `.structural_variants.vcf.gz`, `.small_variants.g.vcf.gz`. |
+| `mosdepth_*`, `inferred_sex`, `stat_depth_mean`, `resolved_sex`, `resolved_sex_source`, `somalier_sex`, `sex_tsv`, `somalier_extract` | As `upstream` makes them. |
+| `input_checks`, `input_provenance` | `<sample_id>.input_checks.tsv` (check, target, status, detail: BAM index, sort order, reference contigs, methylation tags; per VCF BGZF, index, sample column, contigs) and `.input_provenance.tsv` (the BAM's `@PG` and `@RG` fields, the VCFs' `##source` and tool lines). |
 
 ### `assembly`
 
@@ -452,7 +483,11 @@ reads, Paraphase regions failed for coverage, mitorsaw without haplotypes)
 and `mito_unexplained_high` (mitorsaw's haplotypes leave more than
 `mito_unexplained_max`, 0.02, of the fingerprint reads unexplained: a
 contamination or NUMT signal; 0.02 is mitorsaw's own passing criterion)
-warn; workflow messages are informational. The identity flags live on the
+and `imprinting_anomalous` (`methbat report`: an imprinting region lost its
+expected allele-specific methylation without a QC warning; the message
+names the regions) warn; workflow messages and `external_input` (the sample
+entered as the `bam` or `vcf` kind: its alignment, or its calls too, came
+from outside the project) are informational. The identity flags live on the
 cohort page, because they need the whole cohort: `duplicate` (both members
 of a pair at or above `duplicate_relatedness_min`, 0.9: the same
 individual, a re-delivered sample or monozygotic twins) and
@@ -462,6 +497,9 @@ parent both; a sheet error as often as a swap) fail; `related` (an
 undeclared pair at or above `related_relatedness_max`, 0.2) and
 `het_outlier` (heterozygosity ratio beyond the cohort's median ±
 `het_ratio_mad_max`, 3, scaled MADs: contamination or a sample mix) warn;
+`methyl_outlier` (a member's methylation events against the cohort
+background beyond the median + `methyl_events_mad_max`, 3, MADs, from
+`cohort_methyl`'s samples table) warns too;
 `sex_mismatch` also fires for a member whose own run predates the extract
 when the stage's chrX call disagrees with its sheet or coverage. They join
 the member's flags and QC status on the cohort page and in the export, not
@@ -504,7 +542,7 @@ appended.
 
 | File | Rows | Columns |
 | --- | --- | --- |
-| `C1.members.tsv` | one per member, frozen order | `present`; sex from the sheet, from coverage, the sex group the strata use, somalier's call and the ancestry label when `cohort_qc` ran; the parents; every extra sheet column as `sheet_<col>`; the version and run id of each stage (`v_<stage>`, `run_<stage>`); `qc_status`, `qc_flags`, the digest's warnings and time |
+| `C1.members.tsv` | one per member, frozen order | `present`; sex from the sheet, from coverage, the sex group the strata use, somalier's call and the ancestry label when `cohort_qc` ran; the parents; every extra sheet column as `sheet_<col>`; the version and run id of each stage (`v_<stage>`, `run_<stage>`); `qc_status`, `qc_flags`, the digest's warnings and time; `entry_kind` (`reads`, `bam`, `vcf`) |
 | `C1.coverage.tsv` | one per member | mean depth, sawfish's haploid coverage, the chrX and chrY ratios, the read metrics, mean depth per chromosome (`depth_chr1` …) |
 | `C1.variants.tsv` | one per member | SNVs, indels, Ts/Tv, het/hom, records, bcftools' per-sample counts (hets, hom-alt, singletons, missing), ROH, SVs by type and in total, TRGT loci genotyped, uncalled, dropouts and disease loci, CpG and MethBat counts, then every remaining `stat_*` value of the stats file under its own name |
 | `C1.phasing.tsv` | one per member | phased bases, block NG50 and N50, blocks, HiPhase's variant counts, `phased_fraction` |
@@ -516,7 +554,8 @@ appended.
 | `C1.mito.tsv` | one per member × mitorsaw haplotype | abundance, variants against the reference, whether it is the member's major haplotype, haplogrep3's `haplogroup` with its `quality` and where it came from (`run`, or `cohort_merge` for a member collapsed there), the member's homoplasmic and heteroplasmic site counts and highest heteroplasmic `VAF`, the unexplained fingerprint fraction and whether `mito_unexplained_high` fired |
 | `C1.mito.freq.tsv` | one per `kind` (`haplogroup`, `macro_haplogroup`: its first letter) × value × stratum | `count`, `fraction`, `n_called`, `n_members`, over each member's major haplotype |
 | `C1.assembly.tsv` | one per member with an assembly | the flat assembly summary the cohort page draws (haplotype lengths, NG50, Flagger, reliable fraction, concordance, both callers' counts, karyotype) |
-| `C1.identity.*.tsv`, `C1.tr.*.tsv`, `C1.methyl.*.tsv` | copies | the tables of `cohort_qc`, `cohort_tr` and `cohort_methyl`, when the stage has run for the cohort in this mode; skipped with a message otherwise |
+| `C1.identity.*.tsv`, `C1.tr.*.tsv` | copies | the tables of `cohort_qc` and `cohort_tr`, when the stage has run for the cohort in this mode; skipped with a message otherwise |
+| `C1.methyl.background.tsv`, `.summary.tsv`, `.regions.tsv`, `.imprinting.tsv`, `.samples.tsv`, `.events.tsv` | copies | `cohort_methyl`'s tables (chapter 07 above); `C1.methyl.events.tsv` is the one to filter by a gene list |
 | `export_manifest.json` | | ugc-wgw version, the cohort's freeze, the mode, the digest schema and thresholds, the strata used, the run ids read per member and per cohort stage, the domains written or skipped, every file with its rows, bytes and sha256 |
 
 Frequencies are computed over the members with a call: `n_called` is the
@@ -527,7 +566,12 @@ sheet, else coverage) or `ancestry`: the superpopulation somalier's
 `cohort_qc` projected the member onto (a description of structure, not an
 origin; the file header says so). `--strata none|sex|ancestry|all` (default
 `all`) selects; without a `cohort_qc` run the ancestry stratum is left out
-with a note, not an error. The cohort page's "Targeted callers" section
+with a note, not an error. The cohort page's "Methylation (cohort_methyl)" section shows the stage's
+labels and their member counts, the events per member, the genes with the
+most members carrying an event, the recurrent regions, the imprinting
+screen and the comparisons; each sample page lists its own imprinting
+regions under Methylation. Digest schema 5 (0.16): every per-sample digest
+rebuilds once. The cohort page's "Targeted callers" section
 draws from the same computation, so page and files agree. `--domains D[,D…]`
 selects domains, `--out DIR` another directory (refused when it holds
 files but no manifest, unless `--force`), `--force` also rebuilds the

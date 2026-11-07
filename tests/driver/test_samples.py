@@ -314,7 +314,7 @@ class SamplesTest(unittest.TestCase):
         code, out, _ = run_cli(["--project", str(self.cfg.project_dir), "samples", "list", "--json"])
         self.assertEqual(code, 0)
         rows = json.loads(out)
-        self.assertEqual(rows, [{"sample_id": "S1", "sex": "", "singleton": "-"}])
+        self.assertEqual(rows, [{"sample_id": "S1", "sex": "", "entry_kind": "reads", "singleton": "-"}])
 
 
 if __name__ == "__main__":

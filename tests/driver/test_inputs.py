@@ -173,6 +173,46 @@ class InputsTest(unittest.TestCase):
         self.assertFalse(d["merge_mitochondria"])
         self.assertNotIn("mt_small_variant_vcfs", d)
 
+    def test_cohort_methyl(self):
+        """The methylation layer: pileup, profile and report per member (null report + a warning for a run from before the
+        task), the labels (sex group, then the project's methyl_label_columns as column=value), a member without a pileup
+        left out, an unknown column refused; joint mode reads downstream."""
+        for sid in ("S1", "S2", "S3"):
+            seed_success(self.cfg, self.db, "singleton", "sample", sid, {"sample_id": sid, "inferred_sex": "MALE" if sid != "S3" else "FEMALE"})
+        d = self.check_doc("cohort_methyl", inputs.generate(self.ctx("cohort", "C1"), "cohort_methyl")[0])
+        self.assertEqual(d["sample_ids"], ["S2", "S1", "S3"])
+        self.assertEqual(d["sample_labels"], ["XY", "XY", "XX"])   # S2 unsexed in the sheet: coverage says MALE
+        self.assertEqual(len(d["cpg_pileup_beds"]), 3)
+        self.assertTrue(all(p.endswith(".cpg.bed.gz") for p in d["cpg_pileup_beds"]))
+        self.assertTrue(all(p.endswith(".methbat.profile.tsv") for p in d["methbat_profiles"]))
+        self.assertTrue(all(p and p.endswith(".methbat.report.tsv") for p in d["methbat_reports"]))
+        self.assertNotIn("compare_pairs", d)   # the WDL default (XX:XY) unless the project sets it
+        # a legacy member: null report, the warning names it
+        seed_success(self.cfg, self.db, "singleton", "sample", "S1", {"sample_id": "S1", "inferred_sex": "MALE", "legacy": True}, attempt=2)
+        with self.assertLogs("ugc-wgw", level="WARNING") as logs:
+            d = self.check_doc("cohort_methyl", inputs.generate(self.ctx("cohort", "C1"), "cohort_methyl")[0])
+        self.assertEqual(d["methbat_reports"][1], None)
+        self.assertTrue(any("1 member(s) have no methbat_report" in m and "S1" in m for m in logs.output), logs.output)
+        # sheet columns as labels: the sheet's extra columns live in meta
+        self.db.conn.execute("UPDATE samples SET meta_json = ? WHERE sample_id = ?", ('{"project": "plate 3/A", "phenotype": "0"}', "S1"))
+        self.db.conn.execute("UPDATE samples SET meta_json = ? WHERE sample_id = ?", ('{"project": "plate 3/A"}', "S2"))
+        self.db.conn.commit()
+        self.cfg.methyl_label_columns = ["project"]
+        d = self.check_doc("cohort_methyl", inputs.generate(self.ctx("cohort", "C1"), "cohort_methyl")[0])
+        self.assertEqual(d["sample_labels"], ["XY;project=plate_3_A", "XY;project=plate_3_A", "XX"])
+        self.cfg.methyl_label_columns = ["project", "batch"]
+        with self.assertRaises(UgcError) as cm:
+            inputs.generate(self.ctx("cohort", "C1"), "cohort_methyl")
+        self.assertIn("'batch'", str(cm.exception))
+        self.cfg.methyl_label_columns = []
+        # joint mode: downstream's pileups, upstream's sex
+        for sid in ("S1", "S2", "S3"):
+            seed_success(self.cfg, self.db, "upstream", "sample", sid, {"sample_id": sid, "inferred_sex": "MALE"}, mode="joint")
+            seed_success(self.cfg, self.db, "downstream", "sample", sid, {"sample_id": sid}, mode="joint")
+        d = self.check_doc("cohort_methyl", inputs.generate(self.ctx("cohort", "C1", "joint"), "cohort_methyl")[0])
+        self.assertEqual(d["sample_labels"], ["XY", "XY", "XX"])   # S3's sheet sex wins over the coverage call
+        self.assertTrue(all("/downstream/" in p for p in d["cpg_pileup_beds"]))
+
     def test_cohort_freq_standalone_and_joint(self):
         # sheet: S1 MALE, S2 (no sex), S3 FEMALE (see setUp); S2's sex comes from the singleton's inferred_sex
         for sid, sex in (("S1", "FEMALE"), ("S2", "FEMALE"), ("S3", "")):

@@ -40,8 +40,8 @@ except ImportError:  # pragma: no cover
     sys.exit("scripts/wdl-graph.py needs miniwdl (dev-time only): activate .venv or pip install miniwdl")
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
-ENTRYPOINTS = ["ugc_wgw_singleton", "ugc_wgw_upstream", "ugc_wgw_cohort_qc", "ugc_wgw_cohort_call", "ugc_wgw_downstream", "ugc_wgw_cohort_merge",
-               "ugc_wgw_cohort_freq", "ugc_wgw_assembly", "ugc_wgw_assembly_call", "ugc_wgw_cohort_pangenome"]
+ENTRYPOINTS = ["ugc_wgw_singleton", "ugc_wgw_upstream", "ugc_wgw_cohort_qc", "ugc_wgw_cohort_call", "ugc_wgw_intake", "ugc_wgw_downstream", "ugc_wgw_cohort_merge",
+               "ugc_wgw_cohort_freq", "ugc_wgw_cohort_methyl", "ugc_wgw_assembly", "ugc_wgw_assembly_call", "ugc_wgw_cohort_pangenome"]
 OUTPUT = REPO / "docs" / "guide" / "workflow-graphs.md"
 _WORDS = {6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten", 11: "eleven", 12: "twelve"}
 DEFAULT_DEPTH = 1

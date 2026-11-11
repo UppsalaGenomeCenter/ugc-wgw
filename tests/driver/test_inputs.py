@@ -232,6 +232,28 @@ class InputsTest(unittest.TestCase):
         self.assertEqual(d["sample_labels"], ["XY", "XY", "XX"])   # S3's sheet sex wins over the coverage call
         self.assertTrue(all("/downstream/" in p for p in d["cpg_pileup_beds"]))
 
+    def test_cohort_tr(self):
+        """The tandem-repeat stage reads cohort_merge's TRGT VCF, its index and the LPS table, and the members' sex groups;
+        no per-sample file. Without a cohort_merge run it has nothing to read."""
+        for sid, sex in (("S1", "FEMALE"), ("S2", "FEMALE"), ("S3", "")):
+            seed_success(self.cfg, self.db, "singleton", "sample", sid, {"sample_id": sid, "inferred_sex": sex})
+        with self.assertRaises((UgcError, MissingOutputError)):
+            inputs.generate(self.ctx("cohort", "C1"), "cohort_tr")
+        seed_success(self.cfg, self.db, "cohort_merge", "cohort", "C1", {"cohort_id": "C1", "sample_ids": ["S2", "S1", "S3"], "run_glnexus": True})
+        doc, members = inputs.generate(self.ctx("cohort", "C1"), "cohort_tr")
+        d = self.check_doc("cohort_tr", doc)
+        self.assertEqual(d["sample_ids"], ["S2", "S1", "S3"])
+        self.assertEqual(d["sample_sexes"], ["XX", "XY", "XX"])          # S1: the sheet's MALE wins over the inferred FEMALE
+        self.assertTrue(d["trgt_vcf"].endswith("C1.merged.GRCh38_GIABv3.trgt.vcf.gz"))
+        self.assertTrue(d["trgt_vcf_index"].endswith("C1.merged.GRCh38_GIABv3.trgt.vcf.gz.tbi"))
+        self.assertTrue(d["trgt_lps"].endswith(".trgt.lps.tsv"))
+        self.assertNotIn("outlier_min_called", d)                        # the WDL defaults unless the project's stage_inputs set them
+        self.assertIn(("C1", "cohort_merge"), {(m.get("sample_id") or m.get("cohort_id"), m["stage"]) for m in members})
+        self.cfg.stage_inputs = {"cohort_tr": {"outlier_min_called": 4}}
+        d = self.check_doc("cohort_tr", inputs.generate(self.ctx("cohort", "C1"), "cohort_tr")[0])
+        self.assertEqual(d["outlier_min_called"], 4)
+        self.cfg.stage_inputs = {}
+
     def test_cohort_freq_standalone_and_joint(self):
         # sheet: S1 MALE, S2 (no sex), S3 FEMALE (see setUp); S2's sex comes from the singleton's inferred_sex
         for sid, sex in (("S1", "FEMALE"), ("S2", "FEMALE"), ("S3", "")):

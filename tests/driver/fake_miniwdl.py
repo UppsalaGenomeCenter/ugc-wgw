@@ -337,6 +337,11 @@ def make_outputs(stage: str, inputs: dict[str, object], run_dir: pathlib.Path,
             files[name] = f"{sid}.methyl.{REF}.{name[7:]}.tsv"
         if v.get("run_joint_segment"):
             files["joint_segments"] = f"{sid}.methyl.{REF}.joint.meth_regions.bed"
+    elif stage == "cohort_tr":
+        for name, suffix in (("tr_pathogenic_screen", "screen.tsv"), ("tr_screen_loci", "screen_loci.tsv"), ("tr_locus_summary", "loci.tsv.gz"),
+                             ("tr_allele_spectrum", "spectrum.tsv.gz"), ("tr_outlier_pairs", "outliers.tsv.gz"), ("tr_outliers_top", "outliers_top.tsv"),
+                             ("tr_samples", "samples.tsv"), ("tr_summary", "summary.tsv")):
+            files[name] = f"{sid}.tr.{REF}.{suffix}"
     else:
         raise SystemExit(f"fake miniwdl: unknown stage {stage}")
 

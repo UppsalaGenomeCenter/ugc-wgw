@@ -61,6 +61,21 @@ genotype concordance) and the sawfish tasks' resources of both projects
 sawfish23 compare` repeats the comparison alone on the finished runs.
 `init --profile NAME` applies any shipped profile to the smoke project.
 
+## Validation against GIAB
+
+`run.sh validate [<member>]` (default HG002) scores the member's newest
+successful per-sample run of each route (`singleton`, and `downstream` of
+the joint mode) against GIAB's HG002 v5.0q benchmark on chr20: the truth
+slices are the `ugc-wgw-truth` entry of `references.lock`
+(`prepare.sh --references-only` installs them), aardvark and truvari come
+from the SIF cache (both are in `image_manifest.ugc-wgw.txt`; neither is
+used by a workflow). It writes `logs/validate-<stamp>/` (`small.tsv`,
+`sv.tsv`, the tools' directories with the TP/FP/FN VCFs) and prints the
+rows for `VALIDATION.md`, which is the record: add them there with the
+release. About a minute. `--min-f1 snv=0.995` (also `indel`, `sv`) makes a
+figure a gate; `--truth-dir` and `--region` point it at GIAB's full files
+for a whole-genome HG002.
+
 ## Entry kinds
 
 `run.sh entry` (0.16.0) needs the main project's joint phase: it writes a

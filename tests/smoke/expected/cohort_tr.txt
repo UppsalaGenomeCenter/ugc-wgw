@@ -1,0 +1,13 @@
+# Expected outputs of ugc_wgw_cohort_tr in every mode, one glob per line relative to out/.
+# chr20 data: of the 73 named loci only SCA36_NOP56 and CJD_PRNP are called (both normal); the other 71 read mostly_uncalled
+# in the per-locus table, and every locus off chr20 is below_min_called. init lowers outlier_min_called to 4 so the scan runs
+# on four members; a cohort of fewer members (run.sh entry) lists no outlier and its tables are header-only but present.
+tr_pathogenic_screen/*.tr.*.screen.tsv
+tr_screen_loci/*.tr.*.screen_loci.tsv
+tr_locus_summary/*.tr.*.loci.tsv.gz
+tr_allele_spectrum/*.tr.*.spectrum.tsv.gz
+tr_outlier_pairs/*.tr.*.outliers.tsv.gz
+tr_outliers_top/*.tr.*.outliers_top.tsv
+tr_samples/*.tr.*.samples.tsv
+tr_summary/*.tr.*.summary.tsv
+ugc_wgw_manifest/*.cohort_tr.ugc_wgw_manifest.json

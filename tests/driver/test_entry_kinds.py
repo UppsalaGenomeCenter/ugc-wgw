@@ -174,9 +174,9 @@ class SequenceTest(unittest.TestCase):
         self.assertEqual(stages.sample_stages("standalone", "bam"), ("upstream", "downstream"))
         self.assertEqual(stages.sample_stages("joint", "vcf"), ("intake", "downstream"))
         self.assertEqual(stages.sample_stages("assembly", "vcf"), ())
-        self.assertEqual(stages.member_sequence("standalone", "vcf"), ("intake", "downstream", "cohort_qc", "cohort_merge", "cohort_freq", "cohort_methyl"))
+        self.assertEqual(stages.member_sequence("standalone", "vcf"), ("intake", "downstream", "cohort_qc", "cohort_merge", "cohort_freq", "cohort_tr", "cohort_methyl"))
         self.assertEqual(stages.member_sequence("joint", "vcf", has_gvcf=False, allow_standalone=True),
-                         ("intake", "cohort_qc", "downstream", "cohort_merge", "cohort_freq", "cohort_methyl"))
+                         ("intake", "cohort_qc", "downstream", "cohort_merge", "cohort_freq", "cohort_tr", "cohort_methyl"))
         self.assertEqual(stages.member_sequence("joint", "vcf", has_gvcf=False), stages.member_sequence("joint", "vcf"))
         with self.assertRaises(UgcError):
             stages.sample_stages("standalone", "fastq")
@@ -249,7 +249,7 @@ class BuildersAndRunsTest(ProjectCase):
         self.assertEqual((latest[("B1", "upstream")], latest[("B1", "downstream")]), ("success", "success"))
         self.assertEqual((latest[("V1", "intake")], latest[("V1", "downstream")]), ("success", "success"))
         self.assertNotIn(("B1", "singleton"), latest)
-        for stage in ("cohort_qc", "cohort_merge", "cohort_freq", "cohort_methyl"):
+        for stage in ("cohort_qc", "cohort_merge", "cohort_freq", "cohort_tr", "cohort_methyl"):
             self.assertEqual(latest[("C1", stage)], "success", stage)
         # cohort_freq carries the kinds; cohort_merge's inputs took the bam member's downstream and the vcf member's intake
         freq_run = self.db.latest_success("cohort", "C1", "cohort_freq", VERSION)
@@ -305,7 +305,7 @@ class BuildersAndRunsTest(ProjectCase):
         self.assertIn("/intake/", ds_in["ugc_wgw_downstream.small_variant_vcf"])
         man = json.loads((Path(self.db.latest_success("cohort", "C2", "cohort_call", VERSION).run_dir) / "run_manifest.json").read_text())
         self.assertTrue(man["allow_standalone_members"])
-        for stage in ("cohort_merge", "cohort_freq", "cohort_methyl"):
+        for stage in ("cohort_merge", "cohort_freq", "cohort_tr", "cohort_methyl"):
             self.assertEqual(latest[("C2", stage)], "success", stage)
 
     def test_rebase(self):

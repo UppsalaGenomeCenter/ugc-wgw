@@ -132,6 +132,21 @@ The flags (`duplicate`, `pedigree_mismatch`, `related_hub`, `related`, `het_outl
 the driver's, computed on the cohort page from these tables ("Analysis
 summary" below); `ugc-wgw export --domains identity` copies the tables.
 
+### `cohort_tr`
+
+| Output | What it is |
+|---|---|
+| `tr_pathogenic_screen` | `<cohort_id>.tr.GRCh38_GIABv3.screen.tsv`: one row per member and named disease locus (73 per member, the uncalled ones included): genotype, ploidy, the row's `class` and each allele's (`a1_`, `a2_`: copies of the pathogenic motif, class, length, TRGT's length range, longest pure segment, spanning reads, purity, methylation, motif counts; a1 is the allele with more copies), `n_alleles_pathogenic`, `mode_match`, `measure`, `borderline`, the overlapping ordinary locus's lengths (`twin_al`), `notes`. Chapter 08 explains the classes. A research screen, not a diagnostic result. |
+| `tr_screen_loci` | `.screen_loci.tsv`: one row per named locus: STRchive's thresholds, members expected and called, the copies distribution, members per class, alleles above benign, median methylation per sex group, `call_note`. |
+| `tr_locus_summary` | `.loci.tsv.gz`: every locus of the catalog: called members and alleles, allele-length minimum, median, MAD, p95, p99, maximum, reference length, the carriers that met the outlier rule and `outlier_status` (`listed`, `common`, `none`, `below_min_called`); `named_locus` on the named loci and the ordinary loci overlapping them. |
+| `tr_allele_spectrum` | `.spectrum.tsv.gz`: `trid`, `al`, `n_alleles`, `n_members`: the cohort's allele-length distribution at every locus, the tandem-repeat counterpart of the frequency files; no member is named. |
+| `tr_outlier_pairs`, `tr_outliers_top` | `.outliers.tsv.gz`: every member and locus pair listed (the longer allele, the other one, spanning reads, the excess in bp, repeat units and scaled MADs, the cohort's median and MAD, how many members are listed at the locus, `both_alleles`); `.outliers_top.tsv`: per member the 20 strongest, what the pages read. |
+| `tr_samples` | `.samples.tsv`: one row per member: loci called and uncalled, outliers at ordinary loci (the figure behind `tr_outlier_count_high`), outliers at named loci and their twins, outliers on both alleles, named loci called, loci per class, ploidy mismatches. |
+| `tr_summary` | `.summary.tsv`, long format `resource metric key value`: cohort counts, loci per outlier status, the parameters, the reference table's source lines (STRchive's attribution), the 50 loci with the most listed members, the screen's call notes and non-normal classes per locus. |
+
+`ugc-wgw export --domains tr` copies all eight (the three bgzipped ones as
+`.tsv.gz`).
+
 ### `cohort_methyl`
 
 | Output | What it is |
@@ -505,7 +520,12 @@ a hub) and
 `het_ratio_mad_max`, 3, scaled MADs: contamination or a sample mix) warn;
 `methyl_outlier` (a member's methylation events against the cohort
 background beyond the median + `methyl_events_mad_max`, 3, MADs, from
-`cohort_methyl`'s samples table) warns too;
+`cohort_methyl`'s samples table) warns too, as does
+`tr_outlier_count_high` (a member's expansion outliers at ordinary
+tandem-repeat loci beyond the median + `tr_outlier_count_mad_max`, 3, MADs,
+from `cohort_tr`'s samples table: a sample problem, or an ancestry that is
+rare in the cohort); no flag is raised for a class of the disease-locus
+screen;
 `sex_mismatch` also fires for a member whose own run predates the extract
 when the stage's chrX call disagrees with its sheet or coverage. They join
 the member's flags and QC status on the cohort page and in the export, not
@@ -565,7 +585,8 @@ appended.
 | `C1.mito.tsv` | one per member × mitorsaw haplotype | abundance, variants against the reference, whether it is the member's major haplotype, haplogrep3's `haplogroup` with its `quality` and where it came from (`run`, or `cohort_merge` for a member collapsed there), the member's homoplasmic and heteroplasmic site counts and highest heteroplasmic `VAF`, the unexplained fingerprint fraction and whether `mito_unexplained_high` fired |
 | `C1.mito.freq.tsv` | one per `kind` (`haplogroup`, `macro_haplogroup`: its first letter) × value × stratum | `count`, `fraction`, `n_called`, `n_members`, over each member's major haplotype |
 | `C1.assembly.tsv` | one per member with an assembly | the flat assembly summary the cohort page draws (haplotype lengths, NG50, Flagger, reliable fraction, concordance, both callers' counts, karyotype) |
-| `C1.identity.*.tsv`, `C1.tr.*.tsv` | copies | the tables of `cohort_qc` and `cohort_tr`, when the stage has run for the cohort in this mode; skipped with a message otherwise |
+| `C1.identity.*.tsv` | copies | the tables of `cohort_qc`, when the stage has run for the cohort in this mode; skipped with a message otherwise |
+| `C1.tr.screen.tsv`, `.screen_loci.tsv`, `.loci.tsv.gz`, `.spectrum.tsv.gz`, `.outliers.tsv.gz`, `.outliers_top.tsv`, `.samples.tsv`, `.summary.tsv` | copies | `cohort_tr`'s tables (above); `C1.tr.screen.tsv` is the one to filter by gene or class, `C1.tr.spectrum.tsv.gz` the allele-length resource |
 | `C1.methyl.background.tsv`, `.summary.tsv`, `.regions.tsv`, `.imprinting.tsv`, `.samples.tsv`, `.events.tsv`, `.compare.<baseline>_vs_<compare>.tsv` | copies | `cohort_methyl`'s tables (chapter 07 above); `C1.methyl.events.tsv` is the one to filter by a gene list |
 | `export_manifest.json` | | ugc-wgw version, the cohort's freeze, the mode, the digest schema and thresholds, the strata used, the run ids read per member and per cohort stage, the domains written or skipped, every file with its rows, bytes and sha256 |
 
@@ -582,7 +603,14 @@ labels and their member counts, the events per member, the genes with the
 most members carrying an event, the recurrent regions, the imprinting
 screen and the comparisons; each sample page lists its own imprinting
 regions under Methylation. Digest schema 5 (0.16): every per-sample digest
-rebuilds once. The cohort page's "Targeted callers" section
+rebuilds once. The "Tandem repeats (cohort_tr)" section (0.18) shows the
+disease-locus screen's rows worth a look (a class outside the benign
+range, a borderline value or a note), each with the member's own dropout
+class at the locus, the per-locus table, the expansion outliers per member
+with `tr_outlier_count_high`, and the loci with the most listed members;
+with `summary --cohort` a member's page shows its own rows and strongest
+outliers under Tandem repeats. That block is joined when the page is made:
+the per-sample digest and its schema do not change, so nothing rebuilds. The cohort page's "Targeted callers" section
 draws from the same computation, so page and files agree. `--domains D[,D…]`
 selects domains, `--out DIR` another directory (refused when it holds
 files but no manifest, unless `--force`), `--force` also rebuilds the

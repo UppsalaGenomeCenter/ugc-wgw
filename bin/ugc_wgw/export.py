@@ -4,6 +4,7 @@ number per Paraphase region, StarPhase diplotypes, HLA alleles) are computed her
 the same function, so the two never disagree. See docs/guide/07-results.md ("Cohort tables") and docs/DESIGN.md §8.1."""
 from __future__ import annotations
 
+import gzip
 import shutil
 import statistics
 from collections import Counter, defaultdict
@@ -28,7 +29,8 @@ COPY_DOMAINS: dict[str, tuple[str, tuple[tuple[str, str], ...]]] = {
     "identity": ("cohort_qc", (("qc_pairs", "pairs"), ("qc_samples", "samples"), ("qc_groups", "groups"), ("qc_summary", "summary"),
                                ("qc_members", "members"), ("qc_related_pairs", "related_pairs"), ("qc_ancestry", "ancestry"))),
     "tr": ("cohort_tr", (("tr_allele_spectrum", "spectrum"), ("tr_locus_summary", "loci"), ("tr_outlier_pairs", "outliers"),
-                         ("tr_pathogenic_screen", "screen"), ("tr_dropout_table", "dropouts"), ("tr_summary", "summary"))),
+                         ("tr_outliers_top", "outliers_top"), ("tr_pathogenic_screen", "screen"), ("tr_screen_loci", "screen_loci"),
+                         ("tr_samples", "samples"), ("tr_summary", "summary"))),   # the first three are bgzipped: they keep .gz
     "methyl": ("cohort_methyl", (("cohort_background", "background"), ("methyl_summary", "summary"), ("methyl_regions", "regions"),
                                  ("methyl_imprinting", "imprinting"), ("methyl_samples", "samples"), ("methyl_events", "events"),
                                  ("comparisons", "compare"))),   # an array output: one file per pair, `<prefix>.compare.<baseline>_vs_<compare>.tsv`
@@ -528,10 +530,17 @@ def copy_outputs(run: RunRecord, specs: tuple[tuple[str, str], ...], out_dir: Pa
         if not isinstance(p, str) or not Path(p).exists():
             absent.append(name)
             continue
-        dest = out_dir / f"{prefix}.{suffix}.tsv"
+        dest = out_dir / (f"{prefix}.{suffix}.tsv" + (".gz" if p.endswith(".gz") else ""))
         shutil.copyfile(p, dest)
         copied.append((dest, name))
     return copied, absent
+
+
+def _count_rows(path: Path) -> int:
+    """The data rows of a written table (comment lines and the header excluded), plain or gzipped."""
+    opener = gzip.open if path.name.endswith(".gz") else open
+    with opener(path, "rt") as fh:  # type: ignore[operator]
+        return max(0, sum(1 for line in fh if not line.startswith("#")) - 1)
 
 
 # ---- the export ---------------------------------------------------------------------------------
@@ -686,13 +695,13 @@ def build(cfg: Config, db: DB, code: CodeInfo, *, cohort_id: str, domains: list[
                 domain_files.setdefault(domain, {"files": [], "source_run": run.run_id})["absent"] = absent  # type: ignore[index]
     if force:
         keep = {p.name for _d, p, _n in written}
-        for stale in sorted(dest.glob(f"{prefix}.*.tsv")):
+        for stale in sorted(list(dest.glob(f"{prefix}.*.tsv")) + list(dest.glob(f"{prefix}.*.tsv.gz"))):
             if stale.name not in keep:
                 stale.unlink()
                 res.notes.append(f"removed stale {stale.name}")
     files_meta = []
     for _domain, path, n in written:
-        files_meta.append({"name": path.name, "rows": n if n >= 0 else sum(1 for line in open(path) if not line.startswith("#")) - 1,
+        files_meta.append({"name": path.name, "rows": n if n >= 0 else _count_rows(path),
                            "bytes": path.stat().st_size, "sha256": sha256_file(path)})
     res.files = [p for _d, p, _n in written]
     res.manifest = {

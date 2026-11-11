@@ -216,6 +216,18 @@ Reading the tables:
 | `ugc_wgw_bcftools_freq` | 2 | 4G | cpu from workflow input default; cpu input: freq_threads; memory from workflow input default; memory input: freq_mem_gb; command uses threads | `workflows/ugc_wgw/cohort/freq.wdl:9` |
 | `ugc_wgw_freq_summary` | 1 | 2G | - | `workflows/ugc_wgw/cohort/freq.wdl:179` |
 
+## ugc_wgw_cohort_tr
+
+5 tasks, in first-call order.
+
+| task | cpu | memory | notes | source |
+|---|---|---|---|---|
+| `ugc_wgw_manifest_write` | 1 | 1G | - | `workflows/ugc_wgw/provenance.wdl:9` |
+| `ugc_wgw_regions_prepare` | 1 | 1G | - | `workflows/ugc_wgw/cohort/regions.wdl:9` |
+| `ugc_wgw_tr_screen` | 1 | 2G | cpu from input default; memory from workflow input default; memory input: screen_mem_gb | `workflows/ugc_wgw/tr/cohort.wdl:300` |
+| `ugc_wgw_tr_locus_stats` | 2 | 2G | cpu from input default; memory from workflow input default; memory input: stats_mem_gb | `workflows/ugc_wgw/tr/cohort.wdl:9` |
+| `ugc_wgw_tr_gather` | 2 | 4G | cpu from input default; memory from workflow input default; memory input: gather_mem_gb; command uses threads | `workflows/ugc_wgw/tr/cohort.wdl:661` |
+
 ## ugc_wgw_cohort_methyl
 
 8 tasks, in first-call order.

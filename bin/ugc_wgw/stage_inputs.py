@@ -141,6 +141,13 @@ SOURCES: dict[str, dict[str, Source]] = {
         "sample_sex_sources": (DRIVER, "declared, coverage, somalier or empty, per member"),
         "sample_entry_kinds": (DRIVER, "reads, bam or vcf per member (the sheet-derived entry kind)"),
     },
+    "cohort_tr": {
+        **_COMMON, **_COHORT,
+        "trgt_vcf": (DRIVER, "cohort_merge outputs (cohort_trgt_vcf)"),
+        "trgt_vcf_index": (DRIVER, "cohort_merge outputs (cohort_trgt_vcf_index)"),
+        "trgt_lps": (DRIVER, "cohort_merge outputs (cohort_trgt_lps)"),
+        "sample_sexes": (DRIVER, "the resolved sex of each member's run (declared, else coverage, else somalier), as XX/XY"),
+    },
     "cohort_methyl": {
         **_COMMON, **_COHORT,
         "sample_labels": (DRIVER, "per member: the resolved sex group (XX/XY) and the values of the project's methyl_label_columns as column=value, ';'-joined"),

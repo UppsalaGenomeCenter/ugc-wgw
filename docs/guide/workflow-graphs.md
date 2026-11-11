@@ -3,7 +3,7 @@
 
 # Workflow call graphs
 
-Exact call graphs of the twelve entrypoints, rendered from the miniwdl AST by
+Exact call graphs of the thirteen entrypoints, rendered from the miniwdl AST by
 `scripts/wdl-graph.py`. A workflow called directly by an entrypoint is inlined
 as a box; a workflow it calls in turn is one node. Simplified diagrams with
 the switches and resources explained are in `08-stages.md`.
@@ -560,6 +560,29 @@ flowchart TD
   n5 --> n8
   n6 --> n8
   n7 --> n8
+```
+
+## ugc_wgw_cohort_tr
+
+Source `workflows/ugc_wgw_cohort_tr.wdl`, depth 1, Mermaid source 297 characters.
+
+Inlined workflows: none.
+
+Workflow nodes (not expanded here): none.
+
+```mermaid
+flowchart TD
+  n1["ugc_wgw_tr_screen"]
+  n2["ugc_wgw_regions_prepare"]
+  subgraph s1["scatter shard_index in range(length(ugc_wgw_regions_prepare.sh…"]
+    n3["ugc_wgw_tr_locus_stats"]
+  end
+  n4["ugc_wgw_tr_gather"]
+  n5["ugc_wgw_manifest_write"]
+  n1 --> n4
+  n2 --> n3
+  n2 -.-> s1
+  n3 --> n4
 ```
 
 ## ugc_wgw_cohort_methyl

@@ -1255,6 +1255,83 @@ def parse_methyl_summary(lines: Iterable[str]) -> dict[str, dict[str, dict[str, 
     return out
 
 
+TR_SCREEN_KEEP = ("sample_id", "sex", "trid", "gene", "disease", "inheritance", "chrom", "start", "end", "gt", "ploidy", "class",
+                  "n_alleles_pathogenic", "mode_match", "measure", "borderline", "a1_copies", "a1_class", "a1_al", "a1_lps", "a1_sd", "a1_am",
+                  "a2_copies", "a2_class", "a2_al", "a2_lps", "a2_sd", "a2_am", "twin_al", "notes")
+TR_SCREEN_SEVERITY = ("pathogenic", "intermediate", "below_pathogenic", "above_benign", "below_benign")
+TR_OUTLIER_KEEP = ("trid", "chrom", "start", "end", "motifs", "named_locus", "al", "al_other", "sd", "excess_bp", "excess_units", "z", "cohort_median",
+                   "n_called", "n_carriers", "both_alleles")
+
+
+def parse_tr_summary(lines: Iterable[str]) -> dict[str, dict[str, dict[str, object]]]:
+    """cohort_tr's long-format summary (resource, metric, key, value) as nested dicts, numbers converted; the `source`
+    rows (the reference table's header: attribution, inputs) keep every value, in order, under one list per metric."""
+    out: dict[str, dict[str, dict[str, object]]] = {}
+    for p in _rows(lines):
+        if len(p) < 4 or p[0] == "resource":
+            continue
+        if p[0] == "source":
+            out.setdefault("source", {}).setdefault(p[1], {}).setdefault("values", []).append(p[3])  # type: ignore[union-attr]
+        else:
+            out.setdefault(p[0], {}).setdefault(p[1], {})[p[2]] = _num(p[3])
+    return out
+
+
+def parse_tr_samples(lines: Iterable[str]) -> list[dict[str, object]]:
+    """cohort_tr's samples table: one row per member, the counts as numbers."""
+    cols, rows = table(lines)
+    return [{c: (_num(r.get(c, "")) if c.startswith("n_") else r.get(c, "")) for c in cols} for r in rows]
+
+
+def parse_tr_screen(lines: Iterable[str]) -> dict[str, object]:
+    """cohort_tr's screen, streamed: the rows worth a look (a class other than normal or uncalled, or a note other than
+    a missing LPS value), the worst first, and the member counts per class. The table has members x 73 rows."""
+    cols: list[str] = []
+    findings: list[dict[str, object]] = []
+    by_class: dict[str, int] = {}
+    n = 0
+    for line in lines:
+        if not line or line.startswith("##"):
+            continue
+        p = line.split("\t")
+        if not cols:
+            cols = p
+            continue
+        r = dict(zip(cols, p))
+        n += 1
+        cls = r.get("class", "")
+        by_class[cls] = by_class.get(cls, 0) + 1
+        notes = [x for x in r.get("notes", "").split(";") if x and x != "lps_missing"]
+        if cls in ("normal", "uncalled") and not notes and r.get("borderline") != "yes":
+            continue
+        row: dict[str, object] = {k: r.get(k, "") for k in TR_SCREEN_KEEP}
+        for k in ("start", "end", "ploidy", "n_alleles_pathogenic", "a1_copies", "a2_copies", "a1_al", "a2_al", "a1_lps", "a2_lps"):
+            row[k] = _num(row[k]) if row[k] != "" else None
+        row["notes"] = ";".join(notes)
+        findings.append(row)
+    rank = {c: i for i, c in enumerate(TR_SCREEN_SEVERITY)}
+    findings.sort(key=lambda r: (rank.get(str(r["class"]), len(rank)), str(r["gene"]).upper(), str(r["sample_id"])))
+    return {"n_rows": n, "by_class": by_class, "findings": findings}
+
+
+def parse_tr_screen_loci(lines: Iterable[str]) -> list[dict[str, object]]:
+    """cohort_tr's per-locus screen table: thresholds, call rate, the copies distribution, members per class."""
+    cols, rows = table(lines)
+    text = {"trid", "gene", "disease", "inheritance", "chrom", "motifs", "pathogenic_motifs", "measure", "twin_trid", "call_note"}
+    return [{c: (r.get(c, "") if c in text else (_num(r[c]) if r.get(c, "") != "" else None)) for c in cols} for r in rows]
+
+
+def parse_tr_outliers_top(lines: Iterable[str], per_member: int = 10) -> dict[str, list[dict[str, object]]]:
+    """The strongest expansion outliers per member (the stage writes them ranked): at most `per_member` rows each."""
+    cols, rows = table(lines)
+    out: dict[str, list[dict[str, object]]] = {}
+    for r in rows:
+        mine = out.setdefault(r.get("sample_id", ""), [])
+        if len(mine) < per_member:
+            mine.append({k: (_num(r.get(k, "")) if k not in ("trid", "chrom", "motifs", "named_locus", "sd", "both_alleles") else r.get(k, "")) for k in TR_OUTLIER_KEEP})
+    return out
+
+
 def parse_methyl_samples(lines: Iterable[str]) -> list[dict[str, object]]:
     """cohort_methyl's samples table: one row per member, the counts as numbers."""
     cols, rows = table(lines)

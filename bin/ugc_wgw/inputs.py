@@ -546,6 +546,21 @@ def build_cohort_freq(ctx: BuildContext) -> dict[str, object]:
     return doc
 
 
+def build_cohort_tr(ctx: BuildContext) -> dict[str, object]:
+    """The cohort's tandem repeats: cohort_merge's merged TRGT VCF and trgt-lps table, the members and their sex groups
+    (which decide how many members a chrY locus expects and the ploidy check on chrX). No per-sample file is read."""
+    doc = common_inputs(ctx)
+    members = ctx.members()
+    doc["cohort_id"] = ctx.subject_id
+    doc["sample_ids"] = members
+    _, cm = ctx.prior("cohort_merge", "cohort", ctx.subject_id)
+    doc["trgt_vcf"] = cm.req("cohort_trgt_vcf")
+    doc["trgt_vcf_index"] = cm.req("cohort_trgt_vcf_index")
+    doc["trgt_lps"] = cm.req("cohort_trgt_lps")
+    doc["sample_sexes"] = [_sex_group(ctx, sid, "")[0] for sid in members]
+    return doc
+
+
 LABEL_SAFE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
@@ -730,6 +745,7 @@ BUILDERS = {
     "downstream": build_downstream,
     "cohort_merge": build_cohort_merge,
     "cohort_freq": build_cohort_freq,
+    "cohort_tr": build_cohort_tr,
     "cohort_methyl": build_cohort_methyl,
     "assembly": build_assembly,
     "assembly_call": build_assembly_call,

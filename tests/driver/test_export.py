@@ -1,4 +1,5 @@
 """`ugc-wgw export`: the frequency tables, the per-member rows and the command end to end."""
+import gzip
 import json
 import tempfile
 import unittest
@@ -158,7 +159,11 @@ class ExportEndToEnd(unittest.TestCase):
         for n in ("C1.members.tsv", "C1.coverage.tsv", "C1.variants.tsv", "C1.phasing.tsv", "C1.cn.tsv", "C1.cn.freq.tsv",
                   "C1.pgx.tsv", "C1.pgx.freq.tsv", "C1.hla.tsv", "C1.hla.freq.tsv", "C1.mito.tsv", "C1.mito.freq.tsv"):
             self.assertIn(n, names)
-        self.assertIn("tr: cohort_tr has not run", err)
+        tr_names = ["C1.tr.loci.tsv.gz", "C1.tr.outliers.tsv.gz", "C1.tr.outliers_top.tsv", "C1.tr.samples.tsv", "C1.tr.screen.tsv", "C1.tr.screen_loci.tsv",
+                    "C1.tr.spectrum.tsv.gz", "C1.tr.summary.tsv"]   # cohort_tr's tables, the three big ones still bgzipped
+        self.assertEqual(sorted(n for n in names if n.startswith("C1.tr.")), tr_names)
+        with gzip.open(self.export_dir / "C1.tr.spectrum.tsv.gz", "rt") as fh:
+            self.assertEqual(fh.readline().rstrip("\n").split("\t"), ["trid", "al", "n_alleles", "n_members"])
         self.assertIn("assembly: no member has an assembly", err)
         comment, cols, rows = _read_tsv(self.export_dir / "C1.members.tsv")
         self.assertTrue(comment.startswith("# ugc-wgw "))
@@ -180,13 +185,15 @@ class ExportEndToEnd(unittest.TestCase):
         man = json.loads((self.export_dir / "export_manifest.json").read_text())
         self.assertEqual((man["schema"], man["digest_schema"], man["cohort"]["n"], man["members"]["with_digest"]), (1, summary.DIGEST_SCHEMA, 2, 2))
         self.assertTrue(man["source_runs"]["members"]["S1"]["singleton"])
-        self.assertEqual(man["domains"]["tr"], {"skipped": "cohort_tr has not run"})
+        self.assertEqual(sorted(man["domains"]["tr"]["files"]), tr_names)
+        self.assertTrue(man["domains"]["tr"]["source_run"].startswith("C1-cohort_tr-"))
         self.assertEqual(man["strata"]["kinds"], ["ALL", "sex"])
         self.assertIsNone(man["strata"]["ancestry"])
         for f in man["files"]:
             p = self.export_dir / f["name"]
             self.assertTrue(p.exists())
-            self.assertEqual(sum(1 for line in p.read_text().splitlines() if not line.startswith("#")) - 1, f["rows"])
+            text = gzip.decompress(p.read_bytes()).decode() if p.name.endswith(".gz") else p.read_text()
+            self.assertEqual(max(0, sum(1 for line in text.splitlines() if not line.startswith("#")) - 1), f["rows"])   # an empty table has 0 rows
         # the digests are shared with `summary`
         self.assertTrue((self.cfg.results_dir / "reports" / "summary" / "S1.summary.json").exists())
 
@@ -198,6 +205,9 @@ class ExportEndToEnd(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("unknown export domain", err)
         code, out, err = run_cli(["--project", self.proj, "export", "--cohort", "C1", "--domains", "tr"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(out.split()), 8)
+        code, out, err = run_cli(["--project", self.proj, "export", "--cohort", "C1", "--domains", "assembly"])
         self.assertEqual(code, 1)
         self.assertIn("nothing written", err)
         code, out, err = run_cli(["--project", self.proj, "export", "--cohort", "NOPE"])

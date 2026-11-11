@@ -118,7 +118,8 @@ def prerequisites(db: DB, mode: str, stage: str, subject_type: str, subject_id: 
                   cohort: Cohort | None, version: str | None, *, allow_standalone: bool = False) -> str | None:
     """None when every earlier stage is satisfied, else the reason it is not. A sample's earlier stages are those of
     its own sequence (its entry kind's per-sample stages, the mode's cohort stages); a cohort stage waits for every
-    member's per-sample stages before it and for the cohort stages before it (cohort_qc never gates)."""
+    member's per-sample stages before it and for the cohort stages before it (the optional ones, cohort_qc and
+    cohort_tr, never gate)."""
     if subject_type == "sample":
         seq = member_stages(db, mode, subject_id, allow_standalone=allow_standalone)
         if stage not in seq:

@@ -28,3 +28,6 @@ ghcr.io/uppsalagenomecenter/haplogrep3@sha256:12de1423817083013a974595cabb4ca8aa
 # Evaluation only (backends/hpc/profiles/eval-sawfish23.json; docs/DESIGN.md §18 2026-11-05): sawfish 2.3.0_build1 as published by PacBio,
 # shipped so the profile runs offline; production stays on upstream's 2.2.1_build2 until the comparison says otherwise:
 quay.io/pacbio/sawfish@sha256:40b167ebdfa07643c918c45fb782f61bd598c38876fc654416d8539b2faa4cf2
+# Validation only (tests/smoke/run.sh validate; docs/DESIGN.md §18 2026-11-11): aardvark 1.1.0 (PacBio's small-variant comparer, MIT),
+# the bioconda build as published on quay.io; it scores the smoke's HG002 calls against GIAB's v5.0q benchmark. No workflow task uses it:
+quay.io/biocontainers/aardvark@sha256:931f07ac6f645c465eb214880e05b0a9290bae697c9921807397008c12554a5a

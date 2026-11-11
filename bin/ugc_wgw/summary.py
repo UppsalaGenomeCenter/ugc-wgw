@@ -56,6 +56,7 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "related_relatedness_max": 0.2,       # an undeclared pair at or above this warns `related`
     "related_hub_min": 10,                # a member related (undeclared) to this many members or more fails `related_hub`: contamination, not kinship; its partners are not flagged on its account
     "het_ratio_mad_max": 3.0,             # het/(het+hom-alt) beyond median ± this many MADs across the cohort warns `het_outlier`
+    "tr_outlier_count_mad_max": 3.0,      # a member's expansion outliers at ordinary loci (cohort_tr) beyond median + this many MADs across the cohort warns `tr_outlier_count_high`
     "methyl_events_mad_max": 3.0,         # a member's methylation events (cohort_methyl) beyond median + this many MADs across the cohort warns `methyl_outlier`
     "sex_unknown_fails": 1,               # 1: a sample no source could sex fails `sex_not_inferred`; 0: it warns
 }
@@ -1174,11 +1175,44 @@ def _assembly_html(asm: dict[str, object]) -> str:
     return body
 
 
+def _tr_cohort_html(tr_row: dict[str, object], cohort_id: str | None) -> str:
+    """The sample against its cohort (cohort_tr): counts, the named-locus rows worth a look, the strongest outliers."""
+    counts: dict[str, object] = tr_row.get("counts", {}) or {}  # type: ignore[assignment]
+    findings: list[dict[str, object]] = tr_row.get("findings", []) or []  # type: ignore[assignment]
+    outliers: list[dict[str, object]] = tr_row.get("outliers", []) or []  # type: ignore[assignment]
+    body = (f"<h3>Against the cohort{' ' + _esc(cohort_id) if cohort_id else ''} (cohort_tr)</h3>"
+            + _cards([("expansion outliers, ordinary loci", sv.fmt(counts.get("n_outliers"))), ("on both alleles", sv.fmt(counts.get("n_outliers_both_alleles"))),
+                      ("outliers at named loci or their twins", sv.fmt(counts.get("n_outliers_named"))),
+                      ("named loci called", f"{sv.fmt(counts.get('n_named_called'))} of {sv.fmt((counts.get('n_named_called') or 0) + (counts.get('n_named_uncalled') or 0))}"),  # type: ignore[operator]
+                      ("named loci pathogenic / intermediate", f"{sv.fmt(counts.get('n_loci_pathogenic'))} / {sv.fmt(counts.get('n_loci_intermediate'))}")]))
+    if findings:
+        rows = [[f.get("gene"), _clip(str(f.get("disease") or ""), 40), f.get("inheritance"), Raw(f"<b>{_esc(f.get('class'))}</b>"), f.get("mode_match"), f.get("gt"),
+                 f"{sv.fmt(f.get('a1_copies'))} / {sv.fmt(f.get('a2_copies'))}" if f.get("a2_copies") is not None else sv.fmt(f.get("a1_copies")),
+                 sv.fmt(f.get("a1_lps")), f.get("a1_am") or "", f.get("borderline") or "", _clip(str(f.get("notes") or ""), 60)] for f in findings]
+        body += ("<p class='small muted'><b>A research screen, not a diagnostic result</b>: copies of the pathogenic motif per allele against STRchive's ranges; "
+                 "the cohort page explains the classes.</p>"
+                 '<div class="wrap">' + _table(["gene", "disease", "inheritance", "class", "fit", "GT", "copies (a1 / a2)", "LPS a1", "5mC a1", "borderline", "notes"], rows)
+                 + "</div>")
+    else:
+        body += "<p class='small muted'>Disease-locus screen: every called named locus is within its benign range, with no note.</p>"
+    if outliers:
+        rows = [[_clip(str(o.get("trid") or ""), 44), o.get("named_locus") or "", sv.fmt(o.get("al")), sv.fmt(o.get("al_other")), sv.fmt(o.get("cohort_median"), 1),
+                 sv.fmt(o.get("excess_bp")), sv.fmt(o.get("excess_units"), 1), sv.fmt(o.get("z"), 1), o.get("sd"), sv.fmt(o.get("n_carriers")), o.get("both_alleles")]
+                for o in outliers]
+        body += ("<h4>Strongest expansion outliers</h4>"
+                 '<div class="wrap">' + _table(["locus", "named locus", "AL", "other allele", "cohort median", "excess bp", "repeat units", "scaled MADs", "spanning reads",
+                                                "carriers", "both alleles"], rows) + "</div>"
+                 "<p class='small muted'>The longer allele against the cohort's distribution at the locus; every pair is in the cohort's outlier table.</p>")
+    return body
+
+
 def render_sample(d: dict[str, object], tools: list[dict[str, object]], *, project_name: str, project_url: str,
                   cohort_links: list[tuple[str, str]] | None = None, identity_row: dict[str, object] | None = None,
-                  identity_cohort: str | None = None) -> str:
+                  identity_cohort: str | None = None, tr_row: dict[str, object] | None = None) -> str:
     """The sample's page. `identity_row` is the sample's row of the cohort's cohort_qc tables (with the identity flags
-    the cohort page computed for it) when the page is made with --cohort and that cohort has a cohort_qc run."""
+    the cohort page computed for it) when the page is made with --cohort and that cohort has a cohort_qc run; `tr_row`
+    the sample's part of the cohort's cohort_tr tables (counts, the screen rows worth a look, its strongest outliers):
+    cohort-level results reach the page at render time, never through the digest."""
     s: dict[str, object] = d["sample"]  # type: ignore[assignment]
     sid = str(s["id"])
     stats: dict[str, object] = d.get("stats", {})  # type: ignore[assignment]
@@ -1320,7 +1354,8 @@ def render_sample(d: dict[str, object], tools: list[dict[str, object]], *, proje
         + "</div></div><h3>Known disease loci (STRchive set in the catalog)</h3>"
         + "<p class='small muted'>GT, allele lengths (AL, bp), motif counts (MC) and spanning reads (SD) as TRGT reports them; "
         + "fail reads: locus genotyped with the fail reads included (" + _esc(", ".join(tr.get("fail_reads_trids", []))) + ").</p>"  # type: ignore[arg-type]
-        + ('<div class="wrap">' + _table(["gene", "disease", "locus", "motifs", "GT", "AL", "MC", "SD", "dropout", "fail reads"], locus_rows) + "</div>" if locus_rows else "<p class='muted'>Not available.</p>"))
+        + ('<div class="wrap">' + _table(["gene", "disease", "locus", "motifs", "GT", "AL", "MC", "SD", "dropout", "fail reads"], locus_rows) + "</div>" if locus_rows else "<p class='muted'>Not available.</p>")
+        + (_tr_cohort_html(tr_row, identity_cohort) if tr_row else ""))
 
     # methylation
     cpg: dict[str, object] = me.get("cpg", {})  # type: ignore[assignment]
@@ -1541,6 +1576,7 @@ def run(cfg: Config, db: DB, code: CodeInfo, *, sample_ids: list[str] | None, co
     # the cohort digest first: the identity rows of its cohort_qc run go into the members' pages
     cdigest: dict[str, object] | None = None
     identity_rows: dict[str, dict[str, object]] = {}
+    tr_rows: dict[str, dict[str, object]] = {}
     if cohort:
         from .summary_cohort import build_cohort_digest  # noqa: PLC0415 - keeps the cohort page optional
         cruns = resolve_cohort_runs(db, cohort.cohort_id, mode, version)
@@ -1548,6 +1584,11 @@ def run(cfg: Config, db: DB, code: CodeInfo, *, sample_ids: list[str] | None, co
                                       genes_of_interest=cfg.methyl_genes_of_interest)
         ident: dict[str, object] = cdigest.get("identity", {}) or {}  # type: ignore[assignment]
         identity_rows = ident.get("members", {}) or {}  # type: ignore[assignment]
+        trd: dict[str, object] = cdigest.get("tandem_repeats", {}) or {}  # type: ignore[assignment]
+        if trd.get("available"):
+            for msid, counts in (trd.get("members") or {}).items():  # type: ignore[union-attr]
+                tr_rows[msid] = {"counts": counts, "findings": [f for f in trd.get("findings", []) if f.get("sample_id") == msid],  # type: ignore[union-attr]
+                                 "outliers": (trd.get("outliers_top") or {}).get(msid, [])}  # type: ignore[union-attr]
     asm_passed: list[str] = []
     for i, sid in enumerate(targets):
         if sid not in digests:
@@ -1558,7 +1599,8 @@ def run(cfg: Config, db: DB, code: CodeInfo, *, sample_ids: list[str] | None, co
         hpath = out_dir / f"{sid}.summary.html"
         links = cohort_links or [(c, f"{c}.summary.html") for c in db.sample_cohorts(sid) if (out_dir / f"{c}.summary.html").exists()]
         hpath.write_text(render_sample(digest, tools, project_name=project_name, project_url=cfg.project_url or DEFAULT_PROJECT_URL,
-                                       cohort_links=links, identity_row=identity_rows.get(sid), identity_cohort=cohort.cohort_id if cohort else None))
+                                       cohort_links=links, identity_row=identity_rows.get(sid), identity_cohort=cohort.cohort_id if cohort else None,
+                                       tr_row=tr_rows.get(sid)))
         written.append(hpath)
         diag(f"{sid}: digest {'rebuilt' if sid in to_build else 'reused'}, wrote {hpath.name}")
         if (i + 1) % 50 == 0:

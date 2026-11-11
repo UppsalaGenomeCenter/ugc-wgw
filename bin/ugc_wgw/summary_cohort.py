@@ -14,7 +14,7 @@ from .inputs import SEX_TO_GROUP
 from .layout import run_files
 from .outputs import Outputs
 from .report import Raw, _bytes, _esc, _table, big_table
-from .summary import DIGEST_SCHEMA, _cards, _has_read_data, _kv, _nav, _page, _sec, _software_sections, _status_badge
+from .summary import DIGEST_SCHEMA, _cards, _clip, _has_read_data, _kv, _nav, _page, _sec, _software_sections, _status_badge
 from .util import UgcError, read_json, utc_now
 
 # (key, label, digits, unit, path into the sample digest, threshold key or None)
@@ -565,6 +565,17 @@ def build_cohort_digest(cohort: Cohort, members: dict[str, dict[str, object]], c
                     if isinstance(p, str) and Path(p).exists():
                         entry[name] = {"path": p, "bytes": Path(p).stat().st_size}
                 entry["genes_of_interest"] = list(genes_of_interest or [])
+            elif stage == "cohort_tr":
+                for name, parser, key in (("tr_summary", sp.parse_tr_summary, "summary"), ("tr_samples", sp.parse_tr_samples, "samples"),
+                                          ("tr_pathogenic_screen", sp.parse_tr_screen, "screen"), ("tr_screen_loci", sp.parse_tr_screen_loci, "screen_loci"),
+                                          ("tr_outliers_top", sp.parse_tr_outliers_top, "outliers_top")):
+                    p = outs.opt(name)
+                    if isinstance(p, str) and Path(p).exists():
+                        entry[key] = parser(sp.read_lines(Path(p)))  # type: ignore[operator]
+                for name in ("tr_locus_summary", "tr_allele_spectrum", "tr_outlier_pairs"):   # the big tables: sizes only
+                    p = outs.opt(name)
+                    if isinstance(p, str) and Path(p).exists():
+                        entry[name] = {"bytes": Path(p).stat().st_size}
             elif stage == "cohort_freq":
                 p = outs.opt("freq_summary")
                 if isinstance(p, str) and Path(p).exists():
@@ -642,6 +653,47 @@ def build_cohort_digest(cohort: Cohort, members: dict[str, dict[str, object]], c
                             "comparisons": {pair: {"counts": counts, "contigs": (msumm.get("compare_contigs") or {}).get(pair, {})}
                                             for pair, counts in (msumm.get("compare") or {}).items()}})
 
+    # tandem repeats: cohort_tr's samples table joined to the member rows (outliers per member, the MAD outliers), the
+    # screen's findings with each member's own dropout class at the locus (from its digest: the stage reads no per-sample file)
+    tr_entry: dict[str, object] = callsets.get("cohort_tr") if isinstance(callsets.get("cohort_tr"), dict) else {}  # type: ignore[assignment]
+    tandem: dict[str, object] = {"available": bool(tr_entry.get("samples") is not None)}
+    if tandem["available"]:
+        trows: list[dict[str, object]] = tr_entry.get("samples", [])  # type: ignore[assignment]
+        by_id_t = {str(r.get("sample_id")): r for r in trows}
+        tvalues = {sid: float(r["n_outliers"]) for sid, r in by_id_t.items() if isinstance(r.get("n_outliers"), (int, float)) and sid in present_members}
+        tflags: dict[str, list[dict[str, object]]] = {}
+        tmed, tmad, _ = _outliers(tvalues) if tvalues else (None, None, [])
+        tmax = thr.get("tr_outlier_count_mad_max", 3.0)
+        tlimit = (tmed + tmax * tmad) if (tmed is not None and tmad is not None and len(tvalues) >= 4) else None
+        for sid, v in tvalues.items():
+            if tlimit is not None and v > tlimit and tmad:   # a constant cohort (mad 0) flags nobody
+                tflags.setdefault(sid, []).append({"code": "tr_outlier_count_high", "severity": "warn",
+                                                   "message": f"{int(v)} expansion outliers at ordinary tandem-repeat loci, above the cohort's median {sv.fmt(tmed)} + "
+                                                              f"{sv.fmt(tmax, 1)} MAD ({sv.fmt(tlimit, 1)}): a sample problem, or an ancestry that is rare in this cohort",
+                                                   "value": v, "threshold": tlimit})
+        for r in present:
+            fl = tflags.get(str(r["id"]), [])
+            if fl:
+                r["flags"] = sorted(set(r["flags"]) | {str(f["code"]) for f in fl})  # type: ignore[arg-type]
+                r["qc_status"] = _worst([str(r.get("qc_status", "pass"))] + [str(f["severity"]) for f in fl])
+            tr_row = by_id_t.get(str(r["id"]))
+            r["tr_outliers"] = _num(tr_row.get("n_outliers")) if tr_row else None
+        if tvalues:
+            distributions["tr_outliers"] = {"label": "expansion outliers at ordinary TR loci (cohort_tr)", "digits": 0, "unit": "", "values": tvalues, "median": tmed,
+                                            "mad": tmad, "outliers": sorted(tflags), "threshold": None, "direction": "max", "beyond_threshold": [],
+                                            "below_threshold": []}
+        screen: dict[str, object] = tr_entry.get("screen") if isinstance(tr_entry.get("screen"), dict) else {}  # type: ignore[assignment]
+        findings: list[dict[str, object]] = [dict(f) for f in screen.get("findings", [])]  # type: ignore[union-attr]
+        for f in findings:
+            loci_of: list[dict[str, object]] = ((present_members.get(str(f.get("sample_id"))) or {}).get("tandem_repeats") or {}).get("disease_loci") or []  # type: ignore[union-attr, assignment]
+            f["dropout"] = next((str(l.get("dropout") or "") for l in loci_of if l.get("trid") == f.get("trid")), "")
+        tandem.update({"flags": tflags, "counts": {"tr_outlier_count_high": len(tflags)},
+                       "members": {sid: by_id_t.get(sid, {"sample_id": sid}) for sid in cohort.members},
+                       "findings": findings, "by_class": screen.get("by_class", {}),
+                       "outliers_top": tr_entry.get("outliers_top", {})})
+        for dup in ("screen", "outliers_top", "samples"):
+            tr_entry.pop(dup, None)
+
     sex: dict[str, object] = {"sheet": {}, "inferred": {}, "somalier": {}, "used": {}, "karyotype": {},
                               "mismatches": [r["id"] for r in present if "sex_mismatch" in r["flags"]],  # type: ignore[operator]
                               "karyotype_mismatches": [r["id"] for r in present if "asm_karyotype_mismatch" in r["flags"]],  # type: ignore[operator]
@@ -675,7 +727,8 @@ def build_cohort_digest(cohort: Cohort, members: dict[str, dict[str, object]], c
             "cohort": {"id": cohort.cohort_id, "frozen_at": cohort.frozen_at, "sha256": cohort.sample_list_sha256, "n": len(cohort.members)},
             "runs": {s: {"run_id": r.run_id, "ugc_wgw_version": r.ugc_wgw_version, "attempt": r.attempt, "finished_at": r.finished_at} for s, r in cruns.items()},
             "members": rows, "missing_members": [r["id"] for r in rows if not r.get("present")],
-            "distributions": distributions, "sex": sex, "identity": identity, "methylation": methylation, "callsets": callsets, "targeted": targeted,
+            "distributions": distributions, "sex": sex, "identity": identity, "methylation": methylation, "tandem_repeats": tandem, "callsets": callsets,
+            "targeted": targeted,
             "assembly": assembly,
             "versions": versions,
             "thresholds": dict(thr), "provenance": prov, "warnings": warnings}
@@ -754,6 +807,80 @@ def _identity_html(ident: dict[str, object], cq: dict[str, object], present: lis
                  + ", ".join(_esc(x) for x in legacy[:50]) + ("…" if len(legacy) > 50 else "") + ".</p>")
     if cq.get("qc_html"):
         body += f"<p class='small muted'>somalier's own interactive report: <code>{_esc((cq.get('qc_html') or {}).get('path'))}</code>.</p>"  # type: ignore[union-attr]
+    return body
+
+
+def _tr_html(trd: dict[str, object], ctr: dict[str, object], outlier_dist: dict[str, object] | None, thr: dict[str, float], link) -> str:  # type: ignore[no-untyped-def]
+    """The Tandem repeats section: the screen of the named disease loci (rows worth a look, the per-locus table), the
+    expansion outliers per member and the loci with the most carriers, the resource files, STRchive's attribution."""
+    summ: dict[str, dict[str, dict[str, object]]] = ctr.get("summary", {}) or {}  # type: ignore[assignment]
+    cohort_s = summ.get("cohort", {})
+    val = lambda metric: (cohort_s.get(metric) or {}).get("")  # noqa: E731
+    status: dict[str, object] = (summ.get("loci", {}).get("outlier_status") or {})
+    params = {k: (v or {}).get("") for k, v in (summ.get("parameters") or {}).items()}
+    findings: list[dict[str, object]] = trd.get("findings", []) or []  # type: ignore[assignment]
+    by_class: dict[str, int] = trd.get("by_class", {}) or {}  # type: ignore[assignment]
+    classed = [f for f in findings if f.get("class") not in ("normal", "uncalled")]
+    body = _cards([("members", val("n_members")), ("loci in the catalog", val("n_loci")), ("named disease loci", (summ.get("screen", {}).get("n_loci") or {}).get("")),
+                   ("member x locus rows outside the benign range", len(classed)), ("expansion-outlier pairs", val("n_outlier_pairs")),
+                   ("loci with a listed outlier", status.get("listed")), ("loci with a common long allele", status.get("common")),
+                   ("members flagged tr_outlier_count_high", (trd.get("counts") or {}).get("tr_outlier_count_high", 0))])  # type: ignore[union-attr]
+    body += ("<h3>Disease-locus screen (STRchive thresholds)</h3>"
+             "<p class='small muted'><b>A research screen, not a diagnostic result.</b> Per member and named locus, each allele's copies of the pathogenic "
+             "motif (TRGT's motif counts; allele length over motif length where the table says so) are classed against STRchive's ranges: "
+             "<code>pathogenic</code>, <code>intermediate</code>, <code>above_benign</code> or <code>below_pathogenic</code> for the undefined gaps, "
+             "<code>below_benign</code>. TRGT's counts tolerate interruptions and its frames are wider than the clinical ones at some loci, so a class is a "
+             "reason to look at the reads (<code>trgt plot</code> on the member's spanning reads), not a finding. Fit: <code>consistent</code> with the "
+             "locus's inheritance, or <code>carrier</code> (one allele at a recessive locus).</p>")
+    if classed or findings:
+        rows = [[link(str(f.get("sample_id"))), f.get("gene"), _clip(str(f.get("disease") or ""), 40), f.get("inheritance"), Raw(f"<b>{_esc(f.get('class'))}</b>"),
+                 f.get("mode_match"), f.get("gt"), f"{sv.fmt(f.get('a1_copies'))} / {sv.fmt(f.get('a2_copies'))}" if f.get("a2_copies") is not None else sv.fmt(f.get("a1_copies")),
+                 f"{sv.fmt(f.get('a1_al'))} / {sv.fmt(f.get('a2_al'))}" if f.get("a2_al") is not None else sv.fmt(f.get("a1_al")), sv.fmt(f.get("a1_lps")),
+                 f.get("a1_am") or "", f.get("borderline") or "", f.get("dropout") or "", _clip(str(f.get("notes") or ""), 60)] for f in findings]
+        body += big_table(["member", "gene", "disease", "inheritance", "class", "fit", "GT", "copies (a1 / a2)", "AL bp (a1 / a2)", "LPS a1", "5mC a1", "borderline",
+                           "dropout", "notes"], rows, what=f"{len(rows)} member x locus rows worth a look ({len(classed)} outside the benign range)", open_below=40)
+        body += ("<p class='small muted'>a1 is the allele with more copies. LPS: the pathogenic motif's longest uninterrupted run (shorter than the copies means "
+                 "interruptions). 5mC: the allele's mean methylation; read it within a sex group at X-linked loci. Dropout: the member's own class at the locus "
+                 "from its run. Rows listed for a note or a borderline value alone have class normal.</p>")
+    else:
+        body += "<p class='muted'>No member has an allele outside the benign range, a borderline value or a note at a called locus.</p>"
+    if by_class:
+        body += "<p class='small'>Member x locus rows by class: " + ", ".join(f"{_esc(k)} {sv.fmt(v)}" for k, v in sorted(by_class.items(), key=lambda kv: -kv[1])) + ".</p>"
+    loci: list[dict[str, object]] = ctr.get("screen_loci", []) or []  # type: ignore[assignment]
+    if loci:
+        lrows = [[l.get("gene"), l.get("trid"), l.get("inheritance"), f"{l.get('chrom')}:{sv.fmt(l.get('start'))}", _clip(str(l.get("pathogenic_motifs") or ""), 28),
+                  f"{sv.fmt(l.get('benign_max'))} / {sv.fmt(l.get('pathogenic_min'))}", f"{sv.fmt(l.get('n_called'))} of {sv.fmt(l.get('n_expected'))}",
+                  sv.fmt(l.get("copies_median"), 1), sv.fmt(l.get("copies_max")), sv.fmt(l.get("n_intermediate")), sv.fmt(l.get("n_above_benign")),
+                  sv.fmt(l.get("n_pathogenic")), sv.fmt(l.get("n_expanded_other_motif")), l.get("call_note")] for l in loci]
+        body += ("<h3>Named loci</h3>"
+                 + big_table(["gene", "locus", "inheritance", "position", "pathogenic motif(s)", "benign max / pathogenic min", "members called", "copies median",
+                              "copies max", "intermediate", "above benign", "pathogenic", "other motif", "note"], lrows,
+                             what=f"{len(lrows)} named loci ({sum(1 for l in loci if l.get('call_note') != 'ok')} with a call note)", open_below=10)
+                 + "<p class='small muted'>Members per class at each locus. <code>mostly_uncalled</code>: a catalog or coverage problem at the locus, not a "
+                   "property of the members; <code>few_uncalled</code>: the uncalled members are the ones to check for an allele longer than the reads; "
+                   "<code>threshold_or_frame_suspect</code>: more than a fifth of the alleles are above benign, so the thresholds and TRGT's frame disagree "
+                   "here.</p>")
+    body += "<h3>Expansion outliers</h3>"
+    if outlier_dist:
+        body += sv.strip_or_band([{"label": "outliers per member", "points": sorted(outlier_dist["values"].items()), "outliers": outlier_dist.get("outliers", []),  # type: ignore[union-attr, attr-defined]
+                                   "threshold": None, "beyond": [], "digits": 0, "unit": ""}], width=700)
+    body += ("<p class='small muted'>A member and locus pair is listed when the member's longer allele is at least "
+             f"{_esc(sv.fmt(params.get('outlier_min_bp')))} bp and {_esc(sv.fmt(params.get('outlier_mad_min'), 1))} scaled MADs above the cohort's median (the scale "
+             "never below one repeat unit), at loci with at least " + _esc(sv.fmt(params.get("outlier_min_called"))) + " called members, and only while "
+             "the carriers are few: a locus where many members qualify has a common long allele and lists nobody. The count per member is over the ordinary "
+             "loci; red points lie beyond median + " + _esc(sv.fmt(thr.get("tr_outlier_count_mad_max", 3.0), 1)) + " MAD (<code>tr_outlier_count_high</code>, "
+             "warn). A high count is a sample problem or an ancestry that is rare in the cohort; contractions are not scanned.</p>")
+    top_loci = (summ.get("outlier_loci", {}).get("n_carriers") or {})
+    named_of = (summ.get("outlier_loci", {}).get("named_locus") or {})
+    if top_loci:
+        trows = [[trid, sv.fmt(n), named_of.get(trid, "")] for trid, n in sorted(top_loci.items(), key=lambda kv: (-float(kv[1]), kv[0]))[:25]]  # type: ignore[arg-type]
+        body += "<h3>Loci with the most outlier members</h3>" + big_table(["locus", "members listed", "named locus"], trows, what=f"{len(trows)} loci", open_below=12)
+    body += _kv([["allele-length resource (trid, al, n_alleles, n_members)", _bytes((ctr.get("tr_allele_spectrum") or {}).get("bytes"))],  # type: ignore[union-attr]
+                 ["per-locus table (median, MAD, quantiles, status)", _bytes((ctr.get("tr_locus_summary") or {}).get("bytes"))],  # type: ignore[union-attr]
+                 ["every outlier pair", _bytes((ctr.get("tr_outlier_pairs") or {}).get("bytes"))]])  # type: ignore[union-attr]
+    source = ((summ.get("source", {}).get("tr_map_source") or {}).get("values") or [])
+    if source:
+        body += "<p class='small muted'>Thresholds: " + _esc(str(source[0])) + ".</p>"  # type: ignore[index]
     return body
 
 
@@ -987,7 +1114,7 @@ def render_cohort(d: dict[str, object], tools: list[dict[str, object]], *, proje
                  + "<p class='small muted'>Bars: records by the number of members carrying the variant, in bins that scale with the cohort; "
                  "line: the cumulative share (right axis).</p></div></div>"
                  + "<h3>Merged tandem repeats (trgt merge, trgt-lps)</h3>"
-                 + _kv([["loci in the trgt-lps table", sv.fmt(lps.get("loci"))], ["samples", sv.fmt(len(lps.get("samples", [])))], ["size", _bytes(lps.get("bytes"))]]))  # type: ignore[arg-type]
+                 + _kv([["rows of the trgt-lps table (locus x motif)", sv.fmt(lps.get("loci"))], ["samples", sv.fmt(len(lps.get("samples", [])))], ["size", _bytes(lps.get("bytes"))]]))  # type: ignore[arg-type]
         if cm.get("small_variant_vcf"):
             jv2: dict[str, object] = cm.get("small_variant_vcf", {})  # type: ignore[assignment]
             body += "<h3>Joint small-variant call set (cohort_merge, GLnexus)</h3>" + _kv([["samples in the VCF", sv.fmt(len(jv2.get("samples", [])))], ["size", _bytes(jv2.get("bytes"))]])  # type: ignore[arg-type]
@@ -1015,6 +1142,13 @@ def render_cohort(d: dict[str, object], tools: list[dict[str, object]], *, proje
                                [[link(r.get("sample_id")), r.get("group"), r.get("sex_source"), r.get("in_small_variant_vcf"), r.get("in_sv_vcf")]
                                 + ([r.get("in_mt_vcf")] if has_mt else []) for r in fs]) + "</details>")
     add("sec-freq", "Allele frequencies (cohort_freq)", fbody or "<p class='muted'>cohort_freq has not run.</p>")
+
+    # tandem repeats (cohort_tr)
+    trd: dict[str, object] = d.get("tandem_repeats", {}) or {}  # type: ignore[assignment]
+    ctr: dict[str, object] = callsets.get("cohort_tr", {}) or {}
+    if d.get("mode") != "assembly":
+        add("sec-tr", "Tandem repeats (cohort_tr)", _tr_html(trd, ctr, dist.get("tr_outliers"), thr, link) if ctr and trd.get("available") else
+            "<p class='muted'>cohort_tr has not run for this cohort (<code>ugc-wgw submit --cohort " + _esc(cid) + " --stage cohort_tr</code>).</p>")
 
     # methylation (cohort_methyl)
     meth: dict[str, object] = d.get("methylation", {}) or {}  # type: ignore[assignment]

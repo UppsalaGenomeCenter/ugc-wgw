@@ -169,6 +169,19 @@ grep -q "^methbat_atlas_tsv	$me/nanomix_39Bisulfite.methbat.tsv$" "$ref_map"
 grep -q '^##methbat_map_input=gtf	gencode.v50.annotation.gtf.gz	sha256:83fba3e9' "$me/methbat_map.GRCh38_GIABv3.tsv"
 [ "$(grep -vc '^#' "$me/methbat_map.GRCh38_GIABv3.tsv")" -eq 32039 ]   # header + 32,038 islands
 [ -f "$me/nanomix_39Bisulfite.methbat.tsv" ]
+# the tandem-repeat references (references.lock ugc-wgw-tr): two generated tables, both reference-map keys
+trr=$scratch/prefix/references/ugc-wgw-tr-0.1.0
+grep -q "^tr_disease_loci_tsv	$trr/tr_disease_loci.strchive-2.4.4.tsv$" "$ref_map"
+grep -q "^tr_named_overlaps_tsv	$trr/tr_named_overlaps.tsv$" "$ref_map"
+grep -q '^##tr_map_input=strchive	STRchive-loci.v2.4.4.json@v2.4.4	sha256:bbfe8823' "$trr/tr_disease_loci.strchive-2.4.4.tsv"
+grep -q 'CC BY 4.0' "$trr/tr_disease_loci.strchive-2.4.4.tsv"
+[ "$(grep -vc '^#' "$trr/tr_disease_loci.strchive-2.4.4.tsv")" -eq 74 ]   # header + 73 named loci
+[ "$(grep -vc '^#' "$trr/tr_named_overlaps.tsv")" -eq 63 ]                # header + 62 twins
+# the smoke's truth data (references.lock ugc-wgw-truth): six shipped files, no reference-map key
+tr=$scratch/prefix/references/ugc-wgw-truth-0.1.0
+[ "$(sha256sum "$tr/HG002_GRCh38_v5.0q_smvar.chr20.vcf.gz" | cut -d' ' -f1)" = 8cb4332ba078d77e4720c22c5de912a3cac933988953611549b30abadb7edcdd ]
+[ -s "$tr/HG002_GRCh38_v5.0q_stvar.chr20.vcf.gz.tbi" ] && [ -s "$tr/HG002_GRCh38_v5.0q_stvar.benchmark.chr20.bed" ]
+if grep -q 'ugc-wgw-truth' "$ref_map"; then echo "the truth files must not be reference-map keys" >&2; exit 1; fi
 # the assembly stages' references (references.lock ugc-wgw-asm): three shipped files, the derived fasta and its index built
 asm=$scratch/prefix/references/ugc-wgw-asm-0.1.0
 grep -q "^asm_fasta	$asm/human_GRCh38_GIABv3_asm.fasta$" "$ref_map"

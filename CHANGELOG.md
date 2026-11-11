@@ -3,6 +3,39 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.18.0
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin (0.6.0)
+unchanged; two new reference entries (`ugc-wgw-tr`, `ugc-wgw-truth`); one
+new image, used by the smoke test only. Tandem repeats at cohort scale, and
+the first truth-set score of the pipeline's own calls.
+
+- **A new stage, `cohort_tr`**, from the merged TRGT VCF and trgt-lps table
+  of `cohort_merge` alone (no per-sample task, optional: nothing waits for
+  it). The 73 named disease loci of the TRGT catalog are screened per
+  member against STRchive's thresholds (STRchive v2.4.4, CC BY 4.0): copies
+  of the pathogenic motif per allele, a class (`normal`, `intermediate`,
+  `pathogenic`, the gaps by name), the fit to the locus's inheritance,
+  notes such as an expansion of another motif. Every locus of the catalog
+  gets its allele-length distribution and spectrum, an in-house resource,
+  and the members whose longer allele is far above the cohort's and rare
+  in it are listed as expansion outliers (at least 50 bp and 5 scaled MADs
+  above the median, never less than five repeat units, a common long
+  allele listing nobody). The cohort page gains a Tandem repeats section
+  and the advisory flag `tr_outlier_count_high`; `ugc-wgw export --domains
+  tr` copies the tables. A research screen, not a diagnostic result: no
+  flag is raised for a class. The per-sample digests are untouched, so
+  nothing is rebuilt. trgt-denovo is not part of the stage.
+- **`tests/smoke/run.sh validate`** scores the smoke's HG002 against the
+  Genome in a Bottle HG002 v5.0q benchmark on chr20, small variants with
+  aardvark and structural variants with truvari (bench, then refine), for
+  the standalone and the joint route, and `tests/smoke/VALIDATION.md`
+  keeps the rows per release. First scores (DeepVariant 1.10.0, sawfish
+  2.3.0, 48.7x): SNV F1 0.9985 for DeepVariant's own call set and 0.9977
+  for the member's slice of the GLnexus joint VCF, indel F1 0.950 and
+  0.939, SV F1 0.928. The chr20 truth slices ship as a reference entry.
+
 ## 0.17.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

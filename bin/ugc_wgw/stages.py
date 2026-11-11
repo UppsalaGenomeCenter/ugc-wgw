@@ -15,7 +15,8 @@ class StageSpec:
     subject_type: str  # "sample" | "cohort"
     wdl: str           # file under <code>/workflows/
     builder: str       # function name in inputs.py
-    optional: bool = False   # never a prerequisite of the stages after it (cohort_qc: its flags gate a freeze, not a run)
+    optional: bool = False   # never a prerequisite of the stages after it (cohort_qc: its flags gate a freeze, not a run;
+                             # cohort_tr: a screen and a resource nothing downstream reads)
 
 
 STAGES: dict[str, StageSpec] = {
@@ -27,6 +28,7 @@ STAGES: dict[str, StageSpec] = {
     "downstream": StageSpec("downstream", "sample", "ugc_wgw_downstream.wdl", "build_downstream"),
     "cohort_merge": StageSpec("cohort_merge", "cohort", "ugc_wgw_cohort_merge.wdl", "build_cohort_merge"),
     "cohort_freq": StageSpec("cohort_freq", "cohort", "ugc_wgw_cohort_freq.wdl", "build_cohort_freq"),
+    "cohort_tr": StageSpec("cohort_tr", "cohort", "ugc_wgw_cohort_tr.wdl", "build_cohort_tr", optional=True),
     "cohort_methyl": StageSpec("cohort_methyl", "cohort", "ugc_wgw_cohort_methyl.wdl", "build_cohort_methyl"),
     "assembly": StageSpec("assembly", "sample", "ugc_wgw_assembly.wdl", "build_assembly"),
     "assembly_call": StageSpec("assembly_call", "sample", "ugc_wgw_assembly_call.wdl", "build_assembly_call"),
@@ -34,8 +36,8 @@ STAGES: dict[str, StageSpec] = {
 }
 
 MODES: dict[str, tuple[str, ...]] = {
-    "standalone": ("singleton", "cohort_qc", "cohort_merge", "cohort_freq", "cohort_methyl"),
-    "joint": ("upstream", "cohort_qc", "cohort_call", "downstream", "cohort_merge", "cohort_freq", "cohort_methyl"),
+    "standalone": ("singleton", "cohort_qc", "cohort_merge", "cohort_freq", "cohort_tr", "cohort_methyl"),
+    "joint": ("upstream", "cohort_qc", "cohort_call", "downstream", "cohort_merge", "cohort_freq", "cohort_tr", "cohort_methyl"),
     "assembly": ("assembly", "assembly_call", "cohort_pangenome"),
 }
 

@@ -1,0 +1,21 @@
+{
+  "ugc_wgw_cohort_tr.ugc_wgw_version": "<ugc_wgw_version>",
+  "ugc_wgw_cohort_tr.cohort_id": "String",
+  "ugc_wgw_cohort_tr.sample_ids": [
+    "String"
+  ],
+  "ugc_wgw_cohort_tr.sample_sexes": [
+    "String (XX, XY or empty per member, aligned with sample_ids)"
+  ],
+  "ugc_wgw_cohort_tr.trgt_vcf": "File (cohort_trgt_vcf of cohort_merge)",
+  "ugc_wgw_cohort_tr.trgt_vcf_index": "File (cohort_trgt_vcf_index of cohort_merge)",
+  "ugc_wgw_cohort_tr.trgt_lps": "File (cohort_trgt_lps of cohort_merge)",
+  "ugc_wgw_cohort_tr.outlier_min_bp": 50,
+  "ugc_wgw_cohort_tr.outlier_mad_min": 5.0,
+  "ugc_wgw_cohort_tr.outlier_min_called": 20,
+  "ugc_wgw_cohort_tr.outlier_max_carrier_fraction": 0.01,
+  "ugc_wgw_cohort_tr.outlier_max_carriers_min": 2,
+  "ugc_wgw_cohort_tr.ref_map_file": "<local_path_prefix>/ugc_wgw_ref_map.GRCh38_GIABv3.tsv",
+  "ugc_wgw_cohort_tr.backend": "HPC",
+  "ugc_wgw_cohort_tr.preemptible": true
+}

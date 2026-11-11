@@ -426,6 +426,88 @@ def _methbat_report(imprinting: str) -> str:
             + f"chr14\t100824186\t100827641\tMEG3:TSS-DMRb\t{third[0]}\t{third[1]}\tAlleleSpecificMethylation\t{third[2]}\t{third[3]}\t{third[4]}\t\t\t1.000000e0\t0\t0\t0\t0\t0\t0\n")
 
 
+TR_SCREEN_COLS = (["sample_id", "sex", "trid", "gene", "disease", "inheritance", "chrom", "start", "end", "gt", "ploidy", "class", "n_alleles_pathogenic",
+                   "mode_match", "measure", "borderline"] + [f"a{i}_{k}" for i in (1, 2) for k in ("copies", "class", "al", "allr", "lps", "sd", "ap", "am", "mc")]
+                  + ["twin_trid", "twin_al", "notes"])
+TR_PAIR_COLS = ["sample_id", "trid", "chrom", "start", "end", "motifs", "named_locus", "al", "al_other", "sd", "excess_bp", "excess_units", "z", "cohort_median",
+                "cohort_mad", "scale", "ref_len", "n_called", "n_carriers", "both_alleles"]
+
+
+def _tr_outlier_counts(members: list[str]) -> list[int]:
+    """Expansion outliers per member: small and varied, the last member of a cohort of four or more far above (flagged)."""
+    return [40 if (len(members) >= 4 and i == len(members) - 1) else 1 + i % 3 for i in range(len(members))]
+
+
+def _tr_samples(members: list[str]) -> str:
+    rows = []
+    for i, (m, n) in enumerate(zip(members, _tr_outlier_counts(members))):
+        rows.append("\t".join([m, "XY" if i % 2 == 0 else "XX", "900", "37", str(n), "1" if i == 0 else "0", "0", "70", "3", "1" if i == 0 else "0",
+                               "1" if i == 1 else "0", "0", "0", "0"]) + "\n")
+    return ("sample_id\tsex\tn_loci_called\tn_loci_uncalled\tn_outliers\tn_outliers_named\tn_outliers_both_alleles\tn_named_called\tn_named_uncalled\t"
+            "n_loci_pathogenic\tn_loci_intermediate\tn_loci_above_benign\tn_loci_below_benign\tn_ploidy_sex_mismatch\n" + "".join(rows))
+
+
+def _tr_screen(members: list[str]) -> str:
+    """One row per member at two named loci: the first member pathogenic at HTT (45 CAG), the second intermediate at
+    FMR1 (60 CGG), everybody else normal; the third member uncalled at FMR1."""
+    def row(m: str, i: int, trid: str, gene: str, inh: str, chrom: str, cls: str, a1: int, a2: int, note: str = "") -> str:
+        d = {"sample_id": m, "sex": "XY" if i % 2 == 0 else "XX", "trid": trid, "gene": gene, "disease": f"{gene} disease", "inheritance": inh, "chrom": chrom,
+             "start": "100", "end": "160", "gt": "." if cls == "uncalled" else "0/1", "ploidy": "0" if cls == "uncalled" else "2", "class": cls,
+             "n_alleles_pathogenic": "1" if cls == "pathogenic" else "0", "mode_match": "consistent" if cls == "pathogenic" else "none",
+             "measure": "mc_pathogenic", "borderline": "" if cls == "uncalled" else "no", "notes": note}
+        if cls != "uncalled":
+            d.update({"a1_copies": str(a1), "a1_class": cls, "a1_al": str(a1 * 3), "a1_lps": str(a1 - 2), "a1_sd": "12", "a1_am": "0.20", "a1_mc": str(a1),
+                      "a2_copies": str(a2), "a2_class": "normal", "a2_al": str(a2 * 3), "a2_lps": str(a2), "a2_sd": "14", "a2_am": "0.10", "a2_mc": str(a2)})
+        return "\t".join(d.get(c, "") for c in TR_SCREEN_COLS) + "\n"
+    rows = []
+    for i, m in enumerate(members):
+        rows.append(row(m, i, "HD_HTT", "HTT", "AD", "chr4", "pathogenic" if i == 0 else "normal", 45 if i == 0 else 19, 17))
+        rows.append(row(m, i, "FXS_FMR1", "FMR1", "XD", "chrX", "intermediate" if i == 1 else ("uncalled" if i == 2 else "normal"), 60 if i == 1 else 30, 29))
+    return "\t".join(TR_SCREEN_COLS) + "\n" + "".join(rows)
+
+
+def _tr_screen_loci(members: list[str]) -> str:
+    n = len(members)
+    cols = ["trid", "gene", "disease", "inheritance", "chrom", "start", "end", "motifs", "pathogenic_motifs", "benign_min", "benign_max", "intermediate_min",
+            "intermediate_max", "pathogenic_min", "pathogenic_max", "measure", "n_expected", "n_called", "call_rate", "n_alleles", "copies_median", "copies_p95",
+            "copies_max", "n_normal", "n_intermediate", "n_above_benign", "n_below_benign", "n_pathogenic", "n_expanded_other_motif",
+            "frac_alleles_above_benign", "am_median_xx", "am_median_xy", "twin_trid", "call_note"]
+    htt = ["HD_HTT", "HTT", "HTT disease", "AD", "chr4", "100", "160", "CAG,CCG", "CAG", "6", "26", "27", "39", "40", "250", "mc_pathogenic", str(n), str(n), "1",
+           str(2 * n), "18", "45", "45", str(max(0, n - 1)), "0", "0", "0", "1" if n else "0", "0", "0.1", "0.1", "0.2", "chr4_90_260_GCC", "ok"]
+    called = n - (1 if n >= 3 else 0)
+    fmr1 = ["FXS_FMR1", "FMR1", "FMR1 disease", "XD", "chrX", "700", "760", "CGG", "CGG", "5", "44", "45", "200", "201", "2000", "mc_pathogenic", str(n), str(called),
+            f"{called / n:.4f}" if n else "", str(2 * called), "30", "60", "60", str(max(0, called - 1)), "1" if n >= 2 else "0", "0", "0", "0", "0", "0.1", "0.4", "0.9",
+            "", "few_uncalled" if called < n else "ok"]
+    return "\t".join(cols) + "\n" + "\t".join(htt) + "\n" + "\t".join(fmr1) + "\n"
+
+
+def _tr_outliers(members: list[str], top: bool) -> str:
+    """One strong outlier per member at an ordinary locus, and for the first member one at a named locus's twin."""
+    rows = []
+    for i, m in enumerate(members):
+        rows.append("\t".join([m, f"chr{i + 1}_1000_1090_CAG", f"chr{i + 1}", "1000", "1090", "CAG", "", "450", "90", "7", "360", "120", "120", "90", "0", "3", "90",
+                               str(len(members)), "1", "no"]) + "\n")
+    if members:
+        rows.append("\t".join([members[0], "chr4_90_260_GCC", "chr4", "90", "260", "GCC", "HD_HTT", "300", "170", "9", "130", "43.3", "43.3", "170", "0", "3", "170",
+                               str(len(members)), "1", "no"]) + "\n")
+    return "\t".join(TR_PAIR_COLS) + "\n" + "".join(rows)
+
+
+def _tr_summary(members: list[str]) -> str:
+    n = len(members)
+    rows = [f"cohort\tn_members\t\t{n}", "cohort\tn_loci\t\t937", f"cohort\tn_spectrum_rows\t\t{3 * n}", f"cohort\tn_outlier_pairs\t\t{n + (1 if n else 0)}",
+            f"loci\toutlier_status\tlisted\t{n + (1 if n else 0)}", "loci\toutlier_status\tcommon\t2", "loci\toutlier_status\tnone\t900",
+            "loci\toutlier_status\tbelow_min_called\t30", "parameters\toutlier_min_bp\t\t50", "parameters\toutlier_mad_min\t\t5.0",
+            "parameters\toutlier_min_called\t\t20", "source\ttr_map_generator\t\tscripts/make-strchive-map.py 1.0.0",
+            "source\ttr_map_source\t\tSTRchive v2.4.4 (https://strchive.org), licensed CC BY 4.0",
+            "source\ttr_map_input\t\tstrchive STRchive-loci.json@v2.4.4 sha256:bb", "source\ttr_map_input\t\tcatalog adotto_strchive.bed.gz sha256:e1",
+            "screen\tn_loci\t\t2", "screen\tcall_note\tok\t1", "screen\tcall_note\tfew_uncalled\t1"]
+    rows += [f"outlier_loci\tn_carriers\tchr{i + 1}_1000_1090_CAG\t1" for i in range(n)]
+    if n:
+        rows += ["outlier_loci\tn_carriers\tchr4_90_260_GCC\t1", "outlier_loci\tnamed_locus\tchr4_90_260_GCC\tHD_HTT", "screen_pathogenic\tn_members\tHD_HTT\t1"]
+    return "resource\tmetric\tkey\tvalue\n" + "\n".join(rows) + "\n"
+
+
 def _methyl_samples(members: list[str], legacy: list[str], labels: list[str]) -> str:
     rows = []
     for i, m in enumerate(members):
@@ -605,6 +687,20 @@ def fixture_bytes(name: str, sid: str, stage: str, inferred_sex: str = "", index
         text = f"section\tmetric\tkey\tvalue\npairs\tn\ttotal\t{n}\npairs\tn\tkept\t0\npairs\thist\t0.00\t{n}\nmembers\tn\ttotal\t{len(ms)}\nmembers\tn\textracted_here\t0\nmembers\tn\twith_ancestry\t{len(ms)}\n"
     elif name == "methbat_report" or name == "member_reports":
         text = _methbat_report(imprinting if name == "methbat_report" else ("anomalous" if (members or []) and index < len(members or []) and (members or [])[index] in (legacy or []) else ""))
+    elif name == "tr_samples":
+        text = _tr_samples(members or [])
+    elif name == "tr_summary":
+        text = _tr_summary(members or [])
+    elif name == "tr_pathogenic_screen":
+        text = _tr_screen(members or [])
+    elif name == "tr_screen_loci":
+        text = _tr_screen_loci(members or [])
+    elif name in ("tr_outliers_top", "tr_outlier_pairs"):
+        text = _tr_outliers(members or [], top=name == "tr_outliers_top")
+    elif name == "tr_locus_summary":
+        text = "chrom\tstart\tend\ttrid\tmotifs\tnamed_locus\tref_len\tn_expected\tn_called\toutlier_status\nchr1\t1000\t1090\tchr1_1000_1090_CAG\tCAG\t\t90\t3\t3\tlisted\n"
+    elif name == "tr_allele_spectrum":
+        text = "trid\tal\tn_alleles\tn_members\nchr1_1000_1090_CAG\t90\t5\t3\nchr1_1000_1090_CAG\t450\t1\t1\n"
     elif name == "methyl_samples":
         text = _methyl_samples(members or [], legacy or [], labels or [])
     elif name == "methyl_summary":

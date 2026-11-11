@@ -10,6 +10,8 @@
 # make-bundle.sh unless --without-ancestry; absent from the install then, and cohort_qc runs without the ancestry step),
 # and, from ugc-wgw-methyl, MethBat's imprinting regions (methbat_report_regions_tsv), the CpG-island gene map (methbat_map)
 # and the nanomix cell-type atlas (methbat_atlas_tsv), all shipped.
+# From ugc-wgw-tr (cohort_tr): the named disease loci with STRchive's thresholds (tr_disease_loci_tsv) and the ordinary
+# catalog loci overlapping them (tr_named_overlaps_tsv), both shipped.
 name	GRCh38_GIABv3
 fasta	<local_path_prefix>/hifi-wdl-resources-v4.0.0-GRCh38_GIABv3/GRCh38_GIABv3/human_GRCh38_GIABv3_no_alt_analysis_set_maskedGRC_decoys_MAP2K3_KMT2C_KCNJ18.fasta
 fasta_index	<local_path_prefix>/hifi-wdl-resources-v4.0.0-GRCh38_GIABv3/GRCh38_GIABv3/human_GRCh38_GIABv3_no_alt_analysis_set_maskedGRC_decoys_MAP2K3_KMT2C_KCNJ18.fasta.fai
@@ -34,3 +36,5 @@ somalier_1kg_tar	<local_path_prefix>/ugc-wgw-qc-0.1.0/1kg.somalier.tar.gz
 methbat_report_regions_tsv	<local_path_prefix>/ugc-wgw-methyl-0.1.0/methbat_report_regions.hg38.tsv
 methbat_map	<local_path_prefix>/ugc-wgw-methyl-0.1.0/methbat_map.GRCh38_GIABv3.tsv
 methbat_atlas_tsv	<local_path_prefix>/ugc-wgw-methyl-0.1.0/nanomix_39Bisulfite.methbat.tsv
+tr_disease_loci_tsv	<local_path_prefix>/ugc-wgw-tr-0.1.0/tr_disease_loci.strchive-2.4.4.tsv
+tr_named_overlaps_tsv	<local_path_prefix>/ugc-wgw-tr-0.1.0/tr_named_overlaps.tsv

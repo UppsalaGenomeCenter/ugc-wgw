@@ -26,6 +26,11 @@
 #                                              HG003's aligned BAM, DeepVariant VCF, sawfish VCF and gVCF), runs its standalone
 #                                              phase, compares HG003v's phased VCFs with HG003's singleton ones, and registers
 #                                              HG003x with contigs renamed to see intake fail as an input error; needs the joint phase
+#   run.sh validate [<member>] [--truth-dir DIR] [--region chr20] [--min-f1 snv|indel|sv=VALUE ...]
+#                                              score the member's (default HG002) newest per-sample run against GIAB's HG002
+#                                              v5.0q benchmark on chr20: small variants with aardvark, SVs with truvari bench
+#                                              and refine; tables under logs/validate-<stamp>/ and the row for VALIDATION.md;
+#                                              reports only, unless --min-f1 sets a floor
 #   run.sh eval sawfish23 [compare]            a second project (project-sawfish23/, results-sawfish23/) initialised with
 #                                              the eval-sawfish23 profile, its standalone phase, then per member truvari
 #                                              bench of its phased SV VCF against the production project's and the sawfish
@@ -39,7 +44,7 @@
 # Stages default to subject HG002 (sample stages) or the cohort of their mode (cohort stages);
 # singleton/cohort_merge run in standalone, upstream/cohort_call/downstream in joint,
 # assembly/assembly_call/cohort_pangenome in assembly (cohort SMOKE, chromosomes chr20 only: init
-# sets stage_inputs.cohort_pangenome.chromosomes). Joint mode uses cohort SMOKEJ (same members) because results paths
+# sets stage_inputs.cohort_pangenome.chromosomes, and cohort_tr.outlier_min_called = 4 for the four members). Joint mode uses cohort SMOKEJ (same members) because results paths
 # do not encode the mode and cohort_merge would otherwise count as done after standalone.
 set -euo pipefail
 
@@ -58,14 +63,14 @@ usage() { sed -n '2,/^# Environment:/p' "$0" | sed '$d'; exit "${1:-0}"; }   # t
 
 mode_of_stage() {
   case "$1" in
-    singleton|cohort_qc|cohort_merge|cohort_freq|cohort_methyl|intake) echo standalone ;;   # the cohort stages exist in joint too: --mode joint; intake: run.sh entry
+    singleton|cohort_qc|cohort_merge|cohort_freq|cohort_tr|cohort_methyl|intake) echo standalone ;;   # the cohort stages exist in joint too: --mode joint; intake: run.sh entry
     upstream|cohort_call|downstream) echo joint ;;
     assembly|assembly_call|cohort_pangenome) echo assembly ;;
     *) die "unknown stage $1" ;;
   esac
 }
 cohort_of_mode() { case "$1" in joint) echo SMOKEJ ;; *) echo SMOKE ;; esac; }
-is_cohort_stage() { case "$1" in cohort_qc|cohort_call|cohort_merge|cohort_freq|cohort_methyl|cohort_pangenome) return 0 ;; *) return 1 ;; esac; }
+is_cohort_stage() { case "$1" in cohort_qc|cohort_call|cohort_merge|cohort_freq|cohort_tr|cohort_methyl|cohort_pangenome) return 0 ;; *) return 1 ;; esac; }
 
 sheet=${UGC_WGW_SMOKE_SHEET:-$smoke/data/samples.tsv}     # run.sh entry registers another sheet in its variant project
 cohort_file=${UGC_WGW_SMOKE_COHORT:-$smoke/data/cohort.txt}
@@ -80,6 +85,18 @@ sample_stages_of() {  # <member>
 set_ugc() {
   [ -f "$project/.ugc-wgw/config.json" ] || die "no smoke project at $project; run: $0 init"
   ugc=(python3 "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["code_dir"])' "$project/.ugc-wgw/config.json")/bin/ugc-wgw" --project "$project")
+}
+# the SIF of an image in the project's image cache: <manifest file> <image name as the manifest writes it, without the digest>.
+# The cache is the one the project's miniwdl.cfg names (config.json's miniwdl_cfg: the smoke's own cfg, or the install's).
+sif_of() {
+  local manifest=$1 image=$2 cfg dir ref name
+  cfg=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["miniwdl_cfg"])' "$project/.ugc-wgw/config.json")
+  dir=$(python3 -c 'import configparser,sys; c=configparser.ConfigParser(); c.read(sys.argv[1]); print(c.get("singularity", "image_cache"))' "$cfg")
+  ref=$(grep -o "$image@sha256:[0-9a-f]*" "$manifest" | head -1 || true)
+  [ -n "$ref" ] || die "no image $image in $manifest"
+  name="docker___${ref//\//_}"; name="${name//:/_}.sif"
+  [ -f "$dir/$name" ] || die "the SIF of $ref is not in $dir ($name); populate the SIF cache from the image manifests"
+  echo "$dir/$name"
 }
 
 # ---- init --------------------------------------------------------------------
@@ -165,9 +182,11 @@ import json, sys
 path = sys.argv[1]
 doc = json.load(open(path))
 doc.setdefault("stage_inputs", {}).setdefault("cohort_pangenome", {})["chromosomes"] = ["chr20"]
+# four members: cohort_tr's outlier scan needs its floor of called members lowered to run at all
+doc["stage_inputs"].setdefault("cohort_tr", {})["outlier_min_called"] = 4
 json.dump(doc, open(path, "w"), indent=2, sort_keys=True)
 PY
-  log "stage_inputs.cohort_pangenome.chromosomes = [chr20]"
+  log "stage_inputs.cohort_pangenome.chromosomes = [chr20]; stage_inputs.cohort_tr.outlier_min_called = 4"
   if [ -n "$hifiasm_threads" ]; then
     # the request and the command's -t both come from this workflow input; a policy row would change only the request
     python3 - "$project/.ugc-wgw/config.json" "$hifiasm_threads" <<'PY'
@@ -314,6 +333,7 @@ cmd_all() {  # cmd_all [standalone] [joint] [assembly]: the named phases in the 
     cmd_check cohort_qc SMOKE || fails=$((fails + 1))
     cmd_check cohort_merge SMOKE || fails=$((fails + 1))
     cmd_check cohort_freq SMOKE || fails=$((fails + 1))
+    cmd_check cohort_tr SMOKE || fails=$((fails + 1))
     cmd_check cohort_methyl SMOKE || fails=$((fails + 1))
   fi
   if [[ "$want" == *" joint "* ]]; then
@@ -324,6 +344,7 @@ cmd_all() {  # cmd_all [standalone] [joint] [assembly]: the named phases in the 
     for m in $(members); do cmd_check downstream "$m" || fails=$((fails + 1)); done
     cmd_check cohort_merge SMOKEJ || fails=$((fails + 1))
     cmd_check cohort_freq SMOKEJ || fails=$((fails + 1))
+    cmd_check cohort_tr SMOKEJ || fails=$((fails + 1))
     cmd_check cohort_methyl SMOKEJ || fails=$((fails + 1))
   fi
   if [[ "$want" == *" assembly "* ]]; then
@@ -444,6 +465,154 @@ cmd_summary() {  # ugc-wgw summary for both cohorts: per-sample pages plus the c
   [ "$fails" -eq 0 ]
 }
 
+# ---- validate ---------------------------------------------------------------
+cmd_validate() {  # [<member>] [--truth-dir DIR] [--region R] [--min-f1 KIND=VALUE ...]: the member's calls against GIAB's HG002 v5.0q benchmark
+  local member=HG002 truth="" region=chr20
+  local -a floors=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --truth-dir) truth="$2"; shift 2 ;;
+      --region) region="$2"; shift 2 ;;
+      --min-f1) floors+=("$2"); shift 2 ;;
+      -*) die "validate: unknown option $1" ;;
+      *) member="$1"; shift ;;
+    esac
+  done
+  set_ugc
+  local code fasta refs_root run
+  code=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["code_dir"])' "$project/.ugc-wgw/config.json")
+  fasta=$(python3 -c 'import json,sys
+m = dict(l.rstrip("\n").split("\t", 1) for l in open(json.load(open(sys.argv[1]))["ref_map_file"]) if "\t" in l)
+print(m["fasta"])' "$project/.ugc-wgw/config.json")
+  refs_root=${fasta%%/hifi-wdl-resources-*}
+  if [ -z "$truth" ]; then
+    truth=$refs_root/$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["bundles"]["ugc-wgw-truth"]["install_subdir"])' "$code/references.lock")
+  fi
+  local smvar=$truth/HG002_GRCh38_v5.0q_smvar.$region.vcf.gz smbed=$truth/HG002_GRCh38_v5.0q_smvar.benchmark.$region.bed
+  local stvar=$truth/HG002_GRCh38_v5.0q_stvar.$region.vcf.gz stbed=$truth/HG002_GRCh38_v5.0q_stvar.benchmark.$region.bed
+  local f
+  for f in "$smvar" "$smvar.tbi" "$smbed" "$stvar" "$stvar.tbi" "$stbed"; do
+    [ -s "$f" ] || die "validate: no $f (the ugc-wgw-truth entry of references.lock: tests/smoke/prepare.sh --references-only installs it; --truth-dir names another directory)"
+  done
+  # the member's newest successful run of each per-sample stage with phased calls, at any version: the standalone route
+  # (singleton: DeepVariant's own call set) and the joint one (downstream: the member's slice of the GLnexus VCF) score differently
+  local runs
+  runs=$(python3 -c 'import glob, json, os, sys
+for stage in ("singleton", "downstream"):
+    best = None
+    for man in glob.glob(os.path.join(sys.argv[1], "samples", sys.argv[2], "*", stage, "current", "run_manifest.json")):
+        try:
+            ok = json.load(open(man)).get("status") == "success"
+        except (OSError, ValueError):
+            ok = False
+        if ok and (best is None or os.path.getmtime(man) > best[0]):
+            best = (os.path.getmtime(man), os.path.dirname(os.path.realpath(man)))
+    if best:
+        print(stage + "\t" + best[1])' "$results" "$member")
+  [ -n "$runs" ] || die "validate: $member has no successful singleton or downstream run under $results"
+  local base_sif aardvark_sif truvari_sif
+  base_sif=$(sif_of "$code/vendor/hifi-human-wgs-wdl/image_manifest.txt" quay.io/pacbio/pb_wdl_base)
+  aardvark_sif=$(sif_of "$code/image_manifest.ugc-wgw.txt" quay.io/biocontainers/aardvark)
+  truvari_sif=$(sif_of "$code/image_manifest.ugc-wgw.txt" quay.io/biocontainers/truvari)
+  local stamp out threads stage run small sv tag
+  stamp=$(date -u +%Y%m%dT%H%M%SZ); out=$smoke/logs/validate-$stamp; mkdir -p "$out"
+  threads=$(nproc); [ "$threads" -le 8 ] || threads=8
+  local -a bind=(--bind "$smoke,$code,$truth,$refs_root")
+  while IFS=$'\t' read -r stage run; do
+    small=$(find "$run/out/phased_small_variant_vcf" -name '*.vcf.gz' 2>/dev/null | head -1)
+    sv=$(find "$run/out/phased_sv_vcf" -name '*.vcf.gz' 2>/dev/null | head -1)
+    if [ -z "$small" ] || [ -z "$sv" ]; then log "validate: $run has no phased small-variant or SV VCF; skipped"; continue; fi
+    tag=$member-$stage
+    mkdir -p "$out/in-$tag"
+    log "validate $member ($stage): $run against GIAB HG002 v5.0q on $region ($truth)"
+    # the indices live in their own output directories: both next to each VCF here
+    ln -sfn "$small" "$out/in-$tag/small.vcf.gz"; ln -sfn "${small%/phased_small_variant_vcf/*}/phased_small_variant_vcf_index/$(basename "$small").tbi" "$out/in-$tag/small.vcf.gz.tbi"
+    ln -sfn "$sv" "$out/in-$tag/sv.vcf.gz"; ln -sfn "${sv%/phased_sv_vcf/*}/phased_sv_vcf_index/$(basename "$sv").tbi" "$out/in-$tag/sv.vcf.gz.tbi"
+    # the query: PASS records of the region where the member carries an alternate allele, genotypes only (the joint slice
+    # keeps hom-ref sites and GLnexus's FORMAT fields, which aardvark does not read)
+    apptainer exec "${bind[@]}" "$base_sif" bcftools view --no-version --apply-filters PASS,. --regions "$region" --include 'GT="alt"' \
+        --output-type u "$out/in-$tag/small.vcf.gz" \
+      | apptainer exec "${bind[@]}" "$base_sif" bcftools annotate --no-version --remove 'INFO,^FORMAT/GT' --output-type z \
+        --output "$out/in-$tag/small.query.vcf.gz" -
+    apptainer exec "${bind[@]}" "$base_sif" tabix --force --preset vcf "$out/in-$tag/small.query.vcf.gz"
+    apptainer exec "${bind[@]}" "$aardvark_sif" aardvark compare --threads "$threads" --reference "$fasta" --truth-vcf "$smvar" \
+        --query-vcf "$out/in-$tag/small.query.vcf.gz" --regions "$smbed" --output-dir "$out/aardvark-$tag" > "$out/aardvark-$tag.log" 2>&1 \
+      || die "validate: aardvark compare failed (see $out/aardvark-$tag.log)"
+    apptainer exec "${bind[@]}" "$truvari_sif" truvari bench -b "$stvar" -c "$out/in-$tag/sv.vcf.gz" --includebed "$stbed" --passonly \
+        --sizemin 50 --sizefilt 50 --pick ac -o "$out/truvari-$tag" > "$out/truvari-$tag.log" 2>&1 \
+      || die "validate: truvari bench failed (see $out/truvari-$tag.log)"
+    # GIAB's README for v5.0q recommends the refine step: the benchmark keeps complex SVs, whose representations differ
+    apptainer exec "${bind[@]}" "$truvari_sif" truvari refine --use-original-vcfs --reference "$fasta" --threads "$threads" \
+        "$out/truvari-$tag" >> "$out/truvari-$tag.log" 2>&1 \
+      || die "validate: truvari refine failed (see $out/truvari-$tag.log)"
+    printf '%s\t%s\n' "$stage" "$run" >> "$out/runs.tsv"
+  done <<< "$runs"
+  [ -s "$out/runs.tsv" ] || die "validate: nothing scored"
+  python3 - "$out" "$member" "$code" "$region" "${floors[@]+"${floors[@]}"}" <<'PY'
+import csv, datetime, gzip, json, sys
+out, member, code, region = sys.argv[1:5]
+floors = dict(f.split("=", 1) for f in sys.argv[5:])
+f4 = lambda v: "%.4f" % float(v)
+
+def header_value(path, prefix):
+    with gzip.open(path, "rt") as fh:
+        for line in fh:
+            if not line.startswith("##"):
+                return ""
+            if line.startswith(prefix):
+                return line[len(prefix):].strip().strip('"')
+    return ""
+
+upstream = json.load(open(f"{code}/upstream.lock")).get("sources") or {}
+tag = next((v.get("tag", "") for v in upstream.values() if isinstance(v, dict)), "")
+small_rows, sv_rows, md, bad = [], [], [], []
+unknown = [k for k in floors if k not in ("snv", "indel", "sv")]
+if unknown:
+    sys.exit("validate: --min-f1 kinds are snv, indel, sv; not " + ", ".join(unknown))
+for line in open(f"{out}/runs.tsv"):
+    stage, run = line.rstrip("\n").split("\t")
+    t = f"{member}-{stage}"
+    by = {}
+    for r in csv.DictReader(open(f"{out}/aardvark-{t}/summary.tsv"), delimiter="\t"):
+        if r["comparison"] == "GT" and r["region_label"] == "ALL" and r["variant_type"] in ("Snv", "Insertion", "Deletion", "JointIndel"):
+            kind = {"Snv": "snv", "JointIndel": "indel"}.get(r["variant_type"], r["variant_type"].lower())
+            by[kind] = [stage, kind, r["truth_total"], r["query_total"], r["truth_tp"], r["truth_fn"], r["query_fp"], f4(r["metric_recall"]),
+                        f4(r["metric_precision"]), f4(r["metric_f1"])]
+    small_rows += [by[k] for k in ("snv", "indel", "insertion", "deletion") if k in by]
+    sv = []
+    for step, path in (("bench", "summary.json"), ("refine", "refine.variant_summary.json")):
+        d = json.load(open(f"{out}/truvari-{t}/{path}"))
+        gt = d.get("gt_concordance")
+        sv.append([stage, step, str(d["base cnt"]), str(d["comp cnt"]), str(d["TP-base"]), str(d["FN"]), str(d["FP"]), f4(d["recall"]), f4(d["precision"]),
+                   f4(d["f1"]), f4(gt) if isinstance(gt, (int, float)) else "NA"])
+    sv_rows += sv
+    man = json.load(open(f"{run}/run_manifest.json"))
+    dv = header_value(f"{out}/in-{t}/small.vcf.gz", "##DeepVariant_version=")
+    glnexus = header_value(f"{out}/in-{t}/small.vcf.gz", "##GLnexusVersion=")
+    caller = ("DeepVariant " + dv if dv else "") + (" GLnexus " + glnexus if glnexus else "")
+    md.append("| " + " | ".join([datetime.date.today().isoformat(), str((man.get("ugc_pacbio_wgw") or {}).get("version", "")), tag, f"{member} {stage} ({region})",
+                                  caller.strip() or "-", header_value(f"{out}/in-{t}/sv.vcf.gz", "##source=") or "-",
+                                  " / ".join(by["snv"][7:10]), " / ".join(by["indel"][7:10]), " / ".join(sv[0][7:10]), " / ".join(sv[1][7:10]), sv[0][10]]) + " |")
+    f1 = {"snv": float(by["snv"][9]), "indel": float(by["indel"][9]), "sv": float(sv[1][9])}
+    bad += [f"{stage}: {k} F1 {f1[k]:.4f} below the floor {v}" for k, v in floors.items() if f1[k] < float(v)]
+with open(f"{out}/small.tsv", "w") as fh:
+    fh.write("stage\tkind\ttruth\tquery\tTP\tFN\tFP\trecall\tprecision\tF1\n" + "".join("\t".join(r) + "\n" for r in small_rows))
+with open(f"{out}/sv.tsv", "w") as fh:
+    fh.write("stage\tstep\ttruth\tquery\tTP\tFN\tFP\trecall\tprecision\tF1\tgt_concordance\n" + "".join("\t".join(r) + "\n" for r in sv_rows))
+with open(f"{out}/validation_rows.md", "w") as fh:
+    fh.write("\n".join(md) + "\n")
+if bad:
+    sys.exit("validate: " + "; ".join(bad))
+PY
+  log "validate: small variants ($member against the v5.0q small-variant benchmark on $region, genotype match, aardvark):"
+  column -t -s $'\t' "$out/small.tsv" >&2
+  log "validate: structural variants >= 50 bp (truvari bench, then refine):"
+  column -t -s $'\t' "$out/sv.tsv" >&2
+  log "validate: the rows for tests/smoke/VALIDATION.md:"
+  cat "$out/validation_rows.md" >&2
+  log "validate: written to $out"
+}
+
 # ---- eval -------------------------------------------------------------------
 cmd_eval() {  # cmd_eval sawfish23 [compare]: a second project with the eval-sawfish23 profile, its standalone phase, then the comparison; "compare" = the comparison alone, on finished runs
   local what=${1:-} step=${2:-}
@@ -469,18 +638,14 @@ cmd_entry() {  # the entry kinds: a variant project whose members enter as an al
   local up2=$results/samples/HG002/$version/upstream/current/out up3=$results/samples/HG003/$version/upstream/current/out
   if [ ! -d "$up2" ] || [ ! -d "$up3" ]; then die "entry: the main project needs successful upstream runs of HG002 and HG003 (run.sh all joint)"; fi
   local stamp out; stamp=$(date -u +%Y%m%dT%H%M%SZ); out=$smoke/logs/entry-$stamp; mkdir -p "$out"
-  local sif_dir sif_name
-  sif_dir=$(python3 -c 'import configparser,sys; c=configparser.ConfigParser(); c.read(sys.argv[1]); print(c.get("singularity", "image_cache"))' "$smoke/miniwdl.cfg")
-  sif_name=$(grep -o 'quay.io/pacbio/pb_wdl_base@sha256:[0-9a-f]*' "$repo/vendor/hifi-human-wgs-wdl/image_manifest.txt" | head -1)
-  sif_name="docker___${sif_name//\//_}"; sif_name="${sif_name//:/_}.sif"
-  [ -f "$sif_dir/$sif_name" ] || die "entry: pb_wdl_base SIF not in $sif_dir ($sif_name); populate the SIF cache first"
+  local base_sif; base_sif=$(sif_of "$repo/vendor/hifi-human-wgs-wdl/image_manifest.txt" quay.io/pacbio/pb_wdl_base)
   # the read-group sample name must be the sample id (the callers name their outputs after it): the main project's BAMs
   # carry SM:HG002 and SM:HG003, so the variant members get reheadered copies (samtools reheader rewrites the header only)
   local b2 b2i b3 b3i sv svi smv smvi gv gvi
   b2=$(ls "$up2"/aligned_hifi_reads/*.bam); b3=$(ls "$up3"/aligned_hifi_reads/*.bam)
   reheader_bam() {  # <in.bam> <old SM> <new SM> <out.bam>
-    apptainer exec --bind "$smoke","$repo" "$sif_dir/$sif_name" samtools reheader -c "sed -E 's/(\tSM:)$2(\t|\$)/\1$3\2/'" "$1" > "$4"
-    apptainer exec --bind "$smoke","$repo" "$sif_dir/$sif_name" samtools index "$4"
+    apptainer exec --bind "$smoke","$repo" "$base_sif" samtools reheader -c "sed -E 's/(\tSM:)$2(\t|\$)/\1$3\2/'" "$1" > "$4"
+    apptainer exec --bind "$smoke","$repo" "$base_sif" samtools index "$4"
   }
   reheader_bam "$b2" HG002 HG002b "$out/HG002b.aligned.bam"; b2=$out/HG002b.aligned.bam; b2i=$b2.bai
   reheader_bam "$b3" HG003 HG003v "$out/HG003v.aligned.bam"; b3=$out/HG003v.aligned.bam; b3i=$b3.bai
@@ -521,8 +686,8 @@ cmd_entry() {  # the entry kinds: a variant project whose members enter as an al
     log "entry: HG003r (HG003v's BAM under another id) was NOT refused (exit $rrc; log $out/HG003r.add.log)"; rc=1
   fi
   reheader_bam "$b3" HG003v HG003x "$out/HG003x.aligned.bam"
-  zcat "$smv" | sed -e 's/^chr20\t/20\t/' -e 's/ID=chr20,/ID=20,/' | apptainer exec --bind "$smoke","$repo" "$sif_dir/$sif_name" bgzip -c > "$out/HG003x.small_variants.vcf.gz"
-  apptainer exec --bind "$smoke","$repo" "$sif_dir/$sif_name" tabix -p vcf "$out/HG003x.small_variants.vcf.gz"
+  zcat "$smv" | sed -e 's/^chr20\t/20\t/' -e 's/ID=chr20,/ID=20,/' | apptainer exec --bind "$smoke","$repo" "$base_sif" bgzip -c > "$out/HG003x.small_variants.vcf.gz"
+  apptainer exec --bind "$smoke","$repo" "$base_sif" tabix -p vcf "$out/HG003x.small_variants.vcf.gz"
   printf 'sample_id\tsex\taligned_bam\taligned_bam_index\tsmall_variant_vcf\tsmall_variant_vcf_index\tsv_vcf\tsv_vcf_index\n' > "$out/bad.tsv"
   printf 'HG003x\tMALE\t%s\t%s\t%s\t%s\t%s\t%s\n' "$out/HG003x.aligned.bam" "$out/HG003x.aligned.bam.bai" "$out/HG003x.small_variants.vcf.gz" "$out/HG003x.small_variants.vcf.gz.tbi" "$sv" "$svi" >> "$out/bad.tsv"
   "${eugc[@]}" samples add "$out/bad.tsv"
@@ -537,17 +702,13 @@ cmd_entry() {  # the entry kinds: a variant project whose members enter as an al
 
 eval_compare() {  # <what> <base results> <comp results> <comp project>: truvari bench per member on the phased SV VCFs; the sawfish tasks' resources
   local what=$1 base=$2 comp=$3 comp_project=$4
-  local code version stamp out sif_dir sif_name
+  local code version stamp out truvari_sif
   code=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["code_dir"])' "$project/.ugc-wgw/config.json")
   version=$(cat "$code/VERSION")
   stamp=$(date -u +%Y%m%dT%H%M%SZ)
   out=$smoke/logs/eval-$what-$stamp
   mkdir -p "$out"
-  sif_dir=$(python3 -c 'import configparser,sys; c=configparser.ConfigParser(); c.read(sys.argv[1]); print(c.get("singularity", "image_cache"))' "$project/.ugc-wgw/miniwdl.cfg" 2>/dev/null || true)
-  [ -n "$sif_dir" ] || sif_dir=$(python3 -c 'import configparser,sys; c=configparser.ConfigParser(); c.read(sys.argv[1]); print(c.get("singularity", "image_cache"))' "$smoke/miniwdl.cfg")
-  sif_name=$(grep -o 'quay.io/biocontainers/truvari@sha256:[0-9a-f]*' "$code/image_manifest.ugc-wgw.txt" | head -1)
-  sif_name="docker___${sif_name//\//_}"; sif_name="${sif_name//:/_}.sif"
-  [ -f "$sif_dir/$sif_name" ] || die "eval: truvari SIF not in $sif_dir ($sif_name); populate the SIF cache from image_manifest.ugc-wgw.txt"
+  truvari_sif=$(sif_of "$code/image_manifest.ugc-wgw.txt" quay.io/biocontainers/truvari)
   local m b c
   printf 'member\tbase_calls\tcomp_calls\tTP_base\tTP_comp\tFP\tFN\tprecision\trecall\tF1\tgt_concordance\n' > "$out/sv.tsv"
   for m in $(members); do
@@ -558,7 +719,7 @@ eval_compare() {  # <what> <base results> <comp results> <comp project>: truvari
     mkdir -p "$out/in-$m"
     ln -sfn "$b" "$out/in-$m/base.vcf.gz"; ln -sfn "${b%/phased_sv_vcf/*}/phased_sv_vcf_index/$(basename "$b").tbi" "$out/in-$m/base.vcf.gz.tbi"
     ln -sfn "$c" "$out/in-$m/comp.vcf.gz"; ln -sfn "${c%/phased_sv_vcf/*}/phased_sv_vcf_index/$(basename "$c").tbi" "$out/in-$m/comp.vcf.gz.tbi"
-    apptainer exec --bind "$smoke","$code" "$sif_dir/$sif_name" truvari bench -b "$out/in-$m/base.vcf.gz" -c "$out/in-$m/comp.vcf.gz" -o "$out/truvari-$m" \
+    apptainer exec --bind "$smoke","$code" "$truvari_sif" truvari bench -b "$out/in-$m/base.vcf.gz" -c "$out/in-$m/comp.vcf.gz" -o "$out/truvari-$m" \
         --sizemin 50 --sizefilt 50 --pctseq 0 > "$out/truvari-$m.log" 2>&1 || { log "eval: truvari bench failed for $m (see $out/truvari-$m.log)"; continue; }
     python3 - "$m" "$out/truvari-$m/summary.json" >> "$out/sv.tsv" <<'PY'
 import json, sys
@@ -602,7 +763,8 @@ case "$1" in
   sacct) cmd_sacct ;;
   eval) shift; cmd_eval "$@" ;;
   entry) cmd_entry ;;
+  validate) shift; cmd_validate "$@" ;;
   -h|--help) usage ;;
-  singleton|upstream|intake|cohort_qc|cohort_call|downstream|cohort_merge|cohort_freq|cohort_methyl|assembly|assembly_call|cohort_pangenome) cmd_stage "$@" ;;
+  singleton|upstream|intake|cohort_qc|cohort_call|downstream|cohort_merge|cohort_freq|cohort_tr|cohort_methyl|assembly|assembly_call|cohort_pangenome) cmd_stage "$@" ;;
   *) die "unknown command $1" ;;
 esac

@@ -1156,7 +1156,7 @@ class SummaryEndToEnd(unittest.TestCase):
         self.assertEqual(cd["distributions"]["mito_unexplained"]["threshold"], 0.02)
         self.assertEqual([r["id"] for r in cd["members"]], ["S1", "S2"])
         self.assertEqual(cd["missing_members"], [])
-        self.assertEqual(set(cd["runs"]), {"cohort_qc", "cohort_merge", "cohort_freq", "cohort_methyl"})
+        self.assertEqual(set(cd["runs"]), {"cohort_qc", "cohort_merge", "cohort_freq", "cohort_tr", "cohort_methyl"})
         # identity: cohort_qc's tables read, no flag for two unrelated members without a pedigree; the section and the member pages
         self.assertTrue(cd["identity"]["available"])
         self.assertEqual((cd["identity"]["counts"], cd["identity"]["n_fail"]), ({}, 0))
@@ -1340,6 +1340,99 @@ class MethylationTest(unittest.TestCase):
         self.assertEqual(events["rows"][0]["sample_id"], "B")
         none = sp.parse_methyl_events(fixture_bytes("methyl_events", "C1", "cohort_methyl", members=["A", "B", "C"]).decode().splitlines(), genes=["NOPE"])
         self.assertEqual((none["n"], len(none["rows"])), (2, 0))
+
+
+class TandemRepeatEndToEnd(unittest.TestCase):
+    """A five-member cohort through the fake with cohort_tr: the cohort page's Tandem repeats section, the digest's
+    block (findings with the members' own dropout class, the outlier counts and the tr_outlier_count_high flag), the
+    members' pages, the unchanged per-sample digest schema, and a cohort whose cohort_tr failed."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.cfg = make_project(self.tmp)
+        self.proj = str(self.cfg.project_dir)
+        tsv = write_tsv(self.tmp, [{"sample_id": f"S{i}", "sex": "MALE" if i % 2 else "FEMALE", "hifi_reads": f"s{i}.bam"} for i in range(1, 6)])
+        self.assertEqual(run_cli(["--project", self.proj, "samples", "add", str(tsv)])[0], 0)
+        self.assertEqual(run_cli(["--project", self.proj, "cohort", "freeze", "C1", "--samples", str(write_ids(self.tmp, [f"S{i}" for i in range(1, 6)]))])[0], 0)
+        self.out_dir = self.cfg.results_dir / "reports" / "summary"
+
+    def test_parsers(self):
+        from .fixtures import fixture_bytes
+        members = ["S1", "S2", "S3", "S4", "S5"]
+        text = lambda name: fixture_bytes(name, "C1", "cohort_tr", members=members).decode().splitlines()  # noqa: E731
+        screen = sp.parse_tr_screen(text("tr_pathogenic_screen"))
+        self.assertEqual((screen["n_rows"], screen["by_class"]), (10, {"pathogenic": 1, "normal": 7, "intermediate": 1, "uncalled": 1}))
+        self.assertEqual([(f["sample_id"], f["trid"], f["class"], f["a1_copies"], f["a1_lps"]) for f in screen["findings"]],
+                         [("S1", "HD_HTT", "pathogenic", 45, 43), ("S2", "FXS_FMR1", "intermediate", 60, 58)])   # the worst class first
+        summ = sp.parse_tr_summary(text("tr_summary"))
+        self.assertEqual((summ["cohort"]["n_members"][""], summ["loci"]["outlier_status"]["common"], summ["parameters"]["outlier_mad_min"][""]), (5, 2, 5.0))
+        self.assertEqual(len(summ["source"]["tr_map_input"]["values"]), 2)                # both inputs kept
+        self.assertIn("CC BY 4.0", summ["source"]["tr_map_source"]["values"][0])
+        samples = sp.parse_tr_samples(text("tr_samples"))
+        self.assertEqual([r["n_outliers"] for r in samples], [1, 2, 3, 1, 40])
+        top = sp.parse_tr_outliers_top(text("tr_outliers_top"), per_member=1)
+        self.assertEqual((len(top["S1"]), top["S1"][0]["trid"], top["S1"][0]["z"], top["S5"][0]["al"]), (1, "chr1_1000_1090_CAG", 120, 450))
+        loci = sp.parse_tr_screen_loci(text("tr_screen_loci"))
+        self.assertEqual([(l["trid"], l["n_called"], l["call_note"], l["benign_max"]) for l in loci], [("HD_HTT", 5, "ok", 26), ("FXS_FMR1", 4, "few_uncalled", 44)])
+
+    def test_pages_digest_and_flag(self):
+        code, out, err = run_cli(["--project", self.proj, "submit", "--mode", "standalone", "--cohort", "C1"])
+        self.assertEqual(code, 0, err)
+        code, out, err = run_cli(["--project", self.proj, "summary", "--cohort", "C1"])
+        self.assertEqual(code, 0, err)
+        d1 = json.loads((self.out_dir / "S1.summary.json").read_text())
+        self.assertEqual(d1["schema"], 5)                                # the stage adds nothing to a per-sample digest
+        cd = json.loads((self.out_dir / "C1.summary.json").read_text())
+        trd = cd["tandem_repeats"]
+        self.assertTrue(trd["available"])
+        self.assertIn("cohort_tr", cd["runs"])
+        self.assertEqual(trd["counts"], {"tr_outlier_count_high": 1})    # 1, 2, 3, 1, 40: median 2, MAD 1, limit 5
+        self.assertEqual([f["code"] for f in trd["flags"]["S5"]], ["tr_outlier_count_high"])
+        self.assertIn("ancestry that is rare in this cohort", trd["flags"]["S5"][0]["message"])
+        rows = {r["id"]: r for r in cd["members"]}
+        self.assertEqual({k: v["tr_outliers"] for k, v in rows.items()}, {"S1": 1, "S2": 2, "S3": 3, "S4": 1, "S5": 40})
+        self.assertIn("tr_outlier_count_high", rows["S5"]["flags"])
+        self.assertEqual(rows["S5"]["qc_status"], "warn")
+        self.assertIn("tr_outliers", cd["distributions"])
+        self.assertEqual([(f["sample_id"], f["trid"], f["class"]) for f in trd["findings"]], [("S1", "HD_HTT", "pathogenic"), ("S2", "FXS_FMR1", "intermediate")])
+        self.assertIn("dropout", trd["findings"][0])                     # joined from the member's digest, not read by the stage
+        self.assertNotIn("screen", cd["callsets"]["cohort_tr"])          # the findings live in the block, once
+        self.assertEqual(len(cd["callsets"]["cohort_tr"]["screen_loci"]), 2)
+        page = (self.out_dir / "C1.summary.html").read_text()
+        for needle in ("Tandem repeats (cohort_tr)", "A research screen, not a diagnostic result", "Disease-locus screen (STRchive thresholds)",
+                       "Named loci", "Loci with the most outlier members", "few_uncalled", "CC BY 4.0", "tr_outlier_count_high",
+                       "Member x locus rows by class: normal 7"):
+            self.assertIn(needle, page, needle)
+        page1 = (self.out_dir / "S1.summary.html").read_text()
+        for needle in ("Against the cohort C1 (cohort_tr)", "Strongest expansion outliers", "chr4_90_260_GCC", "pathogenic"):
+            self.assertIn(needle, page1, needle)
+        page4 = (self.out_dir / "S4.summary.html").read_text()
+        self.assertIn("every called named locus is within its benign range", page4)
+        # without --cohort the sample page has no cohort block
+        code, out, err = run_cli(["--project", self.proj, "summary", "--samples", "S1", "--out-dir", str(self.tmp / "solo")])
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("Against the cohort", (self.tmp / "solo" / "S1.summary.html").read_text())
+
+    def test_optional_and_absent(self):
+        # cohort_tr fails: the submit reports it, cohort_methyl ran anyway, and the page says the stage has not run
+        code, out, err = run_cli(["--project", self.proj, "submit", "--mode", "standalone", "--cohort", "C1"], env={"UGC_WGW_FAKE_FAIL_STAGES": "cohort_tr"})
+        self.assertEqual(code, 1, err)
+        db = DB(self.cfg.db_path)
+        try:
+            self.assertEqual(db.latest_run("cohort", "C1", "cohort_tr", VERSION_OF(self.cfg)).status, "failed")
+            self.assertEqual(db.latest_run("cohort", "C1", "cohort_methyl", VERSION_OF(self.cfg)).status, "success")
+        finally:
+            db.close()
+        code, out, err = run_cli(["--project", self.proj, "summary", "--cohort", "C1"])
+        self.assertEqual(code, 0, err)
+        cd = json.loads((self.out_dir / "C1.summary.json").read_text())
+        self.assertFalse(cd["tandem_repeats"]["available"])
+        self.assertIn("cohort_tr has not run for this cohort", (self.out_dir / "C1.summary.html").read_text())
+        self.assertNotIn("Against the cohort", (self.out_dir / "S1.summary.html").read_text())
+
+
+def VERSION_OF(cfg) -> str:  # noqa: N802 - the version the test project runs at
+    return config.read_version(cfg.code_dir)
 
 
 class MethylationEndToEnd(unittest.TestCase):

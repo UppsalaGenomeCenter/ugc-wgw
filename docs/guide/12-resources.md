@@ -512,6 +512,19 @@ larger one. The worked policy above was written that way from the first
 ten samples; proposing rows from the accounting automatically stays a
 manual step.
 
+## The tandem-repeat stage
+
+`cohort_tr` scatters one `ugc_wgw_tr_locus_stats` per shard of
+`scatter_regions` (2 cpu, `stats_mem_gb` 2 GB): `bcftools query` streams
+the shard's records of the merged TRGT VCF, and the script holds one line
+at a time (a line is about 200 bytes per member, 10 kB and more at
+hundreds of members), so the task's time is bcftools's reading time and
+its memory flat. `ugc_wgw_tr_screen` (1 cpu, `screen_mem_gb` 2 GB) reads
+135 records and one pass of the trgt-lps table; `ugc_wgw_tr_gather` (2 cpu,
+`gather_mem_gb` 4 GB) concatenates and bgzips, holding the outlier pairs in
+memory. On the chr20 smoke cohort the whole stage is under two minutes;
+the figures at hundreds of members come from the first production run.
+
 ## The methylation layer and the intake stage
 
 `cohort_methyl`'s tasks are small: `ugc_wgw_methbat_build` reads every
@@ -567,3 +580,15 @@ against 28 min and 68 GB for 2.2.1 over the 864, so 2.3.0 became the
 default in 0.17.0. A `resources.tsv` row of 16 GB for `sawfish_discover`
 is safe with it (the task's own request is 128 GB). An evaluation profile
 is never applied to a production project.
+
+A comparison between two versions of a tool says whether something
+changed, not whether the calls are right. For that the smoke carries a
+truth-set score: `tests/smoke/run.sh validate` compares the smoke's HG002
+calls on chr20 with GIAB's HG002 v5.0q benchmark, small variants with
+aardvark and structural variants with truvari (bench, then refine), for
+the standalone route and the joint one, and prints the rows that
+`tests/smoke/VALIDATION.md` keeps per release. On the first run (0.17.0,
+DeepVariant 1.10.0, sawfish 2.3.0) the SNV F1 was 0.9985 for DeepVariant's
+own set and 0.9977 for the GLnexus slice, the indel F1 0.950 and 0.939, the
+SV F1 0.928 after refinement. It reports and records; `--min-f1` turns a
+figure into a gate once a few releases have shown its spread.

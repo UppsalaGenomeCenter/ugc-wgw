@@ -1,6 +1,6 @@
 version 1.0
 
-# ugc-pacbio-wgw — trgt merge scoped to one shard's contigs, and trgt-lps on the concatenated cohort TRGT VCF
+# ugc-pacbio-wgw — trgt merge scoped to one shard's contigs, trgt-lps per merge shard, and the gather of the shard tables
 # origin: none
 # see docs/DESIGN.md §7.6
 

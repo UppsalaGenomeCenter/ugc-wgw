@@ -830,6 +830,10 @@ task ugc_wgw_methyl_summary {
         pair = (rows[0][ci["baseline_category"]] + ":" + rows[0][ci["compare_category"]]) if rows else path.rsplit(".compare.", 1)[-1].rsplit(".tsv", 1)[0].replace("_vs_", ":")
         for label, n in sorted(Counter(c[ci["summary_comparison"]] or "none" for c in rows).items()):
             add("compare", pair, label, n)
+        # where the differing regions lie: the XX:XY pair is a check (chrX and little else), so the page says so
+        labelled = [c for c in rows if c[ci["summary_comparison"]] not in ("", "InsufficientData", "Uncategorized")]
+        for cls, n in sorted(Counter("chrX" if c[ci["chrom"]] == "chrX" else "chrY" if c[ci["chrom"]] == "chrY" else "autosomal" for c in labelled).items()):
+            add("compare_contigs", pair, cls, n)
         if note:
             add("notes", "compare", pair, note)
     with open(prefix + ".summary.tsv", "w") as out:

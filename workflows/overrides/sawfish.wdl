@@ -1,6 +1,6 @@
 version 1.0
 
-# ugc-pacbio-wgw — sawfish discover and call with the image as a task input (override of upstream task file: sawfish_image, default upstream's 2.2.1_build2; the eval-sawfish23 profile sets 2.3.0_build1; otherwise identical)
+# ugc-pacbio-wgw — sawfish discover and call with the image as a task input (override of upstream task file: sawfish_image, default PacBio's 2.3.0_build1 since 0.17.0, adopted 2026-11-09 after identical call sets and a 19-fold memory drop on the production cohort; upstream v4.0.0 pins 2.2.1_build2; otherwise identical)
 # origin: vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/sawfish.wdl @ v4.0.0
 # see docs/DESIGN.md §18 (2026-11-05), DERIVED_FILES.md, backends/hpc/profiles/eval-sawfish23.json
 
@@ -64,7 +64,7 @@ task sawfish_discover {
       description: "Memory to use in GiB"
     }
     sawfish_image: {
-      description: "ugc-wgw: the sawfish image as <name>@sha256:<digest> under runtime_attributes.container_registry (default upstream's 2.2.1_build2; the eval-sawfish23 profile sets 2.3.0_build1)"
+      description: "ugc-wgw: the sawfish image as <name>@sha256:<digest> under runtime_attributes.container_registry (default 2.3.0_build1 since 0.17.0; upstream v4.0.0 pins 2.2.1_build2)"
     }
     runtime_attributes: {
       description: "Runtime attribute structure"
@@ -85,7 +85,7 @@ task sawfish_discover {
     String out_prefix
     Int threads = 16
     Int mem_gb = 128
-    String sawfish_image = "sawfish@sha256:5cf8f02790ecb89e652885c57f103fc9597c41f75ee71be2c05510cbbdf68f59"
+    String sawfish_image = "sawfish@sha256:40b167ebdfa07643c918c45fb782f61bd598c38876fc654416d8539b2faa4cf2"
     RuntimeAttributes runtime_attributes
   }
 
@@ -132,7 +132,7 @@ task sawfish_discover {
   }
 
   runtime {
-    docker: "~{runtime_attributes.container_registry}/~{sawfish_image}"  # ugc-wgw: the image is an input (default 2.2.1_build2)
+    docker: "~{runtime_attributes.container_registry}/~{sawfish_image}"  # ugc-wgw: the image is an input (default 2.3.0_build1)
     cpu: threads
     memory: "~{mem_gb} GiB"
     disk: "~{disk_size} GB"
@@ -216,7 +216,7 @@ task sawfish_call {
       description: "Memory to use in GiB"
     }
     sawfish_image: {
-      description: "ugc-wgw: the sawfish image as <name>@sha256:<digest> under runtime_attributes.container_registry (default upstream's 2.2.1_build2; the eval-sawfish23 profile sets 2.3.0_build1)"
+      description: "ugc-wgw: the sawfish image as <name>@sha256:<digest> under runtime_attributes.container_registry (default 2.3.0_build1 since 0.17.0; upstream v4.0.0 pins 2.2.1_build2)"
     }
     runtime_attributes: {
       description: "Runtime attribute structure"
@@ -238,7 +238,7 @@ task sawfish_call {
     Array[String] copynum_summary_names
     Int threads = 16
     Int mem_gb = 32
-    String sawfish_image = "sawfish@sha256:5cf8f02790ecb89e652885c57f103fc9597c41f75ee71be2c05510cbbdf68f59"
+    String sawfish_image = "sawfish@sha256:40b167ebdfa07643c918c45fb782f61bd598c38876fc654416d8539b2faa4cf2"
     RuntimeAttributes runtime_attributes
   }
 
@@ -332,7 +332,7 @@ task sawfish_call {
   }
 
   runtime {
-    docker: "~{runtime_attributes.container_registry}/~{sawfish_image}"  # ugc-wgw: the image is an input (default 2.2.1_build2)
+    docker: "~{runtime_attributes.container_registry}/~{sawfish_image}"  # ugc-wgw: the image is an input (default 2.3.0_build1)
     cpu: threads
     memory: "~{mem_gb} GiB"
     disk: "~{disk_size} GB"

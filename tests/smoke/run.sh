@@ -12,7 +12,7 @@
 #                                                SLURM, runs one sample at a time (--inflight overrides);
 #                                                --hifiasm-threads sets stage_inputs.assembly.hifiasm_threads
 #                                                (the fat partition allocates whole 96-core nodes)
-#   run.sh <stage> [<subject>] [--mode M] [--retry [--max-attempts N]]   submit (or retry) one stage, then check
+#   run.sh <stage> [<subject>] [--mode M] [--retry [--max-attempts N]] [--any-version]   submit (or retry) one stage, then check
 #   run.sh check <stage> [<subject>]           check expected outputs of the current attempt
 #   run.sh all [standalone] [joint] [assembly]  the phases in that order (default: all three):
 #                                              standalone (SMOKE) -> joint (SMOKEJ) -> assembly (all four
@@ -259,6 +259,7 @@ cmd_stage() {
       --mode) mode="$2"; shift 2 ;;
       --retry) verb=retry; shift ;;
       --max-attempts) extra+=(--max-attempts "$2"); shift 2 ;;
+      --any-version) extra+=(--any-version); shift ;;   # a cohort stage over per-sample runs of an earlier version (the repo's VERSION moved on)
       -*) die "unknown option $1" ;;
       *) subject="$1"; shift ;;
     esac
@@ -602,6 +603,6 @@ case "$1" in
   eval) shift; cmd_eval "$@" ;;
   entry) cmd_entry ;;
   -h|--help) usage ;;
-  singleton|upstream|cohort_qc|cohort_call|downstream|cohort_merge|cohort_freq|assembly|assembly_call|cohort_pangenome) cmd_stage "$@" ;;
+  singleton|upstream|intake|cohort_qc|cohort_call|downstream|cohort_merge|cohort_freq|cohort_methyl|assembly|assembly_call|cohort_pangenome) cmd_stage "$@" ;;
   *) die "unknown command $1" ;;
 esac

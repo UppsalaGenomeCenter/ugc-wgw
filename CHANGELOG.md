@@ -3,6 +3,41 @@
 Release notes of the public copy. Each version corresponds to a verified
 offline bundle; the upstream tag it is built on is named first.
 
+## 0.17.0
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin (0.6.0) and
+the reference entries unchanged; no new image. What the first production
+cohort taught the 0.14.0 to 0.16.0 stages, and sawfish 2.3.0.
+
+- **sawfish 2.3.0 is the default** for structural-variant discovery and
+  calling (upstream v4.0.0 pins 2.2.1). On three whole genomes the call
+  sets were identical to 2.2.1's, record for record, with `discover` at
+  6 minutes and 3.6 GB instead of 28 minutes and 68 GB. Every per-sample
+  run started after the upgrade uses it; existing results are untouched.
+- **Identity: `related_hub`.** A member related, without a pedigree link,
+  to ten or more others (`related_hub_min`) is a contaminated or mixed
+  sample, not kin: it fails, and its pairs no longer count against its
+  partners. On an 864-member cohort two such samples had excluded about
+  600 members from the identity pass list.
+- **Mitochondria.** For members whose runs predate 0.15.0 the most
+  abundant mitorsaw haplotype is the major one, so the haplogroups that
+  `cohort_merge` classifies for them are counted on the cohort page and in
+  `mito.freq.tsv`.
+- **Methylation.** `ugc-wgw export --domains methyl` copies the comparison
+  files, and the cohort page says where each comparison's differing regions
+  lie (chrX, chrY, autosomes): the default `XX:XY` pair is a check as much
+  as a result.
+- **Moving a project to a new version.** `ugc-wgw upgrade --install` now
+  moves the rendered reference map with the engine paths; every command
+  refuses a project whose paths or map belong to another installed
+  version, and `submit` refuses a reference map that lacks a key the
+  stage's workflow reads, naming the keys, instead of failing inside the
+  engine.
+- **Summaries.** `summary` and `export` write each per-sample digest as it
+  is built and show progress, so an interrupted rebuild of a large cohort
+  resumes where it stopped (`--jobs N` builds in parallel).
+
 ## 0.16.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

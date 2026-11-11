@@ -29,7 +29,7 @@ from .report import CSS as REPORT_CSS
 from .report import JS as REPORT_JS
 from .report import Raw, _bytes, _esc, _table
 from .stages import mode_stages, namespace, sample_stages, stage_spec
-from .util import UgcError, diag, read_json, utc_now, write_json
+from .util import Meter, UgcError, diag, hms, read_json, utc_now, write_json
 
 DIGEST_SCHEMA = 5   # 5 (0.16.0): the methylation block gains the imprinting report; 4 (0.15.0): the mitorsaw block gained the collapsed chrM counts and the haplogroups; every per-sample digest rebuilds once per bump
 # The public repository (scripts/export-public.sh fills the owner); `project_url` in config.json overrides it.
@@ -54,6 +54,7 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "pedigree_relatedness_min": 0.35,     # a declared parent-child pair below this fails `pedigree_mismatch` ...
     "pedigree_relatedness_max": 0.65,     # ... as does one above this (a "parent" that is a duplicate)
     "related_relatedness_max": 0.2,       # an undeclared pair at or above this warns `related`
+    "related_hub_min": 10,                # a member related (undeclared) to this many members or more fails `related_hub`: contamination, not kinship; its partners are not flagged on its account
     "het_ratio_mad_max": 3.0,             # het/(het+hom-alt) beyond median ± this many MADs across the cohort warns `het_outlier`
     "methyl_events_mad_max": 3.0,         # a member's methylation events (cohort_methyl) beyond median + this many MADs across the cohort warns `methyl_outlier`
     "sex_unknown_fails": 1,               # 1: a sample no source could sex fails `sex_not_inferred`; 0: it warns
@@ -1480,15 +1481,28 @@ def collect_digests(cfg: Config, db: DB, code: CodeInfo, *, sample_ids: list[str
                 continue
         to_build.append(sid)
     if to_build:
+        # each digest is written the moment it is built: an interrupted run (hours for hundreds of whole-genome
+        # members, 30 to 40 s each on one process) resumes where it stopped, the written ones being fresh
+        meter = Meter(f"digests ({jobs} process{'es' if jobs > 1 else ''})")
         work = [(sources[sid], thr, y) for sid in to_build]
+
+        def keep(sid: str, digest: dict[str, object], i: int) -> None:
+            digest["qc"] = qc_flags(digest, thr)
+            write_json(out_dir / f"{sid}.summary.json", digest)
+            digests[sid] = digest
+            meter.update(i, len(work), sid)
+
         if jobs > 1 and len(work) > 1:
             with concurrent.futures.ProcessPoolExecutor(max_workers=jobs) as pool:
-                results = list(pool.map(_digest_job, work))
+                for i, (sid, digest) in enumerate(zip(to_build, pool.map(_digest_job, work)), 1):
+                    keep(sid, digest, i)
         else:
-            results = [_digest_job(w) for w in work]
-        for sid, digest in zip(to_build, results):
-            digests[sid] = digest
+            for i, (sid, w) in enumerate(zip(to_build, work), 1):
+                keep(sid, _digest_job(w), i)
+        meter.close(f"digests: {len(work)} built in {hms(meter.elapsed)}" if len(work) >= 10 else None)
     for sid, digest in digests.items():
+        if sid in to_build:
+            continue   # written above
         digest["qc"] = qc_flags(digest, thr)  # thresholds may have changed since the digest was written
         write_json(out_dir / f"{sid}.summary.json", digest)
     return Collected(digests=digests, sources=sources, rebuilt=to_build, skipped=skipped)

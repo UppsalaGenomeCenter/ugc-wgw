@@ -50,10 +50,23 @@ class HtmlChecker(HTMLParser):
             self.stack.pop()
 
 
+def ref_map_text(tmp: pathlib.Path) -> str:
+    """A reference map with every key of the shipped template (the driver refuses a map lacking a key an entrypoint
+    reads): `name` and `scatter_regions` as the fake engine expects, every other key a path that does not exist."""
+    keys = []
+    for line in (REPO / "references" / "ugc_wgw_ref_map.GRCh38_GIABv3.template.tsv").read_text().splitlines():
+        if line and not line.startswith("#") and "\t" in line:
+            keys.append(line.split("\t", 1)[0])
+    rows = {"name": "GRCh38_GIABv3", "scatter_regions": "/dev/null"}
+    for k in keys:
+        rows.setdefault(k, str(tmp / "nonexistent" / k))
+    return "".join(f"{k}\t{v}\n" for k, v in rows.items())
+
+
 def make_project(tmp: pathlib.Path, **kw: object) -> config.Config:
     tmp = pathlib.Path(tmp)
     ref = tmp / "ugc_wgw_ref_map.GRCh38_GIABv3.tsv"
-    ref.write_text("name\tGRCh38_GIABv3\nscatter_regions\t/dev/null\n")
+    ref.write_text(ref_map_text(tmp))
     cfg_file = tmp / "miniwdl.cfg"
     cfg_file.write_text("[scheduler]\n")
     args = dict(code=REPO, miniwdl=FAKE, cfg=cfg_file, ref_map=ref, poll_interval=0.05, max_inflight=4)

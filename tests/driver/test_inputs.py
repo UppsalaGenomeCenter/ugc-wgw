@@ -173,6 +173,25 @@ class InputsTest(unittest.TestCase):
         self.assertFalse(d["merge_mitochondria"])
         self.assertNotIn("mt_small_variant_vcfs", d)
 
+    def test_reference_map_keys(self):
+        """A map rendered by an older version lacks the keys the entrypoints read: refused before any job, naming them
+        (the 864's cohort_methyl at 0.16.0 failed in the engine with `Map key not found` on a 0.15.0 map)."""
+        from ugc_wgw.stages import ref_map_keys, wdl_path
+        keys = ref_map_keys(wdl_path(self.cfg.code_dir, "cohort_methyl"))
+        self.assertTrue({"methbat_map", "methbat_report_regions_tsv", "methbat_atlas_tsv", "name"} <= keys, keys)
+        self.assertIn("fasta", ref_map_keys(wdl_path(self.cfg.code_dir, "singleton")))   # through the override's imports
+        for sid in ("S1", "S2", "S3"):
+            seed_success(self.cfg, self.db, "singleton", "sample", sid, {"sample_id": sid, "inferred_sex": "MALE"})
+        ref = Path(self.cfg.ref_map_file)
+        full = ref.read_text()
+        ref.write_text("".join(line for line in full.splitlines(True) if not line.startswith(("methbat_map\t", "methbat_atlas_tsv\t"))))
+        with self.assertRaises(UgcError) as cm:
+            inputs.generate(self.ctx("cohort", "C1"), "cohort_methyl")
+        self.assertIn("lacks methbat_atlas_tsv, methbat_map", str(cm.exception))
+        self.assertIn("upgrade --install", str(cm.exception))
+        ref.write_text(full)
+        inputs.generate(self.ctx("cohort", "C1"), "cohort_methyl")
+
     def test_cohort_methyl(self):
         """The methylation layer: pileup, profile and report per member (null report + a warning for a run from before the
         task), the labels (sex group, then the project's methyl_label_columns as column=value), a member without a pileup

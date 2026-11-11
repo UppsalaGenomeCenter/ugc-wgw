@@ -3,6 +3,7 @@ import html
 import json
 import tempfile
 import unittest
+from unittest import mock
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -663,6 +664,38 @@ class IdentityTest(unittest.TestCase):
         self.assertIn("No data", sv.scatter([], []))
         self.assertIn("<circle", sv.scatter([], [("S1", 0.0, 0.0, "")]))   # one point: a degenerate range is widened
 
+    def test_related_hub(self):
+        """A member related to related_hub_min members or more is the anomaly (the 864 cohort's gos_0001, related to 858
+        of 863 with the highest heterozygosity): it fails `related_hub`, its partners are not flagged on its account, and
+        the pass list keeps them; a real pair among the partners is still handled by sheet order."""
+        from ugc_wgw import summary_cohort as sc
+        thr = dict(summary.DEFAULT_THRESHOLDS)
+        others = [f"M{i:02d}" for i in range(1, 13)]
+        pairs = [{"sample_a": "HUB", "sample_b": m, "relatedness": 0.25, "ibs0": 500, "expected": None} for m in others]
+        pairs.append({"sample_a": "M01", "sample_b": "M02", "relatedness": 0.3, "ibs0": 400, "expected": None})
+        order = ["HUB"] + others
+        members = [{"sample_id": s, "het_ratio": 0.76 if s == "HUB" else 0.63, "somalier_sex": "MALE"} for s in order]
+        digests = {s: {"sample": {"id": s, "sex_sheet": "MALE", "father_id": None, "mother_id": None}, "coverage": {"inferred_sex": ""},
+                       "identity": {"legacy": False, "somalier": "x"}} for s in order}
+        flags = sc.identity_flags(pairs, members, digests, order, thr)
+        self.assertEqual([(f["code"], f["severity"], f["value"]) for f in flags["HUB"] if f["code"] != "het_outlier"], [("related_hub", "fail", 12)])
+        self.assertIn("related at or above 0.2 to 12 members", flags["HUB"][0]["message"])
+        self.assertEqual(sorted(f["code"] for f in flags["M01"]), ["related"])          # its own pair with M02, not the hub
+        self.assertEqual(flags["M03"], [])
+        rows = [{"id": s, "present": True, "identity_status": "fail" if any(f["severity"] == "fail" for f in flags[s]) else "pass"} for s in order]
+        d = {"members": rows, "identity": {"available": True, "flags": flags, "pairs": pairs}, "thresholds": thr}
+        passed, excluded = sc.identity_pass(d, {s: i for i, s in enumerate(order)})
+        self.assertEqual(passed, ["M01"] + others[2:])
+        self.assertEqual([sid for sid, _w in excluded], ["HUB", "M02"])
+        self.assertIn("related at or above 0.2 to 12 members", dict(excluded)["HUB"])
+        # the hub found later in the sheet changes nothing for its partners
+        passed2, excluded2 = sc.identity_pass(d, {s: i for i, s in enumerate(others + ["HUB"])})
+        self.assertEqual(passed2, ["M01"] + others[2:])
+        # with a higher threshold nobody is a hub and the old rule applies: every partner warns `related`
+        loose = sc.identity_flags(pairs, members, digests, order, dict(thr, related_hub_min=20))
+        self.assertEqual(sorted(f["code"] for f in loose["M03"]), ["related"])
+        self.assertNotIn("related_hub", {f["code"] for f in loose["HUB"]})
+
     def test_flags_and_pass(self):
         from ugc_wgw import summary_cohort as sc
         thr = dict(summary.DEFAULT_THRESHOLDS)
@@ -854,6 +887,27 @@ class SummaryEndToEnd(unittest.TestCase):
         self.assertEqual(checker.titles, 1, path.name)
         self.assertNotIn('src="http', text)
         return text
+
+    def test_digests_are_written_as_built(self):
+        # a rebuild of hundreds of whole-genome members takes hours: the digests built before an interruption stay
+        # on disk and are reused by the next run, which builds only the missing ones
+        original, calls = summary._digest_job, []
+
+        def flaky(args):
+            calls.append(args[0].sample_id)
+            if len(calls) == 2:
+                raise RuntimeError("interrupted")
+            return original(args)
+
+        with mock.patch.object(summary, "_digest_job", flaky):
+            with self.assertRaises(RuntimeError):
+                run_cli(["--project", self.proj, "summary", "--samples", "S1", "S2"])
+        self.assertTrue((self.out_dir / "S1.summary.json").exists())
+        self.assertFalse((self.out_dir / "S2.summary.json").exists())
+        code, _, err = run_cli(["--project", self.proj, "summary", "--samples", "S1", "S2"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("S1: digest reused", err)
+        self.assertIn("S2: digest rebuilt", err)
 
     def test_sample_pages(self):
         code, out, err = run_cli(["--project", self.proj, "summary", "--samples", "S1", "S2"])
@@ -1338,7 +1392,7 @@ class MethylationEndToEnd(unittest.TestCase):
         code, out, err = run_cli(["--project", self.proj, "export", "--cohort", "C1", "--out", str(out_dir), "--domains", "methyl"])
         self.assertEqual(code, 0, err)
         names = sorted(p.name for p in out_dir.glob("C1.methyl.*"))
-        self.assertEqual(names, ["C1.methyl.background.tsv", "C1.methyl.events.tsv", "C1.methyl.imprinting.tsv", "C1.methyl.regions.tsv",
+        self.assertEqual(names, ["C1.methyl.background.tsv", "C1.methyl.compare.XX_vs_XY.tsv", "C1.methyl.events.tsv", "C1.methyl.imprinting.tsv", "C1.methyl.regions.tsv",
                                  "C1.methyl.samples.tsv", "C1.methyl.summary.tsv"])
 
     def test_anomalous_report_flags_the_sample(self):

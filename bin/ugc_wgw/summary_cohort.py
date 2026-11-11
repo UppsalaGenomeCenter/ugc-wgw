@@ -302,7 +302,8 @@ def identity_flags(pairs: list[dict[str, object]], members_tbl: list[dict[str, o
     """The cohort-level identity flags per member, from cohort_qc's tables (docs/guide/07-results.md, "Identity"):
     `duplicate` (fail, both members of a pair at or above duplicate_relatedness_min), `pedigree_mismatch` (fail, child and
     parent of a declared pair outside pedigree_relatedness_min..max, or missing from the table), `related` (warn, both
-    members of an undeclared pair at or above related_relatedness_max), `het_outlier` (warn, heterozygosity ratio beyond
+    members of an undeclared pair at or above related_relatedness_max), `related_hub` (fail, a member related that way to
+    related_hub_min members or more: contamination, whose pairs count against nobody else), `het_outlier` (warn, heterozygosity ratio beyond
     median ± het_ratio_mad_max scaled MADs, from four members), and `sex_mismatch` (warn) for a member whose own run
     predates the somalier extract when cohort_qc's chrX call disagrees with the sheet or the coverage inference."""
     flags: dict[str, list[dict[str, object]]] = {sid: [] for sid in order}
@@ -313,6 +314,31 @@ def identity_flags(pairs: list[dict[str, object]], members_tbl: list[dict[str, o
 
     dup_min, ped_min, ped_max, rel_max = (thr["duplicate_relatedness_min"], thr["pedigree_relatedness_min"],
                                           thr["pedigree_relatedness_max"], thr["related_relatedness_max"])
+    hub_min = int(thr.get("related_hub_min", 10))
+    # a member related to many others is the anomaly, not its partners: contamination inflates the shared heterozygous
+    # sites and so somalier's relatedness to everyone (the 864 cohort, 2026-11-09: one sample "related" to 858 of 863).
+    # The hubs are taken out one by one, the most connected first, until nobody reaches related_hub_min; their pairs do
+    # not count against anyone
+    undeclared: list[tuple[str, str, float]] = []
+    for p in pairs:
+        a, b, r = str(p.get("sample_a") or ""), str(p.get("sample_b") or ""), p.get("relatedness")
+        expected = p.get("expected")
+        if isinstance(r, (int, float)) and rel_max <= r < dup_min and not (isinstance(expected, (int, float)) and expected > 0):
+            undeclared.append((a, b, float(r)))
+    hubs: dict[str, int] = {}
+    while undeclared:
+        degree: dict[str, int] = {}
+        for a, b, _r in undeclared:
+            degree[a] = degree.get(a, 0) + 1
+            degree[b] = degree.get(b, 0) + 1
+        sid, n = max(degree.items(), key=lambda kv: (kv[1], kv[0]))
+        if n < hub_min:
+            break
+        hubs[sid] = n
+        undeclared = [t for t in undeclared if sid not in t[:2]]
+    for sid, n in hubs.items():
+        flag(sid, "related_hub", "fail", f"related at or above {rel_max:g} to {n} members with no pedigree link in the sheet (at least "
+             f"{hub_min}): a contaminated or mixed sample looks related to everyone; its partners are not flagged on its account", n, hub_min)
     rel: dict[tuple[str, str], float] = {}
     for p in pairs:
         a, b, r = str(p.get("sample_a") or ""), str(p.get("sample_b") or ""), p.get("relatedness")
@@ -324,7 +350,7 @@ def identity_flags(pairs: list[dict[str, object]], members_tbl: list[dict[str, o
         if r >= dup_min:
             for x, y in ((a, b), (b, a)):
                 flag(x, "duplicate", "fail", f"same individual as {y} (relatedness {r:.3f}, at or above {dup_min:g})", r, dup_min)
-        elif r >= rel_max and not declared:
+        elif r >= rel_max and not declared and a not in hubs and b not in hubs:
             for x, y in ((a, b), (b, a)):
                 flag(x, "related", "warn", f"related to {y} (relatedness {r:.3f}) with no pedigree link in the sheet", r, rel_max)
     for sid in order:
@@ -385,6 +411,8 @@ def identity_pass(d: dict[str, object], sheet_order: dict[str, int]) -> tuple[li
     thr: dict[str, float] = d.get("thresholds", {}) or {}  # type: ignore[assignment]
     rel_max = float(thr.get("related_relatedness_max", 0.2))
     pairs: list[dict[str, object]] = ident.get("pairs", []) or []  # type: ignore[assignment]
+    hubs = {sid for sid, fl in flags.items() if any(f.get("code") == "related_hub" for f in fl)}   # out as failures; their pairs count against nobody
+    pairs = [p for p in pairs if p.get("sample_a") not in hubs and p.get("sample_b") not in hubs]
     kept: list[str] = []
     excluded: list[tuple[str, str]] = []
     for sid in order:
@@ -606,9 +634,13 @@ def build_cohort_digest(cohort: Cohort, members: dict[str, dict[str, object]], c
         if values:
             distributions["methyl_events"] = {"label": "methylation events (cohort_methyl)", "digits": 0, "unit": "", "values": values, "median": med, "mad": mad,
                                               "outliers": sorted(mflags), "threshold": None, "direction": "max", "beyond_threshold": [], "below_threshold": []}
+        msumm: dict[str, dict[str, object]] = me_entry.get("summary") if isinstance(me_entry.get("summary"), dict) else {}  # type: ignore[assignment]
         methylation.update({"flags": mflags, "counts": {"methyl_outlier": len(mflags)},
                             "members": {sid: by_id_m.get(sid, {"sample_id": sid}) for sid in cohort.members},
-                            "legacy_reported": [sid for sid, r in by_id_m.items() if str(r.get("report_source")) == "stage"]})
+                            "legacy_reported": [sid for sid, r in by_id_m.items() if str(r.get("report_source")) == "stage"],
+                            # each comparison's summary_comparison counts and where its differing regions lie (chrX, chrY, autosomal)
+                            "comparisons": {pair: {"counts": counts, "contigs": (msumm.get("compare_contigs") or {}).get(pair, {})}
+                                            for pair, counts in (msumm.get("compare") or {}).items()}})
 
     sex: dict[str, object] = {"sheet": {}, "inferred": {}, "somalier": {}, "used": {}, "karyotype": {},
                               "mismatches": [r["id"] for r in present if "sex_mismatch" in r["flags"]],  # type: ignore[operator]
@@ -801,8 +833,18 @@ def _methyl_html(meth: dict[str, object], cme: dict[str, object], events_dist: d
                    "or few phased sites. The member table is <code>methyl_imprinting</code>; each member's page lists its regions.</p>")
     comp = summ.get("compare", {})
     if comp:
-        crow = [[pair, ", ".join(f"{lab} {sv.fmt(n)}" for lab, n in sorted(counts.items())), str((notes.get("compare") or {}).get(pair, ""))] for pair, counts in comp.items()]
-        body += "<h3>Group comparisons (methbat compare)</h3>" + _table(["pair (baseline:compare)", "summary_comparison counts", "note"], crow, cls="")
+        contigs: dict[str, dict[str, object]] = summ.get("compare_contigs", {}) or {}
+
+        def where(pair: str) -> str:
+            cls = {k: v for k, v in (contigs.get(pair) or {}).items() if isinstance(v, (int, float))}
+            total = sum(cls.values())
+            if not total:
+                return ""
+            return f"{sv.fmt(total)} differing region(s): " + ", ".join(f"{k} {sv.fmt(v)}" for k, v in sorted(cls.items(), key=lambda kv: -kv[1]))
+
+        crow = [[pair, ", ".join(f"{lab} {sv.fmt(n)}" for lab, n in sorted(counts.items())),
+                 "; ".join(x for x in (where(pair), str((notes.get("compare") or {}).get(pair, ""))) if x)] for pair, counts in comp.items()]
+        body += "<h3>Group comparisons (methbat compare)</h3>" + _table(["pair (baseline:compare)", "summary_comparison counts", "where, note"], crow, cls="")
         body += ("<p class='small muted'>The default <code>XX:XY</code> pair is a check as much as a result: chrX regions should differ and little else. "
                  "Each comparison file is an output of the stage.</p>")
     dec = summ.get("deconvolution", {}).get("top_cell_type", {}) or {}

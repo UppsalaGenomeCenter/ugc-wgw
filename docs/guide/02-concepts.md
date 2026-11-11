@@ -25,9 +25,12 @@ of the next, by reading the earlier run's `outputs.json`.
 ## Mode
 
 A **mode** is the stage sequence the driver walks: `standalone` is
-`singleton → cohort_merge → cohort_freq`, `joint` is
-`upstream → cohort_call → downstream → cohort_merge → cohort_freq`, `assembly`
-is `assembly → assembly_call → cohort_pangenome`. Every `submit`, `retry`,
+`singleton → cohort_qc → cohort_merge → cohort_freq → cohort_methyl`,
+`joint` is `upstream → cohort_qc → cohort_call → downstream → cohort_merge
+→ cohort_freq → cohort_methyl`, `assembly` is `assembly → assembly_call →
+cohort_pangenome`. A sample that enters as an aligned BAM or with its VCFs
+runs its own per-sample stages inside either cohort mode (chapter 05,
+entry kinds). Every `submit`, `retry`,
 `status` and `inputs` command takes `--mode`, default `standalone`, because
 the same stage can sit in different modes with different wiring: `downstream`
 in joint mode takes the cohort-called VCF, `cohort_merge` in standalone mode

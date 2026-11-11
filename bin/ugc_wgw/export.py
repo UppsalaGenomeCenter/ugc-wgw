@@ -30,7 +30,8 @@ COPY_DOMAINS: dict[str, tuple[str, tuple[tuple[str, str], ...]]] = {
     "tr": ("cohort_tr", (("tr_allele_spectrum", "spectrum"), ("tr_locus_summary", "loci"), ("tr_outlier_pairs", "outliers"),
                          ("tr_pathogenic_screen", "screen"), ("tr_dropout_table", "dropouts"), ("tr_summary", "summary"))),
     "methyl": ("cohort_methyl", (("cohort_background", "background"), ("methyl_summary", "summary"), ("methyl_regions", "regions"),
-                                 ("methyl_imprinting", "imprinting"), ("methyl_samples", "samples"), ("methyl_events", "events"))),
+                                 ("methyl_imprinting", "imprinting"), ("methyl_samples", "samples"), ("methyl_events", "events"),
+                                 ("comparisons", "compare"))),   # an array output: one file per pair, `<prefix>.compare.<baseline>_vs_<compare>.tsv`
 }
 ANCESTRY_SOURCE = ("cohort_qc", "qc_ancestry")   # somalier's ancestry TSV: `#sample_id`, `predicted_ancestry`, probabilities, PCs
 ANCESTRY_NOTE = "ancestry is somalier's projection onto the 1000 Genomes superpopulations (AFR, AMR, EAS, EUR, SAS): a description of structure, not an origin"
@@ -369,6 +370,12 @@ def mito_rows(digests: dict[str, dict[str, object]], cohort_haplogroups: list[di
         fp: dict[str, object] = mito.get("fingerprint") or {}  # type: ignore[assignment]
         collapsed: dict[str, object] = mito.get("collapsed") or {}  # type: ignore[assignment]
         flagged = any(f.get("code") == "mito_unexplained_high" for f in (_dig(m, "qc", "flags") or []) if isinstance(f, dict))  # type: ignore[union-attr]
+        major = str(collapsed.get("major_haplotype") or "")
+        if not major:
+            # a run before 0.15 has no collapsed summary: the most abundant haplotype is the major one, as the collapse defines it
+            # (the 864 cohort, 2026-11-09: 864 haplogroups made in cohort_merge and none counted, for want of this)
+            best = max((h for h in haps if isinstance(h, dict)), key=lambda h: _num(h.get("estimated_abundance")) or 0.0, default=None)
+            major = str(best.get("label") or "") if best else ""
         for h in haps:
             if not isinstance(h, dict):
                 continue
@@ -381,7 +388,7 @@ def mito_rows(digests: dict[str, dict[str, object]], cohort_haplogroups: list[di
                          "num_ref_variants": h.get("num_ref_variants"), "estimated_abundance": h.get("estimated_abundance"),
                          "unexplained_fraction": fp.get("unexplained_fraction"), "passing_explanation": fp.get("passing_explanation"),
                          "mito_unexplained_high": flagged, "haplogroup": hg, "haplogroup_quality": hq if hg else "",
-                         "haplogroup_source": source if hg else "", "major_haplotype": str(h.get("label")) == str(collapsed.get("major_haplotype") or ""),
+                         "haplogroup_source": source if hg else "", "major_haplotype": bool(major) and str(h.get("label")) == major,
                          "homoplasmic_sites": collapsed.get("homoplasmic"), "heteroplasmic_sites": collapsed.get("heteroplasmic"),
                          "het_vaf_max": collapsed.get("het_vaf_max")})
     return rows
@@ -505,6 +512,19 @@ def copy_outputs(run: RunRecord, specs: tuple[tuple[str, str], ...], out_dir: Pa
     absent: list[str] = []
     for name, suffix in specs:
         p = outs.opt(name)
+        if isinstance(p, list):
+            # an array output (the comparisons): each file keeps what distinguishes it, the part after `.<suffix>.` of its name
+            files = [f for f in p if isinstance(f, str) and Path(f).exists()]
+            if not files:
+                absent.append(name)
+                continue
+            for f in files:
+                tail = Path(f).name.split(f".{suffix}.", 1)[1] if f".{suffix}." in Path(f).name else Path(f).name
+                tail = tail[:-4] if tail.endswith(".tsv") else tail
+                dest = out_dir / f"{prefix}.{suffix}.{tail}.tsv"
+                shutil.copyfile(f, dest)
+                copied.append((dest, name))
+            continue
         if not isinstance(p, str) or not Path(p).exists():
             absent.append(name)
             continue

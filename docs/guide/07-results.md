@@ -128,7 +128,7 @@ made (chapter 08).
 | `qc_ancestry`, `qc_ancestry_html` | `.somalier-ancestry.tsv` and report: each member's superpopulation probabilities and principal components next to the 2,504 labelled 1000 Genomes samples; absent when the reference set is not installed. |
 | `somalier_extracts` | Every member's genotype sketch, cohort order. |
 
-The flags (`duplicate`, `pedigree_mismatch`, `related`, `het_outlier`) are
+The flags (`duplicate`, `pedigree_mismatch`, `related_hub`, `related`, `het_outlier`) are
 the driver's, computed on the cohort page from these tables ("Analysis
 summary" below); `ugc-wgw export --domains identity` copies the tables.
 
@@ -150,7 +150,8 @@ summary" below); `ugc-wgw export --domains identity` copies the tables.
 | `deconvolution` (with `run_deconvolve`) | `<sample_id>.GRCh38_GIABv3.methbat.deconvolution.json` per member: `metrics.normalized_fraction` per cell type of the atlas (nanomix 39Bisulfite, an example). |
 
 `ugc-wgw export --domains methyl` copies the background, summary, regions,
-imprinting, samples and events tables.
+imprinting, samples and events tables and the comparison files
+(`.compare.<baseline>_vs_<compare>.tsv`, one per pair).
 
 ### `intake`
 
@@ -493,8 +494,13 @@ of a pair at or above `duplicate_relatedness_min`, 0.9: the same
 individual, a re-delivered sample or monozygotic twins) and
 `pedigree_mismatch` (a declared parent-child pair outside
 `pedigree_relatedness_min`–`pedigree_relatedness_max`, 0.35–0.65: child and
-parent both; a sheet error as often as a swap) fail; `related` (an
-undeclared pair at or above `related_relatedness_max`, 0.2) and
+parent both; a sheet error as often as a swap) and `related_hub` (a member
+related that way to `related_hub_min`, 10, members or more with no
+pedigree link: contamination makes a sample look related to everyone, so
+the member fails and its partners are not flagged on its account; hubs are
+taken out one at a time, the most connected first) fail; `related` (an
+undeclared pair at or above `related_relatedness_max`, 0.2, neither member
+a hub) and
 `het_outlier` (heterozygosity ratio beyond the cohort's median ±
 `het_ratio_mad_max`, 3, scaled MADs: contamination or a sample mix) warn;
 `methyl_outlier` (a member's methylation events against the cohort
@@ -522,9 +528,14 @@ reused while the runs it came from are unchanged and its schema is current
 haplogroups in the mitorsaw block; 0.14.0 to schema 3: every digest
 rebuilds once after each) and rebuilt otherwise
 (`--force` rebuilds all). Building one costs
-about 15 s of pure Python per
-sample (the 500 bp mosdepth bed and the TRGT outputs are streamed);
-`--jobs N` builds N in parallel. Set `project_url` in `config.json` to the
+about 15 s of pure Python on the chr20 smoke data and 30 to 40 s for a
+whole-genome sample (the 937,000-locus TRGT VCF and the 500 bp mosdepth
+bed, six million windows, are streamed), so the first `summary` after a
+schema change rebuilds a cohort of 864 in seven to ten hours on one
+process; `--jobs N` builds N in parallel (864 members in about half an hour
+with 16), and a progress line says how many are done and how long is left.
+Each digest is written the moment it is built, so an interrupted run
+resumes where it stopped. Set `project_url` in `config.json` to the
 repository the pages should link to.
 
 ## Cohort tables
@@ -555,7 +566,7 @@ appended.
 | `C1.mito.freq.tsv` | one per `kind` (`haplogroup`, `macro_haplogroup`: its first letter) × value × stratum | `count`, `fraction`, `n_called`, `n_members`, over each member's major haplotype |
 | `C1.assembly.tsv` | one per member with an assembly | the flat assembly summary the cohort page draws (haplotype lengths, NG50, Flagger, reliable fraction, concordance, both callers' counts, karyotype) |
 | `C1.identity.*.tsv`, `C1.tr.*.tsv` | copies | the tables of `cohort_qc` and `cohort_tr`, when the stage has run for the cohort in this mode; skipped with a message otherwise |
-| `C1.methyl.background.tsv`, `.summary.tsv`, `.regions.tsv`, `.imprinting.tsv`, `.samples.tsv`, `.events.tsv` | copies | `cohort_methyl`'s tables (chapter 07 above); `C1.methyl.events.tsv` is the one to filter by a gene list |
+| `C1.methyl.background.tsv`, `.summary.tsv`, `.regions.tsv`, `.imprinting.tsv`, `.samples.tsv`, `.events.tsv`, `.compare.<baseline>_vs_<compare>.tsv` | copies | `cohort_methyl`'s tables (chapter 07 above); `C1.methyl.events.tsv` is the one to filter by a gene list |
 | `export_manifest.json` | | ugc-wgw version, the cohort's freeze, the mode, the digest schema and thresholds, the strata used, the run ids read per member and per cohort stage, the domains written or skipped, every file with its rows, bytes and sha256 |
 
 Frequencies are computed over the members with a call: `n_called` is the

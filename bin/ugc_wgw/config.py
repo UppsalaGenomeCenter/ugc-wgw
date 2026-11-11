@@ -351,10 +351,14 @@ def check_engine_paths(cfg: "Config") -> str:
     if vdir is not None:
         stray = [f"{k} = {v}" for k, v in (("miniwdl", cfg.miniwdl), ("miniwdl_cfg", cfg.miniwdl_cfg), ("venv_dir", cfg.venv_dir))
                  if v is not None and not Path(v).resolve().is_relative_to(vdir)]
+        # the reference map: the site's own file anywhere is fine; one rendered under another version's directory is not
+        rm = Path(cfg.ref_map_file).resolve()
+        if rm.is_relative_to(vdir.parent) and not rm.is_relative_to(vdir):
+            stray.append(f"ref_map_file = {cfg.ref_map_file}")
         if stray:
             raise UgcError(f"the project's code_dir is {vdir.name} but " + "; ".join(stray) + f" (not under {vdir}): every "
                            f"engine path must belong to one installed version, else miniwdl resolves images from another "
-                           f"version's SIF directory; {remedy}")
+                           f"version's SIF directory and the workflows read another version's reference map; {remedy}")
     return version
 
 
@@ -366,15 +370,19 @@ def upgrade_project(cfg: "Config", install: Path) -> tuple[str, str, dict[str, t
     old_version = read_version(cfg.code_dir)
     new_version = read_version(paths["code"])
     changes: dict[str, tuple[str, str]] = {}
+    # the installer renders the map into <root>/versions/<v>/references/: a map under the old version dir (or, for a
+    # checkout, under the old code dir) moves to the same place under the new one; a map elsewhere is the site's and stays
     ref_map = cfg.ref_map_file
+    old_root = installed_version_dir(cfg.code_dir) or cfg.code_dir.resolve()
+    new_root = installed_version_dir(paths["code"]) or paths["code"].resolve()
     try:
-        rel = cfg.ref_map_file.resolve().relative_to(cfg.code_dir.resolve())
+        rel = cfg.ref_map_file.resolve().relative_to(old_root)
     except ValueError:
         rel = None
     if rel is not None:
-        candidate = paths["code"] / rel
+        candidate = new_root / rel
         if not candidate.exists():
-            raise UgcError(f"the reference map {cfg.ref_map_file} lives under the old code dir but {candidate} does not exist "
+            raise UgcError(f"the reference map {cfg.ref_map_file} lives under {old_root} but {candidate} does not exist "
                            f"(was the bundle installed with its references? install-bundle.sh renders it)")
         ref_map = candidate
     for key, old, new in (("code_dir", cfg.code_dir, paths["code"]), ("miniwdl", cfg.miniwdl, paths["miniwdl"]),

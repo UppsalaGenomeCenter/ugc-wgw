@@ -15,7 +15,7 @@ from .config import Config
 from .db import DB, Cohort, RunRecord, SampleRecord
 from .log import LOGGER
 from .outputs import MissingOutputError, Outputs
-from .stages import declared_calls, declared_inputs, namespace, sample_stages, stage_spec, wdl_path
+from .stages import declared_calls, declared_inputs, namespace, sample_stages, stage_spec, wdl_path, ref_map_keys
 from .util import UgcError, read_json, sha256_file, write_json
 
 
@@ -767,7 +767,25 @@ def generate(ctx: BuildContext, stage: str) -> tuple[dict[str, object], list[dic
     doc = {k: v for k, v in doc.items() if v is not None}
     prefixed = {f"{namespace(stage)}.{k}": v for k, v in doc.items()}
     check(ctx.cfg.code_dir, stage, prefixed)
+    check_ref_map(ctx, stage)
     return prefixed, list(ctx.member_runs)
+
+
+def check_ref_map(ctx: BuildContext, stage: str) -> None:
+    """Refuse a reference map that lacks a key the entrypoint reads (a map rendered by an older version, kept by a
+    project that moved: the engine would fail late with `Map key not found`)."""
+    wdl = wdl_path(ctx.cfg.code_dir, stage)
+    needed = ref_map_keys(wdl)
+    if not needed:
+        return
+    if not Path(ctx.cfg.ref_map_file).exists():
+        raise UgcError(f"{stage}: the reference map {ctx.cfg.ref_map_file} does not exist (config.json ref_map_file)")
+    missing = sorted(needed - set(_ref_map(ctx)))
+    if missing:
+        raise UgcError(f"{stage}: the reference map {ctx.cfg.ref_map_file} lacks {', '.join(missing)}, read by "
+                       f"{stage_spec(stage).wdl}: the map was rendered by an older version; `ugc-wgw --project "
+                       f"{ctx.cfg.project_dir} upgrade --install <root>/current` points the project at the installed "
+                       f"version's map (<root>/versions/<v>/references/), or set ref_map_file in config.json to it")
 
 
 def write_inputs(path: Path, doc: dict[str, object]) -> str:

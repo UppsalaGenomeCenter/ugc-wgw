@@ -40,11 +40,11 @@ under `<results>/<samples|cohorts>/<id>/<v>/<stage>/`.
 flowchart LR
   subgraph standalone
     direction LR
-    a1(["singleton"]) --> a0{{"cohort_qc"}} --> a2{{"cohort_merge"}} --> a3{{"cohort_freq"}}
+    a1(["singleton"]) --> a0{{"cohort_qc"}} --> a2{{"cohort_merge"}} --> a3{{"cohort_freq"}} --> a4{{"cohort_methyl"}}
   end
   subgraph joint
     direction LR
-    b1(["upstream"]) --> b0{{"cohort_qc"}} --> b2{{"cohort_call"}} --> b3(["downstream"]) --> b4{{"cohort_merge"}} --> b5{{"cohort_freq"}}
+    b1(["upstream"]) --> b0{{"cohort_qc"}} --> b2{{"cohort_call"}} --> b3(["downstream"]) --> b4{{"cohort_merge"}} --> b5{{"cohort_freq"}} --> b6{{"cohort_methyl"}}
   end
   subgraph assembly
     direction LR
@@ -58,8 +58,8 @@ identity check, is the exception: the stages after it never wait for it.
 Text version:
 
 ```
-standalone:  singleton ──► cohort_qc ──► cohort_merge ──► cohort_freq
-joint:       upstream ──► cohort_qc ──► cohort_call ──► downstream ──► cohort_merge ──► cohort_freq
+standalone:  singleton ──► cohort_qc ──► cohort_merge ──► cohort_freq ──► cohort_methyl
+joint:       upstream ──► cohort_qc ──► cohort_call ──► downstream ──► cohort_merge ──► cohort_freq ──► cohort_methyl
 assembly:    assembly ──► assembly_call ──► cohort_pangenome
              per-sample stage    per-cohort stage (waits for every member)
 ```

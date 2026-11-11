@@ -120,6 +120,12 @@ version does ship means the project's `miniwdl.cfg` is an older version's,
 whose `image_cache` predates the image: since 0.16.0 the driver refuses such
 a project before submitting (`every engine path must belong to one
 installed version`); move it with `ugc-wgw upgrade --install` (chapter 10).
+A run that fails at once with `error_class=OutOfBounds … node=decl-<name>:
+Map key not found` read a reference map that lacks a key the workflow
+needs: the project's `ref_map_file` is a map rendered by an older version
+(`versions/<old>/references/`). The driver now refuses that before
+submitting, naming the keys; `upgrade --install` moves the project to the
+installed version's map.
 
 Apptainer runs with `--containall --no-mount hostfs`: only the task's
 working directory and the declared inputs are visible inside the container,

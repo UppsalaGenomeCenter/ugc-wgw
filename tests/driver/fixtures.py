@@ -461,7 +461,8 @@ def _methyl_summary(members: list[str], legacy: list[str], labels: list[str]) ->
         rows.append(f"notes\tlabel_below_min\tALL\t{len(members)} member(s): comparisons against ALL are InsufficientData")
     if n_events:
         rows += [f"genes\tmembers_with_event\tGENEA\t{n_events}", f"genes\tmembers_with_event\tGENEB\t{n_events}", f"region_type\tn_events\tpromoter\t{n_events}"]
-    rows += ["compare\tXX:XY\tInsufficientData\t4", "notes\tcompare\tXX:XY\tcompare XX:XY: 1 vs 1 members, below min_samples 10: every row is InsufficientData"]
+    rows += ["compare\tXX:XY\tInsufficientData\t4", "compare\tXX:XY\tHypoMethylated\t2", "compare_contigs\tXX:XY\tchrX\t2",
+             "notes\tcompare\tXX:XY\tcompare XX:XY: 1 vs 1 members, below min_samples 10: every row is InsufficientData"]
     return "\n".join(rows) + "\n"
 
 

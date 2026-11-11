@@ -107,6 +107,21 @@ class RowsTest(unittest.TestCase):
         self.assertEqual((rows[0]["haplogroup"], rows[1]["n_haplotypes"]), ("", 2))
         tg = export.targeted_summary({"S1": d}, {"ALL": {"S1": "ALL"}})
         self.assertEqual((tg["mito"]["multi_haplotype"], tg["mito"]["minor_abundance_median"], tg["mito"]["flagged"]), (["S1"], 0.03, ["S1"]))
+        # a run before 0.15 (no collapsed summary, no haplogroups of its own): the haplogroups come from cohort_merge's gathered
+        # table and the most abundant haplotype is the major one, so the cohort counts it (the 864 cohort counted none)
+        legacy = make_digest("S3")
+        legacy["targeted"]["mitorsaw"]["collapsed"] = {}
+        for h in legacy["targeted"]["mitorsaw"]["haplotypes"]:
+            h["haplogroup"] = ""
+        gathered = [{"sample_id": "S3", "haplotype": "hap_0", "haplogroup": "H1h1", "quality": 0.87, "made_in_stage": "yes"},
+                    {"sample_id": "S3", "haplotype": "hap_1", "haplogroup": "H1", "quality": 0.8, "made_in_stage": "yes"}]
+        rows = export.mito_rows({"S3": legacy}, gathered)
+        self.assertEqual([(r["haplotype"], r["haplogroup"], r["haplogroup_source"], r["major_haplotype"]) for r in rows],
+                         [("hap_0", "H1h1", "cohort_merge", True), ("hap_1", "H1", "cohort_merge", False)])
+        self.assertEqual(export.haplogroup_rows(rows), [{"sample_id": "S3", "haplogroup": "H1h1", "macro_haplogroup": "H", "called": True}])
+        tg = export.targeted_summary({"S3": legacy}, {"ALL": {"S3": "ALL"}}, cohort_haplogroups=gathered)
+        self.assertEqual((tg["mito"]["n_haplogrouped"], tg["mito"]["haplogroups"]), (1, {"H1h1": 1}))
+        self.assertEqual(export.mito_rows({"S3": legacy})[0]["major_haplotype"], True)   # abundance decides even without a gathered table
 
     def test_member_and_variant_rows(self):
         d = make_digest("S1")

@@ -71,9 +71,10 @@ ugc-wgw --project /proj/ugc/projects/cohort2026 upgrade --install /proj/ugc/curr
 ```
 
 (or `--install <root>/versions/<v>`): it rewrites the four engine paths to
-that version, moves the reference map to the same place under the new code
-directory when it lived under the old one (a reference map elsewhere is
-kept as it is), keeps the previous file as `config.json.<old version>`,
+that version, moves the reference map to the same place under the new
+version's directory when it lived under the old one (the installer renders
+it into `versions/<v>/references/`; a reference map elsewhere is the
+site's and is kept as it is), keeps the previous file as `config.json.<old version>`,
 migrates the state database and records a `project.upgraded` event. The
 driver reads `VERSION` from `code_dir` on every command, so after the move
 every subject is "not done" at the new version and `submit` starts from the
@@ -87,7 +88,11 @@ stage that did not exist at the old version has no workflow file there),
 and `every engine path must belong to one installed version` when the paths
 mix versions (then miniwdl resolves images from another version's
 `image_cache`, finds a newer image missing and tries the registry, which
-the cluster cannot reach). Both messages name the `upgrade` command; the
+the cluster cannot reach; a reference map rendered under another version's
+directory is refused the same way, and `submit` also refuses a map that
+lacks a key the stage's workflow reads, naming the keys, where the engine
+would have failed late with `Map key not found`). Both messages name the
+`upgrade` command; the
 alternative is always the project's own driver,
 `<root>/versions/<v>/code/bin/ugc-wgw`. A new project against the new
 install (chapter 05) with the same sheet and cohort list also works, at the

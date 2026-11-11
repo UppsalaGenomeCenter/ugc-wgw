@@ -172,6 +172,31 @@ def declared_input_specs(wdl: Path) -> list[InputSpec]:
     return out
 
 
+_REF_KEY_RE = re.compile(r'ref_map\["([A-Za-z_][\w]*)"\]')
+_IMPORT_RE = re.compile(r'^\s*import\s+"([^"]+)"', re.M)
+
+
+def ref_map_keys(wdl: Path) -> set[str]:
+    """The `ref_map["key"]` reads of an entrypoint: its own file and, recursively, the files it imports outside
+    vendor/ (upstream's keys are the template's by construction; ours change between versions, and a project whose
+    rendered map predates the version fails late in the engine with "Map key not found")."""
+    keys: set[str] = set()
+    seen: set[Path] = set()
+    todo = [Path(wdl).resolve()]
+    while todo:
+        f = todo.pop()
+        if f in seen or "vendor" in f.parts:
+            continue
+        seen.add(f)
+        try:
+            text = f.read_text()
+        except OSError:
+            continue
+        keys.update(_REF_KEY_RE.findall(text))
+        todo.extend((f.parent / imp).resolve() for imp in _IMPORT_RE.findall(text))
+    return keys
+
+
 def declared_inputs(wdl: Path) -> dict[str, bool]:
     """{name: required} of the workflow's input block. Required = no default and not optional (`?`)."""
     return {spec.name: spec.required for spec in declared_input_specs(wdl)}

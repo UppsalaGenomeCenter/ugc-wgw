@@ -31,7 +31,8 @@ ugc-wgw init /proj/ugc/projects/cohort2026 --install /proj/ugc/current \
 A profile is a JSON file with the project keys that depend on the cluster
 and the sample set: `stage_inputs`, `deepvariant`, `gpu_type`,
 `parabricks_gpus`, `max_inflight`, `poll_interval`, `assembly_use_parents`,
-`pangenome_sv_cohort`, `resource_retry_max`, `resource_retry_factor`,
+`pangenome_sv_cohort`, `methyl_label_columns`, `methyl_genes_of_interest`,
+`resource_retry_max`, `resource_retry_factor`,
 `learn_resources`, `prices`, `summary_thresholds` and
 `input_thresholds`, plus a `description`. `NAME` is looked
 up as `<prefix>/profiles/NAME.json` (the installer places the examples
@@ -94,6 +95,8 @@ sorted by key.
 | `poll_interval` | `30.0` | Seconds between polls. |
 | `assembly_use_parents` | `true` | Master switch for trio binning in assembly mode. |
 | `pangenome_sv_cohort` | `""` | The cohort whose `cohort_merge` SV VCF `cohort_pangenome` compares its graph with (truvari); empty = the pangenome cohort's own merge, when it has one. |
+| `methyl_label_columns` | `[]` | Sample-sheet columns whose values label the members in `cohort_methyl`'s background, as `column=value`, after the sex group (chapter 08). A column no member has is refused at `submit`. |
+| `methyl_genes_of_interest` | `[]` | Gene symbols the cohort page's Methylation section always lists, with or without events. |
 | `deepvariant` | `"cpu"` | `cpu`, `gpu` or `parabricks`: fills `use_gpu`, `use_parabricks_deepvariant` and Parabricks' GPU count for `singleton` and `upstream`; the GPU type goes to the plugin at submit (chapter 12). |
 | `gpu_type`, `parabricks_gpus` | `""`, `4` | The gres type (applied by the plugin at submit, not an input: changing it keeps the call cache; empty = any GPU of the partition) and the Parabricks GPU count (even) behind that switch. |
 | `stage_inputs` | `{}` | Per-stage input overrides, below. |

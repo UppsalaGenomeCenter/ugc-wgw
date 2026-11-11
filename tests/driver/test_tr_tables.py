@@ -232,6 +232,43 @@ class ScreenTest(unittest.TestCase):
         self.assertEqual((loci["SCA_MISSING"]["n_called"], loci["SCA_MISSING"]["call_note"]), ("0", "mostly_uncalled"))   # no record at all
         self.assertEqual(s[("M1", "SCA_MISSING")]["class"], "uncalled")
 
+    def test_not_assessable_and_the_locus_notes(self):
+        """A locus the reference table marks not assessable is reported and classed nothing; the per-locus note tells a
+        locus without a benign maximum (everyone below_pathogenic: fine) from one whose benign range the cohort misses."""
+        table = self.tmp / "loci.tsv"
+        lines = table.read_text().splitlines()
+        out = []
+        for line in lines:
+            if line.startswith("##"):
+                out.append(line)
+            elif line.startswith("trid\t"):
+                out.append(line + "\tassessable\tassessable_note")
+            else:
+                no = line.startswith("HD_HTT\t")
+                out.append(line + ("\tno\tthe thresholds count something else" if no else "\tyes\t"))
+        table.write_text("\n".join(out) + "\n")
+        htt = self.record("chr4", 100, 200, "HD_HTT", "CAG,CCG", [60, 150], {
+            "M1": "1/2:60,150:60-60,148-153:20,12:17_3,45_5:.:0.99,0.95:.,.:.",     # 45 CAG would be pathogenic
+            "M2": "1/1:60,60:60-60,60-60:15,14:17_3,17_3:.:0.99,0.99:.,.:.",
+        })
+        arx = self.record("chrX", 900, 960, "PRTS_ARX", "NGC", [30, 36], {m: "1:30:.:9:10:.:0.9:.:." for m in ("M1", "M2", "M3")}
+                          | {"F1": "1/1:30,30:.:9,9:10,10:.:0.9,0.9:.,.:.", "F2": "1/2:30,36:.:9,9:10,12:.:0.9,0.9:.,.:."})
+        polg = self.record("chr15", 300, 330, "CPEO_POLG", "GCT", [15], {m: "1/1:15,15:.:9,9:5,5:.:0.9,0.9:.,.:." for m in self.members})   # benign is 10..10
+        _res, s, loci = self.run_screen([htt, arx, polg])
+        m1 = s[("M1", "HD_HTT")]
+        self.assertEqual((m1["class"], m1["a1_class"], m1["a1_copies"], m1["n_alleles_pathogenic"], m1["mode_match"], m1["borderline"], m1["notes"]),
+                         ("not_assessable", "not_assessable", "45", "0", "none", "no", "lps_missing"))
+        self.assertEqual((loci["HD_HTT"]["call_note"], loci["HD_HTT"]["n_not_assessable"], loci["HD_HTT"]["n_pathogenic"], loci["HD_HTT"]["frac_alleles_above_benign"]),
+                         ("not_assessable", "2", "0", "0"))
+        # no benign maximum and nobody near the pathogenic minimum: every row below_pathogenic, the locus ok
+        self.assertEqual({s[(m, "PRTS_ARX")]["class"] for m in self.members}, {"below_pathogenic"})
+        self.assertEqual((loci["PRTS_ARX"]["call_note"], loci["PRTS_ARX"]["n_below_pathogenic"], loci["PRTS_ARX"]["n_above_benign"], loci["PRTS_ARX"]["frac_alleles_above_benign"]),
+                         ("ok", "5", "0", "0"))
+        # the whole cohort below the benign minimum: the thresholds and the frame disagree, in the other direction
+        self.assertEqual({s[(m, "CPEO_POLG")]["class"] for m in self.members}, {"below_benign"})
+        self.assertEqual((loci["CPEO_POLG"]["call_note"], loci["CPEO_POLG"]["n_below_benign"], loci["CPEO_POLG"]["frac_alleles_below_benign"]),
+                         ("threshold_or_frame_suspect", "5", "1"))
+
     def test_motif_replacement_and_recessive(self):
         def rfc1(alts, fields):
             return self.record("chr4", 5000, 5060, "CANVAS_RFC1", "AAGGG,ACAGG,AAAAG", alts, fields)
@@ -244,7 +281,7 @@ class ScreenTest(unittest.TestCase):
         _res, s, loci = self.run_screen([rec])
         m1 = s[("M1", "CANVAS_RFC1")]
         self.assertEqual((m1["class"], m1["a1_copies"], m1["n_alleles_pathogenic"], m1["mode_match"]), ("normal", "0", "0", "none"))
-        self.assertEqual(m1["notes"], "lps_missing;expanded_other_motif;hom_call")
+        self.assertEqual(m1["notes"], "lps_missing;expanded_other_motif")   # homozygous, but no expanded allele: hom_call says nothing here
         m2 = s[("M2", "CANVAS_RFC1")]
         self.assertEqual((m2["class"], m2["a1_copies"], m2["a2_copies"], m2["n_alleles_pathogenic"], m2["mode_match"]), ("pathogenic", "420", "410", "2", "consistent"))
         m3 = s[("M3", "CANVAS_RFC1")]
@@ -259,7 +296,7 @@ class ScreenTest(unittest.TestCase):
                                                    "CANVAS_RFC1\tRFC1\tCANVAS\tRFC1 disease\tAR\tchr4\t5000\t5060\t5\t0\t11\t11\t200\t12"))
         _res, s, loci = self.run_screen([ref])
         self.assertEqual((s[("M1", "CANVAS_RFC1")]["class"], s[("M1", "CANVAS_RFC1")]["notes"], loci["CANVAS_RFC1"]["n_expanded_other_motif"]),
-                         ("normal", "lps_missing;hom_call", "0"))
+                         ("normal", "lps_missing", "0"))
 
     def test_x_linked_nulls_and_nested_ranges(self):
         fmr1 = self.record("chrX", 700, 760, "FXS_FMR1", "CGG", [165, 630, 132], {
@@ -357,7 +394,8 @@ class GatherTest(unittest.TestCase):
         self.assertEqual((samples["S1"]["sex"], samples["S1"]["n_loci_called"], samples["S1"]["n_loci_uncalled"], samples["S1"]["n_outliers"], samples["S1"]["n_outliers_named"]),
                          ("XY", "2", "1", "2", "1"))
         self.assertEqual((samples["S1"]["n_named_called"], samples["S1"]["n_named_uncalled"], samples["S1"]["n_loci_pathogenic"]), ("1", "1", "1"))
-        self.assertEqual((samples["S2"]["n_loci_intermediate"], samples["S2"]["n_ploidy_sex_mismatch"], samples["S3"]["n_loci_above_benign"], samples["S3"]["sex"]), ("1", "1", "1", ""))
+        # S3's row is below_pathogenic (a locus without a benign maximum): not above benign, and not a finding
+        self.assertEqual((samples["S2"]["n_loci_intermediate"], samples["S2"]["n_ploidy_sex_mismatch"], samples["S3"]["n_loci_above_benign"], samples["S3"]["sex"]), ("1", "1", "0", ""))
         summ = {(r["resource"], r["metric"], r["key"]): r["value"] for r in read_tsv(tmp / "out.summary.tsv")}
         self.assertEqual((summ[("cohort", "n_members", "")], summ[("cohort", "n_loci", "")], summ[("cohort", "n_outlier_pairs", "")]), ("3", "3", "4"))
         self.assertEqual((summ[("loci", "outlier_status", "listed")], summ[("loci", "outlier_status", "common")], summ[("loci", "outlier_status", "below_min_called")]), ("1", "1", "0"))

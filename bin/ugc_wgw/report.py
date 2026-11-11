@@ -568,7 +568,7 @@ def render(cfg: Config, code: CodeInfo, reports: list[RunReport], *, ugc_wgw_ver
             d = e["detail"]
             session_rows.append([e["ts"], e["event"], d.get("mode", ""), d.get("cohort", "") or "", d.get("max_inflight", ""),
                                  d.get("launched", ""), d.get("failures", ""), d.get("interrupted", "")])
-    notable = [e for e in events if e["event"] in ("run.reconciled", "run.scancel", "run.auto_retry", "sample.removed",
+    notable = [e for e in events if e["event"] in ("run.reconciled", "run.scancel", "run.auto_retry", "run.rerun", "sample.removed",
                                                    "resources.learned")
                or e["level"] in ("warning", "error")]
 

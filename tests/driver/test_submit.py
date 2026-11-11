@@ -121,6 +121,95 @@ class SubmitTest(unittest.TestCase):
         code, out, _ = run_cli(["--project", self.proj, "status", "--json"])
         self.assertEqual([r.get("cohort_qc") for r in json.loads(out) if r["subject"] == "C1"], ["success(2)"])
 
+    def test_rerun(self):
+        """`submit --stage S --rerun`: one new attempt for a subject whose latest run succeeded, once per invocation;
+        nothing else runs; the later stages that keep the old outputs are named; the refusals."""
+        base = ["--project", self.proj, "submit", "--mode", "standalone", "--cohort", "C1"]
+        code, _, err = run_cli(base)
+        self.assertEqual(code, 0, err)
+        # the refusals: no stage; a per-sample stage without named samples; retry has no --rerun
+        code, _, err = run_cli(base + ["--rerun"])
+        self.assertNotEqual(code, 0)
+        self.assertIn("--rerun needs --stage", err)
+        code, _, err = run_cli(base + ["--stage", "singleton", "--rerun"])
+        self.assertNotEqual(code, 0)
+        self.assertIn("needs --samples or --samples-file", err)
+        db = self.db()
+        try:
+            self.assertEqual(len(db.runs_for("sample", "S1", "singleton")), 1)   # a refusal launches nothing
+        finally:
+            db.close()
+        # a plain submit of a finished stage still does nothing
+        code, _, err = run_cli(base + ["--stage", "cohort_merge"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("launched 0", err)
+        # the dry run shows the new attempt and the later stages, and changes nothing
+        code, out, err = run_cli(base + ["--stage", "cohort_merge", "--rerun", "--dry-run"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("runnable=1", out)
+        self.assertIn("attempt-2  (rerun of the successful attempt 1)", out)
+        self.assertIn("cohort_freq (cohort C1), cohort_tr (cohort C1), cohort_methyl (cohort C1)", out)
+        # the rerun: attempt 2 of cohort_merge alone, exactly once, `current` moved, the reason recorded
+        code, _, err = run_cli(base + ["--stage", "cohort_merge", "--rerun"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("launched 1", err)
+        self.assertIn("keep the outputs of the attempt being replaced", err)
+        db = self.db()
+        try:
+            merge = db.latest_run("cohort", "C1", "cohort_merge", VERSION)
+            self.assertEqual((merge.status, merge.attempt, merge.meta.get("rerun_of")), ("success", 2, 1))
+            self.assertEqual(len(db.runs_for("cohort", "C1", "cohort_merge")), 2)
+            self.assertEqual(os.readlink(merge.run_path.parent / "current"), "attempt-2")
+            self.assertTrue((merge.run_path.parent / "attempt-1" / "run_manifest.json").exists())
+            self.assertEqual(len(db.runs_for("cohort", "C1", "cohort_freq")), 1)     # later stages are not rerun for the user
+            self.assertEqual(len(db.runs_for("sample", "S1", "singleton")), 1)
+        finally:
+            db.close()
+        reruns = [e for e in self.events() if e["event"] == "run.rerun"]
+        self.assertEqual([(e["detail"]["stage"], e["detail"]["reason"]) for e in reruns],
+                         [("cohort_merge", "rerun of the successful attempt 1")])
+        # a later stage rerun picks the new attempt up; an optional stage names no later stage
+        code, _, err = run_cli(base + ["--stage", "cohort_tr", "--rerun"])
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("keep the outputs", err)
+        db = self.db()
+        try:
+            tr = db.latest_run("cohort", "C1", "cohort_tr", VERSION)
+            self.assertEqual((tr.status, tr.attempt), ("success", 2))
+            used = {m["stage"]: m["run_id"] for m in json.loads((tr.run_path / "run_manifest.json").read_text())["cohort_members"]}
+            self.assertEqual(used["cohort_merge"], db.latest_run("cohort", "C1", "cohort_merge", VERSION).run_id)
+        finally:
+            db.close()
+        # per-sample: only the named sample, and the later stages are counted for it
+        code, _, err = run_cli(base + ["--stage", "singleton", "--samples", "S2", "--rerun"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("cohort_merge (cohort C1)", err)
+        db = self.db()
+        try:
+            self.assertEqual([len(db.runs_for("sample", s, "singleton")) for s in ("S1", "S2", "S3")], [1, 2, 1])
+        finally:
+            db.close()
+        code, out, _ = run_cli(["--project", self.proj, "status", "--json"])
+        self.assertEqual([r for r in json.loads(out) if r["subject"] == "S2"][0]["singleton"], "success(2)")
+
+    def test_rerun_leaves_failed_and_missing_alone(self):
+        """--rerun changes nothing for a subject whose latest run failed (retry's business) or that never ran."""
+        base = ["--project", self.proj, "submit", "--mode", "standalone", "--cohort", "C1"]
+        code, _, err = run_cli(base, env={"UGC_WGW_FAKE_FAIL": "S2"})
+        self.assertEqual(code, 1)
+        code, _, err = run_cli(base + ["--stage", "singleton", "--samples", "S1", "S2", "--rerun"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("ugc-wgw retry", err)                  # S2 is still blocked on its failure
+        db = self.db()
+        try:
+            self.assertEqual([(r.status, r.attempt) for r in (db.latest_run("sample", s, "singleton", VERSION) for s in ("S1", "S2"))],
+                             [("success", 2), ("failed", 1)])
+        finally:
+            db.close()
+        # a cohort stage that never ran and cannot yet: blocked on its prerequisite as without --rerun
+        code, _, err = run_cli(base + ["--stage", "cohort_merge", "--rerun"])
+        self.assertIn("waiting for singleton of S2", err)
+
     def test_failure_blocks_cohort_then_retry(self):
         code, _, err = run_cli(["--project", self.proj, "submit", "--mode", "standalone", "--cohort", "C1"],
                                env={"UGC_WGW_FAKE_FAIL": "S2"})

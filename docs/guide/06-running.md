@@ -221,7 +221,8 @@ pending ──► submitted ──► running ──► success     (exit 0, out
 failed (kind transient, attempt ≤ auto_retry_max) ──backoff──► pending   (new row, attempt N+1)
 failed (kind resource: time or memory, escalations < resource_retry_max) ──at once──► pending
                                                    (new row, that task's limit × resource_retry_factor)
-Terminal rows never change. `ugc-wgw retry` inserts a new row: attempt N+1.
+Terminal rows never change. `ugc-wgw retry` inserts a new row: attempt N+1;
+so does `ugc-wgw submit --stage S --rerun` after a success.
 ```
 
 Every failure gets a **kind**: `transient` (a dead driver, a signal, node
@@ -383,6 +384,48 @@ task of the previous attempt that completed, through the call cache, so a run
 that failed in its last task repeats only that task. Fix the cause first
 (chapter 09); a retry with the same inputs and the same error class is a
 retry wasted.
+
+## Running a finished stage again
+
+A stage that succeeded at this version is done: a plain `submit` leaves it
+alone, whatever has changed since. `--rerun` asks for a new attempt of one
+named stage:
+
+```bash
+ugc-wgw submit --mode joint --cohort C1 --stage cohort_tr --rerun
+ugc-wgw submit --mode standalone --stage singleton --samples S2 S7 --rerun
+ugc-wgw submit --mode joint --cohort C1 --stage cohort_merge --rerun --dry-run
+```
+
+Use it when something the stage reads has changed without a new version: a
+`stage_inputs` value, a reference table or an override in the reference
+map, a threshold of the stage itself, or when a result should be
+reproduced. The rules:
+
+- `--stage` is required: a rerun is one stage, never a whole mode. A
+  per-sample stage also needs `--samples` or `--samples-file`, so nothing
+  reruns every member of a cohort by default; a cohort stage needs
+  `--cohort` as always.
+- Each selected subject whose latest run succeeded gets one new attempt
+  (`attempt-N+1`, the run row says `rerun_of`, the event is `run.rerun`).
+  A subject whose latest run failed or was cancelled is not touched: that
+  is `retry`'s work. The earlier attempt stays on disk and in the state
+  database; `current` and every reader (later stages, `summary`,
+  `export`) move to the new one when it succeeds.
+- The call cache still decides what is computed: tasks whose inputs are
+  unchanged replay in seconds, so a rerun after a changed threshold costs
+  the tasks that read it and nothing else. A rerun with nothing changed
+  replays every task from the cache; miniwdl computes a task again only
+  when its cached output files are gone or were modified.
+- Later stages are not rerun for you. They keep the outputs of the
+  replaced attempt until they run again, and the driver names them:
+  `rerun of cohort_merge: these later stages already succeeded and keep
+  the outputs of the attempt being replaced until they are rerun too, in
+  this order: cohort_freq (cohort C1), cohort_tr (cohort C1), ...`.
+  Rerun the ones that should see the new outputs, in that order. An
+  optional stage (`cohort_qc`, `cohort_tr`) is read by no stage, so the
+  line does not appear for it; `summary` and `export` read the new
+  attempt on their next run.
 
 ## Stopping
 

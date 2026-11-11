@@ -16,9 +16,14 @@ from .util import UgcError, read_json, sha256_file, write_json
 
 CONFIG_SCHEMA = 1
 DEFAULT_REGISTRY = "ghcr.io/uppsalagenomecenter"
-DEEPVARIANT_MODES = ("cpu", "gpu", "parabricks")   # small-variant caller of singleton/upstream (guide chapter 12)
+# small-variant caller of singleton/upstream (guide chapter 12): DeepVariant on CPUs or one GPU, Parabricks, or pblab's
+# pbdv (preview) on one GPU or on CPUs
+DEEPVARIANT_MODES = ("cpu", "gpu", "parabricks", "pbdv", "pbdv-cpu")
+GPU_MODES = ("gpu", "parabricks", "pbdv")            # the flavours whose calling task asks for a GPU
+ALIGNERS = ("pbmm2", "pbweave")                      # aligner of the HiFi reads; pbweave is pblab's (preview)
+PREVIEW_TOOLS = ("pbweave", "pbdv")                  # named as preview wherever a run's tools are shown
 # the project keys a site profile may set (`ugc-wgw init --profile`, guide chapter 05); `description` is allowed and ignored
-PROFILE_KEYS = ("max_inflight", "poll_interval", "assembly_use_parents", "pangenome_sv_cohort", "methyl_label_columns", "methyl_genes_of_interest", "deepvariant", "gpu_type",
+PROFILE_KEYS = ("max_inflight", "poll_interval", "assembly_use_parents", "pangenome_sv_cohort", "methyl_label_columns", "methyl_genes_of_interest", "deepvariant", "aligner", "gpu_type",
                 "parabricks_gpus", "stage_inputs", "prices", "summary_thresholds", "input_thresholds",
                 "resource_retry_max", "resource_retry_factor", "learn_resources")
 
@@ -62,7 +67,8 @@ class Config:
     summary_thresholds: dict[str, float] = field(default_factory=dict)   # ugc-wgw summary QC thresholds (docs/guide/07-results.md)
     input_thresholds: dict[str, float] = field(default_factory=dict)     # input BAM check floors (samples.INPUT_THRESHOLDS)
     project_url: str = ""                                                # link printed in the analysis summaries
-    deepvariant: str = "cpu"        # cpu | gpu (DeepVariant call_variants on 1 GPU) | parabricks (pbrun deepvariant)
+    deepvariant: str = "cpu"        # cpu | gpu (DeepVariant call_variants on 1 GPU) | parabricks (pbrun deepvariant) | pbdv | pbdv-cpu
+    aligner: str = "pbmm2"          # pbmm2 | pbweave (pblab, preview)
     gpu_type: str = ""              # SLURM gres type (`a100`): --gres gpu:<type>:N; empty = gpu:N
     parabricks_gpus: int = 4        # GPUs per Parabricks task (the WDL's own default is 4)
     prices: dict[str, object] = field(default_factory=dict)   # unit prices for `usage`/`report` cost columns (guide chapter 07)
@@ -136,6 +142,7 @@ class Config:
             "input_thresholds": self.input_thresholds,
             "project_url": self.project_url,
             "deepvariant": self.deepvariant,
+            "aligner": self.aligner,
             "gpu_type": self.gpu_type,
             "parabricks_gpus": self.parabricks_gpus,
             "prices": self.prices,
@@ -189,6 +196,7 @@ class Config:
             input_thresholds=dict(doc.get("input_thresholds", {}) or {}),  # type: ignore[arg-type]
             project_url=str(doc.get("project_url") or ""),
             deepvariant=check_deepvariant(str(doc.get("deepvariant") or "cpu")),
+            aligner=check_aligner(str(doc.get("aligner") or "pbmm2")),
             gpu_type=str(doc.get("gpu_type") or "").strip(),
             parabricks_gpus=check_gpus(doc.get("parabricks_gpus", 4)),
             prices=dict(doc.get("prices") or {}),  # type: ignore[arg-type]
@@ -203,6 +211,13 @@ def check_deepvariant(mode: str) -> str:
     if mode not in DEEPVARIANT_MODES:
         raise UgcError(f"deepvariant must be one of {', '.join(DEEPVARIANT_MODES)}, not {mode!r}")
     return mode
+
+
+def check_aligner(name: str) -> str:
+    name = name.strip().lower()
+    if name not in ALIGNERS:
+        raise UgcError(f"aligner must be one of {', '.join(ALIGNERS)}, not {name!r}")
+    return name
 
 
 def check_gpus(value: object) -> int:
@@ -261,6 +276,8 @@ def load_profile(path: Path) -> dict[str, object]:
         out[key] = value
     if "deepvariant" in out:
         out["deepvariant"] = check_deepvariant(str(out["deepvariant"]))
+    if "aligner" in out:
+        out["aligner"] = check_aligner(str(out["aligner"]))
     if "parabricks_gpus" in out:
         out["parabricks_gpus"] = check_gpus(out["parabricks_gpus"])
     if "gpu_type" in out:
@@ -461,6 +478,7 @@ def init_project(
     lease_seconds: float = 900.0,
     progress_interval: float = 300.0,
     deepvariant: str = "cpu",
+    aligner: str = "pbmm2",
     gpu_type: str = "",
     parabricks_gpus: int = 4,
     stage_inputs: dict[str, object] | None = None,
@@ -492,6 +510,7 @@ def init_project(
         lease_seconds=lease_seconds,
         progress_interval=progress_interval,
         deepvariant=check_deepvariant(deepvariant),
+        aligner=check_aligner(aligner),
         gpu_type=gpu_type.strip(),
         parabricks_gpus=check_gpus(parabricks_gpus),
         stage_inputs=dict(stage_inputs or {}),  # type: ignore[arg-type]

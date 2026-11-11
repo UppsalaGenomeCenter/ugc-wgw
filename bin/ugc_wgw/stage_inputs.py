@@ -40,6 +40,8 @@ _SAMPLE: dict[str, Source] = {
 _DEEPVARIANT: dict[str, Source] = {
     "use_gpu": (CONFIG, "deepvariant"),
     "use_parabricks_deepvariant": (CONFIG, "deepvariant"),
+    "use_pbdv": (CONFIG, "deepvariant"),
+    "aligner": (CONFIG, "aligner"),
 }
 _COHORT: dict[str, Source] = {
     "cohort_id": (DRIVER, "frozen cohort"),

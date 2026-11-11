@@ -1135,6 +1135,24 @@ class SummaryEndToEnd(unittest.TestCase):
         self.assertIn("Not available", s2)
         self.assertEqual(d2["coverage"]["ratios"]["sex_from_ratio"], "FEMALE")
 
+    def test_member_nav_lists_every_member(self):
+        """The cohort page's side list: every member (no cap), a status dot, the flags to search by, the finder's script
+        only on a page that has the list."""
+        rows = [{"id": f"m_{i:04d}", "qc_status": "fail" if i == 3 else "warn" if i % 2 else "info",
+                 "flags": ["related_hub"] if i == 3 else ["messages", "tool_status"] if i % 2 else []} for i in range(1, 1001)]
+        nav = summary.member_nav(rows)
+        self.assertEqual(nav.count("<a href="), 1000)
+        self.assertIn('<a href="m_1000.summary.html" data-k="m_1000 info" title="info"><span class="dot dot-info"></span>m_1000</a>', nav)
+        self.assertIn('data-k="m_0003 fail related_hub" title="fail: related_hub"><span class="dot dot-fail">', nav)
+        self.assertIn("1000 members", nav)
+        self.assertIn('class="navfilter"', nav)
+        self.assertEqual(summary.member_nav([]), "")
+        page = summary._page("t", summary._nav("b", [("sec-a", "A")], nav), "<p>x</p>")
+        self.assertIn("input.navfilter", page.split("<script>")[1])
+        plain = summary._page("t", summary._nav("b", [("sec-a", "A")]), "<p>x</p>")
+        self.assertNotIn("navfilter", plain.split("<script>")[1])
+        self.assertLess(len(nav) / 1000, 220)   # bytes per member
+
     def test_cohort_page(self):
         code, out, err = run_cli(["--project", self.proj, "summary", "--cohort", "C1"])
         self.assertEqual(code, 0, err)
@@ -1342,6 +1360,77 @@ class MethylationTest(unittest.TestCase):
         self.assertEqual((none["n"], len(none["rows"])), (2, 0))
 
 
+class ToolsOnThePagesTest(unittest.TestCase):
+    """The aligner and small-variant caller a member was made with: named on its page from the run's tools block,
+    grouped on the cohort page, `mixed_tools` when the members differ; runs from before the block read as pbmm2 and
+    DeepVariant; no per-sample digest changes for it."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.cfg = make_project(self.tmp)
+        self.proj = str(self.cfg.project_dir)
+        tsv = write_tsv(self.tmp, [{"sample_id": f"S{i}", "sex": "MALE", "hifi_reads": f"s{i}.bam"} for i in range(1, 4)])
+        self.assertEqual(run_cli(["--project", self.proj, "samples", "add", str(tsv)])[0], 0)
+        self.assertEqual(run_cli(["--project", self.proj, "cohort", "freeze", "C1", "--samples", str(write_ids(self.tmp, ["S1", "S2", "S3"]))])[0], 0)
+        self.out_dir = self.cfg.results_dir / "reports" / "summary"
+
+    def submit(self, *samples):
+        code, _, err = run_cli(["--project", self.proj, "submit", "--mode", "standalone", "--stage", "singleton", "--samples", *samples])
+        self.assertEqual(code, 0, err)
+
+    def test_one_set_then_mixed(self):
+        self.submit("S1", "S2")
+        code, _, err = run_cli(["--project", self.proj, "summary", "--cohort", "C1"])
+        self.assertEqual(code, 0, err)
+        page = (self.out_dir / "S1.summary.html").read_text()
+        self.assertIn("<b>Aligner and small-variant caller</b>: pbmm2; DeepVariant on cpu.</p>", page)
+        self.assertNotIn("Preview", page)
+        d = json.loads((self.out_dir / "C1.summary.json").read_text())
+        self.assertEqual(d["tools"], {"groups": {"pbmm2 + deepvariant": 2}, "mixed": False})
+        self.assertFalse(any("mixed_tools" in w for w in d["warnings"]))
+        self.assertNotIn("tools", json.loads((self.out_dir / "S1.summary.json").read_text()))   # joined at render time
+        cohort_html = (self.out_dir / "C1.summary.html").read_text()
+        self.assertNotIn("aligner and caller sets", cohort_html)
+        # the third member with pblab's tools: its page says so and the cohort is mixed
+        cfg = config.load(self.cfg.project_dir)
+        cfg.aligner, cfg.deepvariant = "pbweave", "pbdv-cpu"
+        config.save(cfg)
+        self.submit("S3")
+        code, _, err = run_cli(["--project", self.proj, "summary", "--cohort", "C1"])
+        self.assertEqual(code, 0, err)
+        page = (self.out_dir / "S3.summary.html").read_text()
+        self.assertIn("<b>Aligner and small-variant caller</b>: pbweave; pbdv on cpu. pbweave and pbdv are from PacBio&#x27;s pblab, which PacBio marks Preview", page)
+        d = json.loads((self.out_dir / "C1.summary.json").read_text())
+        self.assertEqual(d["tools"], {"groups": {"pbmm2 + deepvariant": 2, "pbweave + pbdv": 1}, "mixed": True})
+        self.assertEqual([w for w in d["warnings"] if w.startswith("mixed_tools")][0].split("(")[1].split(")")[0],
+                         "pbmm2 + deepvariant: 2; pbweave + pbdv: 1")
+        cohort_html = (self.out_dir / "C1.summary.html").read_text()
+        self.assertIn("aligner and caller sets", cohort_html)
+        self.assertIn("mixed_tools: the members were made with different aligners", cohort_html)
+        self.assertIn('data-k="s3 ', cohort_html)
+        self.assertRegex(cohort_html, r'data-k="s3 [^"]*pbweave \+ pbdv"')       # findable in the side list
+        self.assertNotRegex(cohort_html, r'data-k="s1 [^"]*pbmm2')                # the default set adds nothing
+
+    def test_runs_before_the_block_and_external_kinds(self):
+        from ugc_wgw.db import DB
+        self.submit("S1")
+        db = DB(self.cfg.db_path)
+        try:
+            run = db.latest_run("sample", "S1", "singleton", None)
+            digest = {"runs": {"singleton": {"run_id": run.run_id}}, "sample": {"entry_kind": "reads"}}
+            self.assertEqual(summary.member_tools(db, digest), {"aligner": "pbmm2", "small_variant_caller": "deepvariant",
+                                                                "small_variant_device": "cpu", "label": "pbmm2 + deepvariant"})
+            # a run from before 0.19.0 has no tools block: what every such run used
+            meta = dict(run.meta); meta.pop("tools")
+            db.conn.execute("UPDATE runs SET meta_json = ? WHERE run_id = ?", (json.dumps(meta), run.run_id)); db.conn.commit()
+            self.assertEqual(summary.member_tools(db, digest), {"aligner": "pbmm2", "small_variant_caller": "deepvariant", "label": "pbmm2 + deepvariant"})
+            self.assertEqual(summary.member_tools(db, {"runs": {"singleton": {"run_id": "gone"}}, "sample": {}})["label"], "pbmm2 + deepvariant")
+            self.assertEqual(summary.member_tools(db, {"runs": {}, "sample": {"entry_kind": "bam"}})["label"], "external + deepvariant")
+            self.assertEqual(summary.member_tools(db, {"runs": {}, "sample": {"entry_kind": "vcf"}})["label"], "external + external")
+        finally:
+            db.close()
+
+
 class TandemRepeatEndToEnd(unittest.TestCase):
     """A five-member cohort through the fake with cohort_tr: the cohort page's Tandem repeats section, the digest's
     block (findings with the members' own dropout class, the outlier counts and the tr_outlier_count_high flag), the
@@ -1364,6 +1453,15 @@ class TandemRepeatEndToEnd(unittest.TestCase):
         self.assertEqual((screen["n_rows"], screen["by_class"]), (10, {"pathogenic": 1, "normal": 7, "intermediate": 1, "uncalled": 1}))
         self.assertEqual([(f["sample_id"], f["trid"], f["class"], f["a1_copies"], f["a1_lps"]) for f in screen["findings"]],
                          [("S1", "HD_HTT", "pathogenic", 45, 43), ("S2", "FXS_FMR1", "intermediate", 60, 58)])   # the worst class first
+        # what the page lists: pathogenic and intermediate rows and calls in doubt; the other classes are only counted
+        cols = "sample_id\ttrid\tgene\tclass\tborderline\tnotes"
+        rows = ["A\tL1\tG1\tnormal\tyes\t", "A\tL2\tG2\tnormal\tno\thom_call", "A\tL3\tG3\tbelow_benign\tno\t", "A\tL4\tG4\tabove_benign\tno\texpanded_other_motif",
+                "B\tL5\tG5\tbelow_pathogenic\tno\t", "B\tL6\tG6\tnot_assessable\tno\tlps_missing", "B\tL7\tG7\tintermediate\tno\thom_call",
+                "C\tL8\tG8\tnormal\tno\tal_seq_mismatch;lps_missing", "C\tL9\tG9\tpathogenic\tyes\tbeyond_pathogenic_max", "C\tL1\tG1\tuncalled\t\t"]
+        narrowed = sp.parse_tr_screen([cols, *rows])
+        self.assertEqual([(f["sample_id"], f["trid"], f["class"], f["notes"]) for f in narrowed["findings"]],
+                         [("C", "L9", "pathogenic", "beyond_pathogenic_max"), ("B", "L7", "intermediate", "hom_call"), ("C", "L8", "normal", "al_seq_mismatch")])
+        self.assertEqual((narrowed["n_rows"], narrowed["by_class"]["normal"], narrowed["by_class"]["not_assessable"], narrowed["by_class"]["below_pathogenic"]), (10, 3, 1, 1))
         summ = sp.parse_tr_summary(text("tr_summary"))
         self.assertEqual((summ["cohort"]["n_members"][""], summ["loci"]["outlier_status"]["common"], summ["parameters"]["outlier_mad_min"][""]), (5, 2, 5.0))
         self.assertEqual(len(summ["source"]["tr_map_input"]["values"]), 2)                # both inputs kept
@@ -1386,7 +1484,9 @@ class TandemRepeatEndToEnd(unittest.TestCase):
         trd = cd["tandem_repeats"]
         self.assertTrue(trd["available"])
         self.assertIn("cohort_tr", cd["runs"])
-        self.assertEqual(trd["counts"], {"tr_outlier_count_high": 1})    # 1, 2, 3, 1, 40: median 2, MAD 1, limit 5
+        self.assertEqual(trd["counts"], {"tr_outlier_count_high": 1})    # 1, 2, 3, 1, 40: median 2, MAD 1, limit 2 + 3 x 1.4826 = 6.4
+        self.assertAlmostEqual(trd["flags"]["S5"][0]["threshold"], 2 + 3 * 1.4826, places=3)
+        self.assertIn("scaled MADs", trd["flags"]["S5"][0]["message"])
         self.assertEqual([f["code"] for f in trd["flags"]["S5"]], ["tr_outlier_count_high"])
         self.assertIn("ancestry that is rare in this cohort", trd["flags"]["S5"][0]["message"])
         rows = {r["id"]: r for r in cd["members"]}

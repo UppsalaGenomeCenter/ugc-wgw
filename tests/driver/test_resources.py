@@ -150,6 +150,22 @@ class ResourcesCommandTest(unittest.TestCase):
         config.save(self.cfg)
         rows, err = self.rows()
         self.assertIn("deepvariant_call_variants_gpu", err)   # the selected task has no partition
+        # pblab's caller: its GPU task is the selected one for pbdv; pbdv-cpu selects none and warns about nothing
+        self.cfg.deepvariant, self.cfg.aligner = "pbdv", "pbweave"
+        config.save(self.cfg)
+        rows, err = self.rows()
+        self.assertIn("ugc_wgw_pbdv_call_gpu", err)
+        self.assertEqual((rows["ugc_wgw_pbdv_call_gpu"]["gpus"], rows["ugc_wgw_pbdv_call_cpu"]["gpus"], rows["ugc_wgw_pbweave_align"]["gpus"]),
+                         ("a100:1", "-", "-"))
+        code, out, _ = run_cli(["--project", self.proj, "resources"])
+        self.assertIn("aligner=pbweave deepvariant=pbdv gpu_type=a100", out.splitlines()[0])
+        self.cfg.deepvariant = "pbdv-cpu"
+        config.save(self.cfg)
+        rows, err = self.rows()
+        self.assertEqual(err, "")
+        code, out, _ = run_cli(["--project", self.proj, "resources"])
+        self.assertIn("aligner=pbweave deepvariant=pbdv-cpu", out.splitlines()[0])
+        self.assertNotIn("gpu_type", out.splitlines()[0])
 
     def test_cpu_row_on_a_threads_task_names_the_input(self):
         self.policy.write_text(HEADER + "ugc_wgw_hifiasm_assemble\t96\t-\t-\tfat\t-\npbmm2_align_wgs\t16\t-\t-\t-\t-\n"

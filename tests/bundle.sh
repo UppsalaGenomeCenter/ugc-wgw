@@ -170,7 +170,7 @@ grep -q '^##methbat_map_input=gtf	gencode.v50.annotation.gtf.gz	sha256:83fba3e9'
 [ "$(grep -vc '^#' "$me/methbat_map.GRCh38_GIABv3.tsv")" -eq 32039 ]   # header + 32,038 islands
 [ -f "$me/nanomix_39Bisulfite.methbat.tsv" ]
 # the tandem-repeat references (references.lock ugc-wgw-tr): two generated tables, both reference-map keys
-trr=$scratch/prefix/references/ugc-wgw-tr-0.1.0
+trr=$scratch/prefix/references/ugc-wgw-tr-0.2.0
 grep -q "^tr_disease_loci_tsv	$trr/tr_disease_loci.strchive-2.4.4.tsv$" "$ref_map"
 grep -q "^tr_named_overlaps_tsv	$trr/tr_named_overlaps.tsv$" "$ref_map"
 grep -q '^##tr_map_input=strchive	STRchive-loci.v2.4.4.json@v2.4.4	sha256:bbfe8823' "$trr/tr_disease_loci.strchive-2.4.4.tsv"

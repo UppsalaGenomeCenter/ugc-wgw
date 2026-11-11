@@ -149,10 +149,10 @@ def read_engine_cfg(path: Path) -> EngineCfg:
 
 # ---- the GPU tasks -----------------------------------------------------------------------
 
-# The inventory marks the two tasks that ask for GPUs (runtime gpuCount). deepvariant.wdl's call_variants_gpu
-# declares one GPU; parabricks_deepvariant.wdl's task defaults to four, set per project by config.json
-# `parabricks_gpus` (inputs.PARABRICKS_GPUS_INPUT). Which of them runs is config.json `deepvariant`.
-GPU_TASKS = {"deepvariant_call_variants_gpu": "gpu", "run_parabricks_deepvariant": "parabricks"}
+# The inventory marks the tasks that ask for GPUs (runtime gpuCount). deepvariant.wdl's call_variants_gpu and
+# pblab's pbdv task declare one GPU; parabricks_deepvariant.wdl's task defaults to four, set per project by
+# config.json `parabricks_gpus` (inputs.PARABRICKS_GPUS_INPUT). Which of them runs is config.json `deepvariant`.
+GPU_TASKS = {"deepvariant_call_variants_gpu": "gpu", "run_parabricks_deepvariant": "parabricks", "ugc_wgw_pbdv_call_gpu": "pbdv"}
 
 
 @dataclass
@@ -160,6 +160,7 @@ class GpuChoice:
     deepvariant: str = "cpu"
     gpu_type: str = ""
     parabricks_gpus: int = 4
+    aligner: str = "pbmm2"
 
     def count(self, task: str) -> int:
         return self.parabricks_gpus if task == "run_parabricks_deepvariant" else 1
@@ -258,7 +259,9 @@ class Resources:
         mem = self.policy.format_memory(self.engine.memory_max) if self.engine.memory_max > 0 else "-"
         cpu = self.engine.cpu_max if self.engine.cpu_max > 0 else "-"
         gpu = f" deepvariant={self.gpu.deepvariant}"
-        if self.gpu.deepvariant != "cpu":
+        if self.gpu.aligner != "pbmm2":
+            gpu = f" aligner={self.gpu.aligner}" + gpu
+        if self.gpu.selected_task() is not None:
             gpu += f" gpu_type={self.gpu.gpu_type or '-'}"
         scratch = ""
         if self.engine.path.exists():
@@ -327,7 +330,7 @@ def load(cfg: Config, *, engine_info: dict[str, str] | None = None) -> Resources
                         "exports its bind list into every container, miniwdl binds every input file, and a cohort task with "
                         'hundreds of inputs cannot start ("argument list too long"); add the four words to run_options of the '
                         "installed miniwdl.cfg (chapter 04)")
-    gpu = GpuChoice(cfg.deepvariant, cfg.gpu_type, cfg.parabricks_gpus)
+    gpu = GpuChoice(cfg.deepvariant, cfg.gpu_type, cfg.parabricks_gpus, cfg.aligner)
     task = gpu.selected_task()
     if task is not None and cfg.miniwdl_cfg.exists():
         if "--nv" not in eng.run_options:

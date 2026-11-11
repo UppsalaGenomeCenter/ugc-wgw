@@ -65,6 +65,7 @@ class DryRunTest(unittest.TestCase):
         run = db.latest_run("sample", "S1", "singleton", VERSION)
         manifest = json.loads((run.run_path / "run_manifest.json").read_text())
         self.assertEqual(manifest["gpu_type"], "l40s")
+        self.assertEqual(manifest["tools"], {"aligner": "pbmm2", "small_variant_caller": "parabricks_deepvariant", "small_variant_device": "gpu"})
         inputs_doc = json.loads((run.run_path / "inputs.json").read_text())
         self.assertFalse(any(k.endswith(".gpuType") for k in inputs_doc), inputs_doc.keys())
         submitted = [json.loads(l) for l in (cfg.logs_dir / "events.jsonl").read_text().splitlines() if '"run.submitted"' in l][0]
@@ -75,6 +76,21 @@ class DryRunTest(unittest.TestCase):
         (tmp / "any").mkdir()
         cfg2 = make_project(tmp / "cpu")
         self.assertEqual(engine.run_env(cfg2), {})
+        # pblab's tools chosen at init: the inputs, the manifest's tools block, no GPU type without a GPU flavour
+        (tmp / "pb").mkdir()
+        cfg4 = make_project(tmp / "pb", deepvariant="pbdv-cpu", aligner="pbweave")
+        proj4 = str(cfg4.project_dir)
+        run_cli(["--project", proj4, "samples", "add", str(write_tsv(tmp / "pb", [{"sample_id": "S1", "hifi_reads": "a.bam"}]))])
+        code, out, err = run_cli(["--project", proj4, "submit", "--mode", "standalone", "--samples", "S1"])
+        self.assertEqual(code, 0, err)
+        db4 = DB(cfg4.db_path)
+        run4 = db4.latest_run("sample", "S1", "singleton", VERSION)
+        m4 = json.loads((run4.run_path / "run_manifest.json").read_text())
+        self.assertEqual((m4["tools"], m4["gpu_type"]),
+                         ({"aligner": "pbweave", "small_variant_caller": "pbdv", "small_variant_device": "cpu"}, None))
+        i4 = json.loads((run4.run_path / "inputs.json").read_text())
+        self.assertEqual((i4["ugc_wgw_singleton.aligner"], i4["ugc_wgw_singleton.use_pbdv"], i4["ugc_wgw_singleton.use_gpu"]), ("pbweave", True, False))
+        db4.close()
         cfg3 = make_project(tmp / "any", deepvariant="parabricks", gpu_type="")
         self.assertEqual(engine.run_env(cfg3), {"MINIWDL__UGC_WGW__GPU_TYPE": ""})   # any GPU of the partition
 

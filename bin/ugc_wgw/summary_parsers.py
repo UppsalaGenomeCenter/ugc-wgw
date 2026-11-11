@@ -1258,7 +1258,9 @@ def parse_methyl_summary(lines: Iterable[str]) -> dict[str, dict[str, dict[str, 
 TR_SCREEN_KEEP = ("sample_id", "sex", "trid", "gene", "disease", "inheritance", "chrom", "start", "end", "gt", "ploidy", "class",
                   "n_alleles_pathogenic", "mode_match", "measure", "borderline", "a1_copies", "a1_class", "a1_al", "a1_lps", "a1_sd", "a1_am",
                   "a2_copies", "a2_class", "a2_al", "a2_lps", "a2_sd", "a2_am", "twin_al", "notes")
-TR_SCREEN_SEVERITY = ("pathogenic", "intermediate", "below_pathogenic", "above_benign", "below_benign")
+TR_SCREEN_SEVERITY = ("pathogenic", "intermediate", "above_benign", "below_benign", "below_pathogenic", "not_assessable")
+# notes that put the call itself in doubt, whatever its class: listed on the page with the pathogenic and intermediate rows
+TR_SCREEN_DOUBT = ("al_seq_mismatch", "ploidy_sex_mismatch", "catalog_motifs_changed")
 TR_OUTLIER_KEEP = ("trid", "chrom", "start", "end", "motifs", "named_locus", "al", "al_other", "sd", "excess_bp", "excess_units", "z", "cohort_median",
                    "n_called", "n_carriers", "both_alleles")
 
@@ -1284,8 +1286,11 @@ def parse_tr_samples(lines: Iterable[str]) -> list[dict[str, object]]:
 
 
 def parse_tr_screen(lines: Iterable[str]) -> dict[str, object]:
-    """cohort_tr's screen, streamed: the rows worth a look (a class other than normal or uncalled, or a note other than
-    a missing LPS value), the worst first, and the member counts per class. The table has members x 73 rows."""
+    """cohort_tr's screen, streamed: the rows worth a look, the worst first, and the member counts per class. Worth a
+    look: a `pathogenic` or `intermediate` class, or a note that says the call itself is in doubt (TR_SCREEN_DOUBT).
+    The other classes are counted and summarised per locus by the stage's own table: on an 864-member cohort the
+    earlier rule (any class but normal, any note, any borderline value) listed 30,482 of 63,072 rows, 674 of them
+    pathogenic or intermediate. The table has members x 73 rows."""
     cols: list[str] = []
     findings: list[dict[str, object]] = []
     by_class: dict[str, int] = {}
@@ -1302,7 +1307,7 @@ def parse_tr_screen(lines: Iterable[str]) -> dict[str, object]:
         cls = r.get("class", "")
         by_class[cls] = by_class.get(cls, 0) + 1
         notes = [x for x in r.get("notes", "").split(";") if x and x != "lps_missing"]
-        if cls in ("normal", "uncalled") and not notes and r.get("borderline") != "yes":
+        if cls not in ("pathogenic", "intermediate") and not any(x in TR_SCREEN_DOUBT for x in notes):
             continue
         row: dict[str, object] = {k: r.get(k, "") for k in TR_SCREEN_KEEP}
         for k in ("start", "end", "ploidy", "n_alleles_pathogenic", "a1_copies", "a2_copies", "a1_al", "a2_al", "a1_lps", "a2_lps"):

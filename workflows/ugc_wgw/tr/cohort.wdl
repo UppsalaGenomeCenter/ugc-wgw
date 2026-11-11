@@ -305,7 +305,7 @@ task ugc_wgw_tr_screen {
         description: "One row per member and named locus (uncalled ones included): sample_id, sex, trid, gene, disease, inheritance, chrom, start, end, gt, ploidy, class, n_alleles_pathogenic, mode_match, measure, borderline, a1_* and a2_* (copies, class, al, allr, lps, sd, ap, am, mc; a1 is the allele with more copies), twin_trid, twin_al, notes"
       },
       screen_loci: {
-        description: "One row per named locus: the thresholds, members expected and called, call rate, the copies distribution, members per class, alleles above benign, median methylation per sex group, the twin, call_note (ok, few_uncalled, mostly_uncalled, threshold_or_frame_suspect)"
+        description: "One row per named locus: the thresholds, members expected and called, call rate, the copies distribution, members per class (below_pathogenic: short of the pathogenic minimum at a locus without a benign maximum; not_assessable: the reference table says the thresholds do not count this repeat unit), the fractions of alleles above and below the benign range, median methylation per sex group, the twin, call_note (ok, few_uncalled, mostly_uncalled, not_assessable, threshold_or_frame_suspect: more than a fifth of the alleles above or below the benign range)"
       }
     }
   }
@@ -412,7 +412,7 @@ task ugc_wgw_tr_screen {
     borderline_bp = int(borderline_bp)
     members = [l.strip() for l in open(samples_path) if l.strip()]
     sex = dict(l.rstrip("\n").split("\t")[:2] for l in open(sexes_path) if "\t" in l)
-    SEVERITY = ["uncalled", "normal", "below_benign", "above_benign", "below_pathogenic", "intermediate", "pathogenic"]
+    SEVERITY = ["uncalled", "not_assessable", "normal", "below_pathogenic", "below_benign", "above_benign", "intermediate", "pathogenic"]
 
     def num(s):
         return float(s) if s not in ("", None) else None
@@ -420,6 +420,8 @@ task ugc_wgw_tr_screen {
     def classify(c, r):
         """The class of an allele with c copies at a locus (STRchive's thresholds, in copies): the benign range first, since at
         two loci it sits inside the pathogenic one; then pathogenic, intermediate, and the names of the gaps."""
+        if r.get("assessable", "yes") == "no":
+            return "not_assessable"   # the thresholds do not count this repeat unit (the table's assessable_note says why)
         bmin, bmax, imin, imax, pmin = (num(r[k]) for k in ("benign_min", "benign_max", "intermediate_min", "intermediate_max", "pathogenic_min"))
         if bmax is not None and (bmin or 0) <= c <= bmax:
             return "normal"
@@ -461,8 +463,9 @@ task ugc_wgw_tr_screen {
              "mode_match", "measure", "borderline"] + [f"a1_{k}" for k in ALLELE] + [f"a2_{k}" for k in ALLELE] + ["twin_trid", "twin_al", "notes"])
     LOCUS_COLS = ["trid", "gene", "disease", "inheritance", "chrom", "start", "end", "motifs", "pathogenic_motifs", "benign_min", "benign_max",
                   "intermediate_min", "intermediate_max", "pathogenic_min", "pathogenic_max", "measure", "n_expected", "n_called", "call_rate", "n_alleles",
-                  "copies_median", "copies_p95", "copies_max", "n_normal", "n_intermediate", "n_above_benign", "n_below_benign", "n_pathogenic",
-                  "n_expanded_other_motif", "frac_alleles_above_benign", "am_median_xx", "am_median_xy", "twin_trid", "call_note"]
+                  "copies_median", "copies_p95", "copies_max", "n_normal", "n_intermediate", "n_above_benign", "n_below_benign", "n_below_pathogenic",
+                  "n_not_assessable", "n_pathogenic", "n_expanded_other_motif", "frac_alleles_above_benign", "frac_alleles_below_benign", "am_median_xx",
+                  "am_median_xy", "twin_trid", "call_note"]
     vcf_samples = None
     records = {}     # trid -> (chrom, pos, end, ref, alts, motifs, fmt keys, sample fields)
     for line in open(vcf_path):
@@ -558,7 +561,7 @@ task ugc_wgw_tr_screen {
                     pmin, pmax = num(r["pathogenic_min"]), num(r["pathogenic_max"])
                     # long by length, short by the pathogenic motif: only an allele longer than the reference one can be an
                     # expansion of another motif (TRGT's frame holds other motifs' copies in the reference allele too)
-                    if use_mc and pmin is not None and a["al"] > rec[2] - rec[1] and a["al"] // motif_len >= pmin and a["copies"] < pmin:
+                    if use_mc and a["class"] != "not_assessable" and pmin is not None and a["al"] > rec[2] - rec[1] and a["al"] // motif_len >= pmin and a["copies"] < pmin:
                         notes.append("expanded_other_motif")
                         stats["other_motif"] += 1
                     if a["class"] == "pathogenic" and pmax is not None and a["copies"] > pmax:
@@ -581,7 +584,9 @@ task ugc_wgw_tr_screen {
                         stats["am_xx" if sx == "XX" else "am_xy"].append(float(am[p]))
                 alleles.sort(key=lambda a: (-a["copies"], -a["al"]))
                 n_path = sum(1 for a in alleles if a["class"] == "pathogenic")
-                if r["inheritance"] in ("AR", "XR") and ploidy == 2 and gt[0] == gt[1]:
+                # a homozygous call of an expanded allele at a recessive locus is two alleles or one with the other dropped out:
+                # said only where it matters (it was on every homozygous row, 5,043 of them on an 864-member cohort)
+                if r["inheritance"] in ("AR", "XR") and ploidy == 2 and gt[0] == gt[1] and any(a["class"] in ("pathogenic", "intermediate") for a in alleles):
                     notes.append("hom_call")
                 if chrom == "chrX" and ((sx == "XY" and ploidy == 2) or (sx == "XX" and ploidy == 1)):
                     notes.append("ploidy_sex_mismatch")
@@ -599,12 +604,18 @@ task ugc_wgw_tr_screen {
                 out.write("\t".join(fmt(row.get(k, "")) for k in COLS) + "\n")
             cp = sorted(stats["copies"])
             n_all = len(cp)
-            above = sum(1 for c in stats["classes"] if c not in ("normal", "below_benign"))
+            # outside the benign range, where the locus has one: below_pathogenic (no benign maximum: every allele short of
+            # the pathogenic minimum) and not_assessable are neither
+            above = sum(1 for c in stats["classes"] if c in ("above_benign", "intermediate", "pathogenic"))
+            below = sum(1 for c in stats["classes"] if c == "below_benign")
             frac = above / n_all if n_all else None
+            frac_below = below / n_all if n_all else None
             rate = stats["called"] / len(expected) if expected else None
-            if not stats["called"] or (rate is not None and rate < 0.5):
+            if r.get("assessable", "yes") == "no":
+                note = "not_assessable"
+            elif not stats["called"] or (rate is not None and rate < 0.5):
                 note = "mostly_uncalled"
-            elif frac is not None and frac > 0.2:
+            elif (frac is not None and frac > 0.2) or (frac_below is not None and frac_below > 0.2):
                 note = "threshold_or_frame_suspect"
             elif stats["called"] < len(expected):
                 note = "few_uncalled"
@@ -616,9 +627,11 @@ task ugc_wgw_tr_screen {
                     "n_expected": len(expected), "n_called": stats["called"], "call_rate": round(rate, 4) if rate is not None else None, "n_alleles": n_all,
                     "copies_median": statistics.median(cp) if cp else None, "copies_p95": cp[max(0, math.ceil(0.95 * n_all) - 1)] if cp else None,
                     "copies_max": cp[-1] if cp else None, "n_normal": rc.count("normal"), "n_intermediate": rc.count("intermediate"),
-                    "n_above_benign": rc.count("above_benign") + rc.count("below_pathogenic"), "n_below_benign": rc.count("below_benign"),
+                    "n_above_benign": rc.count("above_benign"), "n_below_benign": rc.count("below_benign"),
+                    "n_below_pathogenic": rc.count("below_pathogenic"), "n_not_assessable": rc.count("not_assessable"),
                     "n_pathogenic": rc.count("pathogenic"), "n_expanded_other_motif": stats["other_motif"],
                     "frac_alleles_above_benign": round(frac, 4) if frac is not None else None,
+                    "frac_alleles_below_benign": round(frac_below, 4) if frac_below is not None else None,
                     "am_median_xx": round(statistics.median(stats["am_xx"]), 3) if stats["am_xx"] else None,
                     "am_median_xy": round(statistics.median(stats["am_xy"]), 3) if stats["am_xy"] else None, "twin_trid": twin, "call_note": note}
             for k in ("benign_min", "benign_max", "intermediate_min", "intermediate_max", "pathogenic_min", "pathogenic_max"):
@@ -854,7 +867,7 @@ task ugc_wgw_tr_gather {
             cls = c["class"]
             counts[m]["n_named_uncalled" if cls == "uncalled" else "n_named_called"] += 1
             key = {"pathogenic": "n_loci_pathogenic", "intermediate": "n_loci_intermediate", "above_benign": "n_loci_above_benign",
-                   "below_pathogenic": "n_loci_above_benign", "below_benign": "n_loci_below_benign"}.get(cls)
+                   "below_benign": "n_loci_below_benign"}.get(cls)   # below_pathogenic and not_assessable are not findings
             if key:
                 counts[m][key] += 1
             if "ploidy_sex_mismatch" in c.get("notes", "").split(";"):

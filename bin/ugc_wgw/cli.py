@@ -12,7 +12,7 @@ from . import cohorts, config, engine, escalate, export, manifest, progress, rep
 from .log import LOGGER
 from .db import DB
 from .log import Events, setup_logging
-from .plan import Selection, compute
+from .plan import Selection, check_rerun, compute, rerun_followups
 from .reconcile import reconcile
 from .stages import MODES, STAGES, mode_stages, stage_spec
 from .submit import GRACE_SECONDS, Submitter, acquire_lock, dry_run
@@ -49,7 +49,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="assembly mode never trio-bins, even when both parents are registered")
     s.add_argument("--deepvariant", choices=config.DEEPVARIANT_MODES, default=None,
                    help="small-variant caller of singleton/upstream: cpu (default), gpu (DeepVariant call_variants on "
-                        "one GPU) or parabricks (pbrun deepvariant); needs --nv and a GPU partition in the install")
+                        "one GPU), parabricks (pbrun deepvariant), or pblab's pbdv (preview) on one GPU (pbdv) or on CPUs "
+                        "(pbdv-cpu); the GPU flavours need --nv and a GPU partition in the install")
+    s.add_argument("--aligner", choices=config.ALIGNERS, default=None,
+                   help="aligner of the HiFi reads in singleton/upstream: pbmm2 (default) or pblab's pbweave (preview)")
     s.add_argument("--gpu-type", default=None, metavar="TYPE",
                    help="SLURM gres type of the GPU tasks (sbatch --gres gpu:TYPE:N); empty = any GPU (gpu:N)")
     s.add_argument("--parabricks-gpus", type=int, default=None, metavar="N", help="GPUs per Parabricks task (default 4)")
@@ -122,6 +125,12 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--grace", type=float, default=GRACE_SECONDS, help=argparse.SUPPRESS)
         if name == "retry":
             s.add_argument("--max-attempts", type=int, default=3)
+        else:
+            s.add_argument("--rerun", action="store_true",
+                           help="a new attempt of --stage for subjects whose latest run succeeded (changed stage inputs or "
+                                "references, a result to reproduce); a per-sample stage needs --samples or --samples-file. The "
+                                "call cache still replays every task whose inputs are unchanged; later stages keep the old "
+                                "outputs until they are rerun too")
 
     s = sub.add_parser("status", help="latest status per subject and stage")
     s.add_argument("--mode", default="standalone", choices=sorted(MODES))
@@ -290,7 +299,8 @@ def _selection(a: argparse.Namespace) -> Selection:
     elif getattr(a, "samples_file", None):
         samples_sel = cohorts.read_ids(Path(a.samples_file))
     return Selection(mode=a.mode, stage=getattr(a, "stage", None), samples=samples_sel, cohort=getattr(a, "cohort", None),
-                     allow_standalone_members=bool(getattr(a, "allow_standalone_members", False)))
+                     allow_standalone_members=bool(getattr(a, "allow_standalone_members", False)),
+                     rerun=bool(getattr(a, "rerun", False)))
 
 
 def cmd_init(a: argparse.Namespace) -> int:
@@ -328,6 +338,7 @@ def cmd_init(a: argparse.Namespace) -> int:
         resource_retry_factor=float(profile.get("resource_retry_factor", 2.0)),  # type: ignore[arg-type]
         learn_resources=bool(profile.get("learn_resources", True)),
         deepvariant=str(pick(a.deepvariant, "deepvariant", "cpu")), gpu_type=str(pick(a.gpu_type, "gpu_type", "")),
+        aligner=str(pick(a.aligner, "aligner", "pbmm2")),
         parabricks_gpus=int(pick(a.parabricks_gpus, "parabricks_gpus", 4)),  # type: ignore[arg-type]
         stage_inputs=profile.get("stage_inputs"), prices=profile.get("prices"),  # type: ignore[arg-type]
         summary_thresholds=profile.get("summary_thresholds"), profile=meta,  # type: ignore[arg-type]
@@ -403,18 +414,33 @@ def cmd_cohort(a: argparse.Namespace) -> int:
         db.close()
 
 
+def _rerun_note(db: DB, sel: Selection, version: str, any_version: bool, *, dry: bool = False) -> None:
+    """`--rerun`: say which later stages already succeeded and will keep the replaced attempt's outputs."""
+    later = rerun_followups(db, sel, version, any_version=any_version)
+    if not later:
+        return
+    line = (f"rerun of {sel.stage}: these later stages already succeeded and keep the outputs of the attempt being replaced "
+            f"until they are rerun too, in this order: {', '.join(later)}")
+    if dry:
+        print(f"# {line}")
+    else:
+        diag(line)
+
+
 def cmd_submit(a: argparse.Namespace, retry: bool = False) -> int:
     cfg, db, events, version = _open(a)
     try:
         sel = _selection(a)
         code = manifest.load_code_info(cfg.code_dir)
         max_attempts = getattr(a, "max_attempts", None)
+        check_rerun(sel)
         res = resources.load(cfg)  # a malformed policy is refused here, before anything is launched
         for w in res.warnings:
             diag(f"warning: {w}")
         if a.dry_run:
             reconcile(cfg, db, events, code, {}, dry=True)
             print(f"# {res.summary()}")
+            _rerun_note(db, sel, version, a.any_version, dry=True)
             return dry_run(cfg, db, version, sel, any_version=a.any_version, retry_failed=retry, max_attempts=max_attempts)
         if not cfg.miniwdl_cfg.exists():
             raise UgcError(f"miniwdl cfg not found: {cfg.miniwdl_cfg}")
@@ -426,6 +452,7 @@ def cmd_submit(a: argparse.Namespace, retry: bool = False) -> int:
             LOGGER.info(res.summary())
             diag(res.summary())
             reconcile(cfg, db, events, code, engine_info)
+            _rerun_note(db, sel, version, a.any_version)
             sub = Submitter(cfg, db, events, code, engine_info, version, sel,
                             max_inflight=a.max_inflight or cfg.max_inflight,
                             poll=a.poll_interval or cfg.poll_interval, any_version=a.any_version,

@@ -1,15 +1,98 @@
 # Changelog
 
 Release notes of the public copy. Each version corresponds to a verified
-offline bundle; the upstream tag it is built on is named first.
+offline bundle. An entry opens with the upstream tag it is built on and a
+short summary, with anything an existing project has to do; the rest is
+under Details.
+
+## 0.19.0
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin (0.6.0)
+unchanged; one new image of ours, `pblab` (PacBio's pblab release 20261021
+on upstream's base image); the reference entry `ugc-wgw-tr` moves to 0.2.0.
+
+PacBio's preview aligner and small-variant caller, pbweave and pbdv, can be
+chosen per project in the place of pbmm2 and DeepVariant; the defaults do
+not change. The tandem-repeat stage is corrected after its first cohort of
+864 genomes, and a finished stage can be run again with `submit --rerun`.
+An existing project runs `ugc-wgw upgrade --install` (the reference map
+names a new table) and, where `cohort_tr` has run, `submit --stage
+cohort_tr --rerun` once.
+
+<details>
+<summary>Details</summary>
+
+- **pblab's tools as a project choice.** PacBio's pblab release 20261021
+  (every tool marked Preview) ships pbweave, an aligner, and pbdv, a
+  reimplementation of DeepVariant 1.10.0's PacBio model. New project key
+  `aligner: pbmm2|pbweave` (`init --aligner`) and two more values of
+  `deepvariant`, `pbdv` (one GPU) and `pbdv-cpu`; either works alone, and
+  the profile `pblab` sets pbweave and pbdv. They run inside `singleton`
+  and `upstream` with the same outputs and names, so every later tool
+  reads their BAM and VCF unchanged; a default project's inputs and call
+  cache do not change. Each run's manifest records the aligner and caller
+  (`tools`), the sample page names them, and a cohort that mixes sets
+  shows the warning `mixed_tools`. Measured on chr20 of the GIAB trio:
+  against the HG002 v5.0q truth, SNV F1 0.9985 (DeepVariant), 0.9985
+  (pbdv on the same alignments) and 0.9984 (pbweave + pbdv), indel 0.950
+  for all three, SV 0.928; pbdv's calls differ from DeepVariant's in a
+  handful of records per 94,000. With pbweave, calls agree inside the
+  benchmark regions (99% of small variants, SV F1 0.98) and differ in the
+  centromeric and duplicated sequence no benchmark scores (54% of small
+  variants shared there), so one cohort should stay on one aligner. Speed,
+  from PacBio's figures for a 60 Gb genome: alignment 30 s instead of 15
+  minutes on 64 cores, calling under 3 minutes on one GPU. The defaults
+  stay pbmm2 and DeepVariant until whole genomes have been compared.
+  `tests/smoke/run.sh eval pblab` and `tests/smoke/compare_runs.py` make
+  that comparison.
+- **`cohort_tr` after its first production cohort.** The cohort page
+  listed every screen row with any class, note or borderline value (30,482
+  rows for 864 members); it now lists the pathogenic and intermediate rows
+  and the calls in doubt, and counts the rest per locus. A locus can be
+  `not_assessable`: ADTKD_MUC1's thresholds count a cytosine tract inside
+  one repeat unit, not units, so its alleles are reported and nothing is
+  classed (reference table columns `assessable`, `assessable_note`). The
+  per-locus table separates `below_pathogenic` (loci without a benign
+  maximum) from "above benign" and marks a locus
+  `threshold_or_frame_suspect` when more than a fifth of the alleles fall
+  above or below the benign range. `hom_call` is written only on a
+  homozygous pathogenic or intermediate call. `tr_outlier_count_high` uses
+  scaled MADs (62 flagged members of 864 become 29); the count follows
+  ancestry and depth before it says anything about a sample. Measured
+  cost at 864 members: half a core-hour.
+- **`ugc-wgw submit --stage S --rerun`** starts a new attempt of one stage
+  for the selected subjects whose latest run succeeded (a changed
+  `stage_inputs` value, reference or threshold). A per-sample stage needs
+  `--samples`; the call cache still replays unchanged tasks; later stages
+  that already succeeded are named in order and left alone.
+- **The cohort page's side list holds every member** (it stopped at 200),
+  each with a dot for its QC status, under a box that narrows the list by
+  id, status or flag name.
+- Release notes: each version is now a "Built on" paragraph, a short
+  summary with anything an existing project has to do, and the details
+  folded.
+
+</details>
 
 ## 0.18.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
 data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin (0.6.0)
 unchanged; two new reference entries (`ugc-wgw-tr`, `ugc-wgw-truth`); one
-new image, used by the smoke test only. Tandem repeats at cohort scale, and
-the first truth-set score of the pipeline's own calls.
+new image, used by the smoke test only.
+
+A new optional stage, `cohort_tr`, screens the 73 disease loci of the TRGT
+catalog per member against STRchive's thresholds, gives every locus its
+allele-length distribution and lists expansion outliers across the cohort;
+it is a research screen, not a diagnostic result. `tests/smoke/run.sh
+validate` scores the smoke's HG002 against the Genome in a Bottle v5.0q
+benchmark on chr20 (SNV F1 0.9985, indel 0.950, SV 0.928). An existing
+project runs `ugc-wgw upgrade --install` first, since the stage reads two
+new reference-map keys; no per-sample run or digest is rebuilt.
+
+<details>
+<summary>Details</summary>
 
 - **A new stage, `cohort_tr`**, from the merged TRGT VCF and trgt-lps table
   of `cohort_merge` alone (no per-sample task, optional: nothing waits for
@@ -36,12 +119,25 @@ the first truth-set score of the pipeline's own calls.
   for the member's slice of the GLnexus joint VCF, indel F1 0.950 and
   0.939, SV F1 0.928. The chr20 truth slices ship as a reference entry.
 
+</details>
+
 ## 0.17.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
-data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin (0.6.0) and
-the reference entries unchanged; no new image. What the first production
-cohort taught the 0.14.0 to 0.16.0 stages, and sawfish 2.3.0.
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin (0.6.0) and the
+reference entries unchanged; no new image.
+
+Fixes from the first production cohort of 864 members, and sawfish 2.3.0 as
+the default structural-variant caller (calls identical to 2.2.1's on three
+genomes, at a fraction of the time and memory). Identity QC gains
+`related_hub`, which fails a contaminated sample instead of excluding
+everyone it resembles; haplogroups are counted for runs that predate 0.15.0;
+`upgrade` moves the reference map too, and `submit` refuses a map that lacks
+a key. Existing results are untouched: run `ugc-wgw upgrade --install`, then
+`summary` and `export` again.
+
+<details>
+<summary>Details</summary>
 
 - **sawfish 2.3.0 is the default** for structural-variant discovery and
   calling (upstream v4.0.0 pins 2.2.1). On three whole genomes the call
@@ -71,14 +167,26 @@ cohort taught the 0.14.0 to 0.16.0 stages, and sawfish 2.3.0.
   is built and show progress, so an interrupted rebuild of a large cohort
   resumes where it stopped (`--jobs N` builds in parallel).
 
+</details>
+
 ## 0.16.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
 data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin (0.6.0)
 unchanged; no new image; one new reference entry, `ugc-wgw-methyl` 0.1.0
-(MethBat's imprinting regions, a CpG-island gene map generated from
-GENCODE 50, the nanomix cell-type atlas). The cohort's methylation layer,
-and samples that enter as an aligned BAM or as pre-called VCFs.
+(MethBat's imprinting regions, a CpG-island gene map generated from GENCODE
+50, the nanomix cell-type atlas).
+
+A new stage, `cohort_methyl`, builds the cohort's methylation background
+with MethBat and scores every member against it: outlier regions by gene,
+group comparisons, an imprinting screen. Samples can now enter as an aligned
+BAM or as pre-called VCFs, each kind with its own stage sequence. `ugc-wgw
+upgrade --install` moves a project to another installed version. On first
+use the state database moves to schema 4, and every per-sample digest
+rebuilds once.
+
+<details>
+<summary>Details</summary>
 
 - **A new stage, `cohort_methyl`.** MethBat 1.1.0's cohort layer, from
   upstream's image: a background profile of the cohort from the members'
@@ -120,14 +228,25 @@ and samples that enter as an aligned BAM or as pre-called VCFs.
   paths are one installed version, the running driver's, stopping with the
   remedy instead of failing late in a stage.
 
+</details>
+
 ## 0.15.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
 data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin (0.6.0)
 unchanged; one new image, haplogrep3 3.3.2, and one image for evaluation
-only, PacBio's sawfish 2.3.0_build1. The mitochondrial genome becomes a
-call set the cohort can use, and tool versions ahead of upstream can be
-tried on a copy of the data before they are adopted.
+only, PacBio's sawfish 2.3.0_build1.
+
+Each sample gets a diploid mitochondrial call set and a haplogroup
+(mitorsaw's haplotypes collapsed, haplogrep3 for the classification), and
+the cohort stages merge and count them. A result change: chrM leaves the
+cohort small-variant VCF and its frequencies, and the mitochondrial sets
+take its place. A tool version ahead of upstream can be tried on a copy of
+the data first (`run.sh eval`, here sawfish 2.3.0). An existing cohort needs
+no per-sample re-run; every per-sample digest rebuilds once.
+
+<details>
+<summary>Details</summary>
 
 - **A diploid mitochondrial call set per sample.** mitorsaw writes one
   genotype entry per haplotype it finds (`0|1|1|1`), which no VCF consumer
@@ -171,13 +290,24 @@ tried on a copy of the data before they are adopted.
   sheet declares (parent and child); only undeclared relatives and
   duplicates drop their later member.
 
+</details>
+
 ## 0.14.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
 data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin (0.6.0)
 unchanged; one new image, somalier 0.3.7, and one new reference bundle,
-`ugc-wgw-qc` 0.1.0. Identity QC for cohorts gathered over years, the
-cohort's numbers as tables, and releases that ship only what changed.
+`ugc-wgw-qc` 0.1.0.
+
+A new stage, `cohort_qc`, relates every pair of members with somalier,
+checks the pedigree and the sex and projects ancestry; it never blocks the
+stages after it. The sex a run uses is resolved from the sheet, the coverage
+and chrX before sawfish and TRGT see it. `ugc-wgw export` writes the
+cohort's numbers as TSV tables, one per domain. Releases can ship as delta
+bundles that carry only the images the previous one lacked.
+
+<details>
+<summary>Details</summary>
 
 - **A new stage, `cohort_qc`.** somalier relates every pair of members from
   one 200 KB genotype sketch per member (made by `singleton`/`upstream`
@@ -218,12 +348,22 @@ cohort's numbers as tables, and releases that ship only what changed.
   store or missing). A delta needs its base installed; the full tar stays
   on the share for new sites.
 
+</details>
+
 ## 0.13.1
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
-data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin (0.6.0) and
-the image manifest unchanged. The lessons of the first full-size joint run
-(864 samples, 1,772 runs).
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin (0.6.0) and the
+image manifest unchanged.
+
+Fixes from the first full-size joint run (864 samples, 1,772 runs). A task
+killed at its time limit is now classified as a resource failure, so the
+0.13.0 escalation fires. trgt-lps runs per merge shard instead of once over
+the cohort VCF (13h52m before), the per-sample split uses 16 threads, and
+the report pages scale to hundreds of members and thousands of runs.
+
+<details>
+<summary>Details</summary>
 
 - **Time-limit kills are now classified as resource failures.** SLURM
   writes its "DUE TO TIME LIMIT" and "oom_kill" lines to the job's own
@@ -254,11 +394,23 @@ the image manifest unchanged. The lessons of the first full-size joint run
   09 names `slurm-<jobid>.out` among the evidence and miniwdl's side-by-side
   retry layout (`stderr2.txt`, `work2/`).
 
+</details>
+
 ## 0.13.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
 data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.6.0 and
 the image manifest unchanged.
+
+A task that runs out of wall time or memory is re-attempted at once with
+that limit doubled, up to twice per task and resource, while every other
+task of the run replays from the call cache. The request that worked is
+learned per project, so later runs start there; `ugc-wgw resources
+--learned` prints the learned values as policy rows. The miniwdl plugin
+moves to 0.6.0.
+
+<details>
+<summary>Details</summary>
 
 - **A task that ran out of wall time or memory is re-attempted with its
   limit raised, and the working request is learned.** The failure
@@ -279,11 +431,21 @@ the image manifest unchanged.
 - Plugin ugc-wgw-miniwdl 0.6.0: `[ugc_wgw] escalations`, the driver's
   per-run factors and minimums, applied after the policy rows.
 
+</details>
+
 ## 0.12.6
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
 data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.5.0 and
 the image manifest unchanged.
+
+The concatenation of the cohort VCF and its per-sample split no longer parse
+every genotype. On an 800-sample `cohort_call` each took about four hours;
+expect minutes and tens of minutes. The records are byte-identical to the
+previous commands'.
+
+<details>
+<summary>Details</summary>
 
 - **The cohort VCF's concatenation and per-sample split stop parsing every
   genotype.** On an 800-sample `cohort_call` both took about four hours on
@@ -301,11 +463,22 @@ the image manifest unchanged.
   (chapter 12). Expect minutes and tens of minutes instead of four hours
   each.
 
+</details>
+
 ## 0.12.5
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
 data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.5.0 and
 the image manifest unchanged.
+
+The pangenome's Cactus tasks map several haplotypes at once instead of one
+at a time (`split_map_cores`, `chrom_map_cores`). On the chr20 smoke the
+split went from 75 to 55 minutes and the chromosome task from 51 to 39, with
+identical contig assignment. `ugc_wgw_chrom_coverage` no longer needs
+`bgzip`, whose absence had turned the public CI of 0.12.4 red.
+
+<details>
+<summary>Details</summary>
 
 - **The pangenome's Cactus tasks map several haplotypes at once.** Both
   tasks passed all their cores to minigraph's mapping, so Toil mapped one
@@ -326,12 +499,22 @@ the image manifest unchanged.
   tests run on (the public CI of v0.12.4 is red for that), and level 4 is
   25 times faster than 0.12.3's level 9 for a fifth more bytes.
 
+</details>
+
 ## 0.12.4
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
 data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.5.0 and
-the image manifest unchanged. Two findings of the first whole-genome run of
-the assembly track (five 20x samples, every chromosome).
+the image manifest unchanged.
+
+Two fixes from the first whole-genome run of the assembly track (five 20x
+samples, every chromosome). The haplotype regrouping of a non-trio XY sample
+takes minutes instead of an hour and a half, and `sex_not_inferred` no
+longer warns on assembly-only cohorts. Chapter 12 records the run's task
+sizes.
+
+<details>
+<summary>Details</summary>
 
 - `ugc_wgw_chrom_coverage` writes the regrouped haplotype copies of a
   non-trio XY sample through `bgzip` instead of Python's gzip at level 9:
@@ -346,13 +529,25 @@ the assembly track (five 20x samples, every chromosome).
   per haplotype means the mapping has to be sharded before cohorts of
   hundreds of samples; a long-limit partition carries the smaller ones.
 
+</details>
+
 ## 0.12.3
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
 data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.5.0 and
-the image manifest unchanged. A fix release for cohorts of hundreds of
-samples and for the pangenome's sex chromosomes (0.12.2 was cut and
-superseded the same day, unpublished).
+the image manifest unchanged.
+
+A fix release for cohorts of hundreds of samples and for the pangenome's sex
+chromosomes (0.12.2 was cut and superseded the same day, unpublished). Every
+container now runs with Apptainer's exported bind list emptied: an
+800-sample `cohort_call` had failed with "argument list too long". The
+pangenome's cohort VCF carries every member on every chromosome, chrY
+included. An existing install needs a four-word patch of its `miniwdl.cfg`
+(chapter 09); a new site profile, `assembly`, carries the assembly track's
+requests.
+
+<details>
+<summary>Details</summary>
 
 - **The pangenome's cohort VCF has every member on every chromosome.**
   Cactus writes a sample column only for the members with sequence in a
@@ -383,12 +578,22 @@ superseded the same day, unpublished).
   sharding the mapping), and how memory above the standard node reaches a
   task (a policy row; the site cap rounds the workflow's own request down).
 
+</details>
+
 ## 0.12.1
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
 data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.5.0 and
-the image manifest unchanged. A fix release for `cohort_pangenome` on
-clusters whose shared file system is Ceph.
+the image manifest unchanged.
+
+A fix release for `cohort_pangenome` on clusters whose shared file system is
+Ceph. The Cactus tasks keep Toil's directories and lock files on the
+node-local scratch, since Toil refuses to keep them on Ceph. Without scratch
+configured they stay in the task directory, which then has to be a local
+file system.
+
+<details>
+<summary>Details</summary>
 
 - **The Cactus tasks keep Toil's directories on the node-local scratch.**
   The first cluster run of `cohort_pangenome` failed in the genome-wide
@@ -409,11 +614,22 @@ clusters whose shared file system is Ceph.
   policy gains time rows for the assembly-track tasks: the catch-all's two
   hours would kill the split.
 
+</details>
+
 ## 0.12.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
 data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.5.0,
-unchanged. The release is about the assembly track's reporting.
+unchanged.
+
+The assembly track's reporting. The sample and cohort pages read every
+assembly-track output: contiguity, Flagger's composition, both callers, the
+pangenome's structure and the members' genotypes in it. New QC flags catch
+an assembly that disagrees with its read-based SNVs (`asm_concordance_low`).
+No expensive task is touched; every per-sample digest rebuilds once.
+
+<details>
+<summary>Details</summary>
 
 - **The analysis summaries read every assembly-track output.** The sample
   page's Assembly section shows contiguity with the NGx curve and hifiasm's
@@ -449,14 +665,24 @@ unchanged. The release is about the assembly track's reporting.
   as single stages; the masking task's pipeline passes shellcheck 0.9.0 (the
   0.11.0 tag's CI failure).
 
+</details>
+
 ## 0.11.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
 data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.5.0,
-unchanged. There was no 0.10.0. This release is the assembly track: the
-`assembly` mode becomes `assembly → assembly_call → cohort_pangenome`. The tree
-at tag v0.11.0 fails its own CI on a shellcheck 0.9.0 finding in a task
-command; public commit 50a73a0 on main carries the one-line fix.
+unchanged. There was no 0.10.0.
+
+The assembly track: the `assembly` mode becomes `assembly → assembly_call →
+cohort_pangenome`, with assembly-based calling (dipcall, PAV) and a
+Minigraph-Cactus pangenome per cohort. Breaking: the `assembly` stage ends
+at a new output contract and several old outputs are gone. Expensive:
+hifiasm's command changes, so every sample's assembly is recomputed once.
+The tree at tag v0.11.0 fails its own CI on a shellcheck 0.9.0 finding in a
+task command; public commit 50a73a0 on main carries the one-line fix.
+
+<details>
+<summary>Details</summary>
 
 - **Breaking, `assembly`.** The stage ends at an output contract
   (`assembler_used`, `assembler_version`, `haplotype_labels`, `hap_fastas`,
@@ -496,11 +722,22 @@ command; public commit 50a73a0 on main carries the one-line fix.
   a QC-gated pangenome cohort, and `summary --mode assembly` with the cohort
   page's pangenome section.
 
+</details>
+
 ## 0.9.4
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
 data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.5.0,
-unchanged. The only workflow change is a parameter description.
+unchanged.
+
+The `parabricks` profile asks for 4 GPUs of any type and gives Parabricks
+DeepVariant 256 GiB, after the GPU shapes were measured on five samples.
+Site copies of the profile under `<prefix>/profiles/` are never overwritten
+by the installer and need the same edit. The only workflow change is a
+parameter description.
+
+<details>
+<summary>Details</summary>
 
 - The `parabricks` profile asks for 4 GPUs of any type (`gpu_type` empty)
   and gives `run_parabricks_deepvariant` 256 GiB through the `mem_gb` stage
@@ -515,11 +752,22 @@ unchanged. The only workflow change is a parameter description.
   say the plugin applies the type at submit; they still described the
   behaviour before 0.9.3.
 
+</details>
+
 ## 0.9.3
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
 data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.5.0. No
 workflow changed since 0.9.1.
+
+The GPU type is applied by the plugin at submit instead of being a workflow
+input, so it is no longer part of every call-cache key and one project can
+use nodes of different GPU types. Projects created before this release align
+once more. `parabricks_gpus` must be even and is refused otherwise before a
+job is submitted.
+
+<details>
+<summary>Details</summary>
 
 - The GPU type is applied by the plugin at submit instead of being passed
   as the workflow's `gpuType` input. That input reached every task through
@@ -537,11 +785,20 @@ workflow changed since 0.9.1.
   shapes a 6-GPU node allows and how a project shapes its Parabricks jobs
   through stage inputs.
 
+</details>
+
 ## 0.9.2
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
 data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.4.0,
 unchanged since 0.9.0. No workflow changed since 0.9.1.
+
+The run report's Provenance names the container backend, the node-local
+scratch and the resource policy file. `tests/bundle.sh` runs without
+Apptainer again, which is what had failed the CI of 0.9.0 and 0.9.1.
+
+<details>
+<summary>Details</summary>
 
 - The run report's Provenance names the container backend, the node-local
   scratch (`scratch_env` and its mount, or `off`) and the resource policy
@@ -553,11 +810,21 @@ unchanged since 0.9.0. No workflow changed since 0.9.1.
   `apptainer --version`. This is what failed the CI of 0.9.0 and 0.9.1
   after every other step had passed.
 
+</details>
+
 ## 0.9.1
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
 data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.4.0,
 unchanged since 0.9.0.
+
+The pbmm2 reference index is built once at install instead of once per input
+BAM, where a campaign's first wave started hundreds of identical 5.8 GB
+builds. The reference map gains `pbmm2_index`. Alignment inputs change, so a
+sample replayed into a project on this version aligns once more.
+
+<details>
+<summary>Details</summary>
 
 - The pbmm2 reference index is built once at install instead of once per
   input BAM. Upstream's alignment subworkflow and its fail-reads path build
@@ -572,10 +839,21 @@ unchanged since 0.9.0.
   without an index they behave as upstream. Alignment inputs change, so a
   sample replayed into a project on this version aligns once more.
 
+</details>
+
 ## 0.9.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
 data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.4.0.
+
+Node-local scratch for tasks: when the site key `TASK_SCRATCH_ENV` names the
+node's per-job scratch variable, every task's container gets that directory
+as `TMPDIR`, so sort spill files and GLnexus's database leave the shared
+file system. A job without usable scratch runs as before and says so in its
+SLURM log. The miniwdl plugin moves to 0.4.0.
+
+<details>
+<summary>Details</summary>
 
 - Node-local scratch for tasks. The plugin registers a container backend,
   `ugc_slurm_singularity`, which the rendered `miniwdl.cfg` selects: it is
@@ -591,11 +869,21 @@ data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.4.0.
   never set inside a container, so GLnexus's database had always been on
   the shared work directory; the guide is corrected.
 
+</details>
+
 ## 0.8.2
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
 data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.3.0,
 unchanged since 0.8.0.
+
+A CUDA host-memory failure of Parabricks is classified as a resource
+failure: it logs to stdout, exits 255 and leaves no SLURM out-of-memory
+state. The worked resource policy gives `run_parabricks_deepvariant` 256G,
+since 192 GiB failed on deeper samples.
+
+<details>
+<summary>Details</summary>
 
 - Failure classification reads the failed task's `stdout.txt` as well
   (after the SLURM log and `stderr.txt`) and counts a CUDA host-memory
@@ -607,11 +895,19 @@ unchanged since 0.8.0.
   declared 192 GiB held at 19–25x and failed on deeper samples. Chapters 09
   and 12 explain where Parabricks' log is and why SLURM shows nothing.
 
+</details>
+
 ## 0.8.1
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
 data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.3.0,
 unchanged since 0.8.0.
+
+`samples add` and `samples check` show the progress of the input check. The
+guide's examples and quick start are brought up to date.
+
+<details>
+<summary>Details</summary>
 
 - `samples add` and `samples check` show the progress of the input check
   (`inspecting read files N/M (p%), elapsed, about T left`, rewritten in
@@ -621,10 +917,22 @@ unchanged since 0.8.0.
   report; the quick start describes the input check, `--profile cpu` and
   `ugc-wgw usage`; the command reference lists exit code 2.
 
+</details>
+
 ## 0.8.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
 data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.3.0.
+
+`ugc-wgw samples add` checks every input BAM and refuses an empty, truncated
+or read-less one; `samples check` lists size, reads and bases per file.
+`submit` checks the raw read files again just before each run and fails the
+attempt without a SLURM job when they do not hold. Outputs that cannot be
+hardlinked across file systems become symlinks with a warning. The miniwdl
+plugin moves to 0.3.0.
+
+<details>
+<summary>Details</summary>
 
 - Input BAM check: `ugc-wgw samples add` opens every read file with a
   stdlib BGZF reader. An empty, truncated or read-less BAM is refused
@@ -647,10 +955,20 @@ data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is 0.3.0.
   into the venv for it and warns when the prefix, references and call cache
   are on different file systems, as `ugc-wgw init` does for the results.
 
+</details>
+
 ## 0.7.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
 data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is unchanged.
+
+Site profiles: `ugc-wgw init --profile` applies a JSON profile of the
+project keys that depend on the cluster and the sample set. Two profiles
+ship, `cpu` and `parabricks`. The installer fills `<prefix>/profiles/` once
+and never overwrites it.
+
+<details>
+<summary>Details</summary>
 
 - Site profiles: `ugc-wgw init --profile NAME|FILE` applies a JSON profile
   of the project keys that depend on the cluster and the sample set
@@ -663,10 +981,20 @@ data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is unchanged.
 - Shipped profiles `cpu` and `parabricks`: no alignment chunking, pbmm2 on
   24 threads so two alignments share a 48-core node, 20 runs in flight.
 
+</details>
+
 ## 0.6.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
 data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is unchanged.
+
+`ugc-wgw usage` and a Resource usage section in the run report: core-hours,
+CPU efficiency, GPU-hours, memory, queue wait, disk and a cost estimate from
+prices you supply. The driver reads `sacct` for every run's jobs when the
+run finishes; `usage --collect` does it later for older runs.
+
+<details>
+<summary>Details</summary>
 
 - `ugc-wgw usage` and a "Resource usage" section in the run report:
   core-hours (allocated and requested), CPU-hours used with the efficiency,
@@ -681,10 +1009,20 @@ data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is unchanged.
   accounting are estimated from the workflow log and labelled so.
 - The smoke harness's `sacct` step also prints the driver's per-task table.
 
+</details>
+
 ## 0.5.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
 data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is unchanged.
+
+`ugc-wgw stage-inputs` lists every input of every stage with its type,
+default, who fills it and the project's override; `--nested` adds the inputs
+of the tasks inside each entrypoint. Upstream's task thread counts are
+settable as such nested keys. The guide gains a worked site resource policy.
+
+<details>
+<summary>Details</summary>
 
 - `ugc-wgw stage-inputs`: every input of every stage with its type, default,
   description, who fills it (the driver, a `config.json` key, or nobody, so
@@ -706,6 +1044,8 @@ data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin is unchanged.
   with `--color never`.
 - A non-object `stage_inputs.<stage>` in `config.json` is a clean error.
 
+</details>
+
 ## 0.4.1
 
 Patch release: the shell scripts pass shellcheck 0.9.0, which the CI runs.
@@ -713,8 +1053,17 @@ No workflow or driver change; a 0.4.0 bundle stays valid.
 
 ## 0.4.0
 
-First public release. Built on PacBio HiFi-human-WGS-WDL v4.0.0
-(`15e82cb9`) and its reference data container `GRCh38_GIABv3`.
+First public release. Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`)
+and its reference data container `GRCh38_GIABv3`.
+
+Seven workflow entrypoints over PacBio's HiFi-human-WGS-WDL in standalone,
+joint and assembly modes, with the cohort stages scattered by region at
+every cohort size. The `ugc-wgw` driver plans, submits and retries runs and
+writes provenance, reports and analysis summaries. Everything installs from
+an offline bundle with digest-pinned containers.
+
+<details>
+<summary>Details</summary>
 
 - Seven entrypoints: `singleton`, `upstream`, `cohort_call`, `downstream`,
   `cohort_merge`, `cohort_freq`, `assembly`; standalone, joint and assembly
@@ -731,3 +1080,5 @@ First public release. Built on PacBio HiFi-human-WGS-WDL v4.0.0
   self-contained run report.
 - `scripts/manifest-to-samples.py` turns a per-file delivery manifest into
   the sample sheet.
+
+</details>

@@ -1,0 +1,5 @@
+{
+  "description": "PacBio's pblab tools (release 20261021, every tool marked Preview by PacBio) in the place of pbmm2 and DeepVariant: pbweave aligns, pbdv calls small variants on one GPU (set deepvariant to pbdv-cpu for nodes without one). Each key also works alone. Evidence so far: HG002 on chr20 and the comparison in tests/smoke (docs/guide/12-resources.md); a cohort that mixes these members with pbmm2/DeepVariant ones is flagged mixed_tools. The default stays pbmm2 and DeepVariant.",
+  "aligner": "pbweave",
+  "deepvariant": "pbdv"
+}

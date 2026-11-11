@@ -28,6 +28,9 @@ Rules (the generator's version string changes when they do)
   frame        `frame_differs` = yes when the catalog's interval is not STRchive's GRCh38 one (TRGT's frame is
                wider at composite loci).
   twins        an ordinary locus overlapping a named one by at least one base.
+  assessable   `no` for the loci in NOT_COPY_COUNTED, with the reason in `assessable_note`: STRchive's thresholds
+               there are not counts of the repeat unit, so the screen reports the alleles and classes nothing. A
+               listed id that STRchive no longer has stops the generator.
 
 Output: `##` header lines (generator, rules, attribution, inputs with sha256), then the header row and the rows,
 sorted by chromosome order of the catalog and start.
@@ -48,16 +51,24 @@ import re
 import sys
 from pathlib import Path
 
-GENERATOR_VERSION = "1.0.0"
+GENERATOR_VERSION = "1.1.0"
 ORDINARY_ID = re.compile(r"^chr[^_]+_\d+_\d+_")
 # benign_max >= pathogenic_min in STRchive itself: one or two copies apart, read by hand (2026-11-11, v2.4.4)
 NESTED_RANGES = {"HMNR7_VWA1", "pre-MIR7-2_CHNG3"}
+# thresholds that do not count the catalog's repeat unit, read by hand from STRchive's `details` (2026-11-11, v2.4.4). On an
+# 864-member cohort ADTKD_MUC1 classed 88 members pathogenic and 776 below benign by TRGT's motif counts against these.
+NOT_COPY_COUNTED = {
+    "ADTKD_MUC1": "the disease variant is one inserted base in a 7-cytosine tract inside one unit of a 60 bp VNTR; STRchive's "
+                  "thresholds (benign 7, pathogenic 8) count that tract, not copies of the unit, and TRGT's motif counts cannot "
+                  "tell the two units apart",
+}
 IUPAC = {"A": "A", "C": "C", "G": "G", "T": "T", "N": "ACGT", "R": "AG", "Y": "CT", "S": "CG", "W": "AT", "K": "GT", "M": "AC",
          "B": "CGT", "D": "AGT", "H": "ACT", "V": "ACG"}
 MATCH_ORDER = ("exact", "rotation", "iupac")
 LOCI_COLUMNS = ["trid", "gene", "disease_id", "disease", "inheritance", "chrom", "start", "end", "motif_len", "benign_min", "benign_max",
                 "intermediate_min", "intermediate_max", "pathogenic_min", "pathogenic_max", "reference_motifs", "pathogenic_motifs",
-                "catalog_motifs", "pathogenic_catalog_motifs", "motif_match", "frame_differs", "twin_trids", "locus_structure"]
+                "catalog_motifs", "pathogenic_catalog_motifs", "motif_match", "frame_differs", "twin_trids", "locus_structure",
+                "assessable", "assessable_note"]
 
 
 def _open(path: Path) -> io.TextIOBase:
@@ -217,7 +228,11 @@ def main() -> int:
             "pathogenic_catalog_motifs": ",".join(pcm), "motif_match": kind, "frame_differs": frame,
             "twin_trids": ",".join(twins.get(trid, [])),
             "locus_structure": structure if isinstance(structure, str) else "".join(structure or []),
+            "assessable": "no" if trid in NOT_COPY_COUNTED else "yes", "assessable_note": NOT_COPY_COUNTED.get(trid, ""),
         })
+    stale = sorted(set(NOT_COPY_COUNTED) - {str(r["trid"]) for r in rows})
+    if stale and len(rows) > 20:   # the real table; the unit tests' five-locus fixtures need not carry the listed loci
+        raise SystemExit(f"NOT_COPY_COUNTED names loci the inputs do not have: {', '.join(stale)}; look at the list")
     order = {c: i for i, c in enumerate(contigs)}
     rows.sort(key=lambda r: (order[str(r["chrom"])], int(r["start"])))  # type: ignore[call-overload]
 
@@ -227,7 +242,7 @@ def main() -> int:
         f"##tr_map_source=STRchive {args.strchive_tag} (https://strchive.org, https://github.com/dashnowlab/STRchive), licensed CC BY 4.0; "
         "thresholds are STRchive's, in repeat copies; this table is a derived subset",
         "##tr_map_rules=join by locus id; motifs matched on the reference strand (exact, rotation, IUPAC-compatible rotation); "
-        f"nested ranges accepted: {', '.join(sorted(NESTED_RANGES))}",
+        f"nested ranges accepted: {', '.join(sorted(NESTED_RANGES))}; not assessable by copy count: {', '.join(sorted(NOT_COPY_COUNTED))}",
         f"##tr_map_input=strchive\t{args.strchive.name}@{args.strchive_tag}\tsha256:{sha256_file(args.strchive)}",
         f"##tr_map_input=catalog\t{catalog_label}\tsha256:{sha256_file(args.catalog)}",
     ]

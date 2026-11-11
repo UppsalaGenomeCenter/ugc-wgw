@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .config import Config
+from .config import GPU_MODES, Config
 from .db import DB, Cohort, RunRecord, SampleRecord
 from .log import LOGGER
 from .outputs import MissingOutputError, Outputs
@@ -187,10 +187,40 @@ def _deepvariant_inputs(ctx: BuildContext) -> dict[str, object]:
     input: `RuntimeAttributes.gpuType` reaches every task and would be part of every call-cache key, so the
     plugin applies config.json `gpu_type` at submit time instead (engine.run_env)."""
     mode = ctx.cfg.deepvariant
-    doc: dict[str, object] = {"use_gpu": mode != "cpu", "use_parabricks_deepvariant": mode == "parabricks"}
+    doc: dict[str, object] = {"use_gpu": mode in GPU_MODES, "use_parabricks_deepvariant": mode == "parabricks"}
     if mode == "parabricks":
         doc[PARABRICKS_GPUS_INPUT] = ctx.cfg.parabricks_gpus
+    if mode in ("pbdv", "pbdv-cpu"):
+        doc["use_pbdv"] = True   # pblab's caller (preview): the GPU task with use_gpu, else the CPU task
     return doc
+
+
+def _aligner_inputs(ctx: BuildContext) -> dict[str, object]:
+    """`aligner` from config.json's key, only when it is not the default: a project on pbmm2 keeps the inputs
+    document it always had."""
+    return {"aligner": ctx.cfg.aligner} if ctx.cfg.aligner != "pbmm2" else {}
+
+
+def tools_record(stage: str, doc: dict[str, object], kind: str) -> dict[str, str] | None:
+    """Which aligner and small-variant caller a per-sample run uses, read from its final inputs document (so a
+    `stage_inputs` override is told as it ran): the run manifest's `tools` block. pbdv's VCF carries DeepVariant's
+    header verbatim, so nothing but this block says which of them made a call set. `external`: the files came
+    with the sample (the bam and vcf entry kinds). None for the stages that neither align nor call."""
+    if stage == "intake":
+        return {"aligner": "external", "small_variant_caller": "external"}
+    if stage not in ("singleton", "upstream"):
+        return None
+    def get(name: str, default: object) -> object:
+        return doc.get(f"ugc_wgw_{stage}.{name}", default)
+    gpu = bool(get("use_gpu", False))
+    if get("use_pbdv", False):
+        caller, device = "pbdv", "gpu" if gpu else "cpu"
+    elif gpu and get("use_parabricks_deepvariant", False):
+        caller, device = "parabricks_deepvariant", "gpu"
+    else:
+        caller, device = "deepvariant", "gpu" if gpu else "cpu"
+    aligner = "external" if kind == "bam" else str(get("aligner", "pbmm2"))
+    return {"aligner": aligner, "small_variant_caller": caller, "small_variant_device": device}
 
 
 def _ref_map(ctx: BuildContext) -> dict[str, str]:
@@ -224,6 +254,7 @@ def build_singleton(ctx: BuildContext) -> dict[str, object]:
     doc = common_inputs(ctx)
     doc.update(_sample_reads(ctx))
     doc.update(_deepvariant_inputs(ctx))
+    doc.update(_aligner_inputs(ctx))
     doc.update(_sex_inputs(ctx))
     return doc
 
@@ -236,6 +267,7 @@ def build_upstream(ctx: BuildContext) -> dict[str, object]:
     doc.update(_sample_reads(ctx))
     doc.update(_entry_bam(ctx))
     doc.update(_deepvariant_inputs(ctx))
+    doc.update(_aligner_inputs(ctx))
     doc.update(_sex_inputs(ctx))
     return doc
 

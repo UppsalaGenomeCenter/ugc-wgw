@@ -65,7 +65,8 @@ Provenance.
 | `--max-inflight N` | `4` | Default number of concurrent miniwdl runs for `submit`. |
 | `--poll-interval SEC` | `30` | Default seconds between polls in `submit`. |
 | `--no-assembly-parents` | off | Assembly mode never trio-bins. |
-| `--deepvariant cpu\|gpu\|parabricks` | `cpu` | Small-variant caller of `singleton` and `upstream`: DeepVariant on CPUs, its `call_variants` step on one GPU, or NVIDIA Parabricks (chapter 12, "GPU tasks"). |
+| `--deepvariant cpu\|gpu\|parabricks\|pbdv\|pbdv-cpu` | `cpu` | Small-variant caller of `singleton` and `upstream`: DeepVariant on CPUs, its `call_variants` step on one GPU, NVIDIA Parabricks, or pblab's pbdv (preview) on one GPU or on CPUs (chapter 12, "GPU tasks" and "The pblab tools"). |
+| `--aligner pbmm2\|pbweave` | `pbmm2` | Aligner of the HiFi reads in `singleton` and `upstream`: pbmm2, or pblab's pbweave (preview). |
 | `--gpu-type TYPE` | empty | SLURM gres type of the GPU tasks (`a100`: `--gres gpu:a100:N`); empty asks for any GPU (`gpu:N`). |
 | `--parabricks-gpus N` | `4` | GPUs per Parabricks task; even (Parabricks' partition mode refuses an odd count) and not more than one node's. |
 
@@ -97,7 +98,8 @@ sorted by key.
 | `pangenome_sv_cohort` | `""` | The cohort whose `cohort_merge` SV VCF `cohort_pangenome` compares its graph with (truvari); empty = the pangenome cohort's own merge, when it has one. |
 | `methyl_label_columns` | `[]` | Sample-sheet columns whose values label the members in `cohort_methyl`'s background, as `column=value`, after the sex group (chapter 08). A column no member has is refused at `submit`. |
 | `methyl_genes_of_interest` | `[]` | Gene symbols the cohort page's Methylation section always lists, with or without events. |
-| `deepvariant` | `"cpu"` | `cpu`, `gpu` or `parabricks`: fills `use_gpu`, `use_parabricks_deepvariant` and Parabricks' GPU count for `singleton` and `upstream`; the GPU type goes to the plugin at submit (chapter 12). |
+| `deepvariant` | `"cpu"` | `cpu`, `gpu`, `parabricks`, `pbdv` or `pbdv-cpu`: fills `use_gpu`, `use_parabricks_deepvariant`, `use_pbdv` and Parabricks' GPU count for `singleton` and `upstream`; the GPU type goes to the plugin at submit (chapter 12). |
+| `aligner` | `"pbmm2"` | `pbmm2` or `pbweave`: fills `aligner` for `singleton` and `upstream` (only when it is not the default, so an existing project's inputs do not change). |
 | `gpu_type`, `parabricks_gpus` | `""`, `4` | The gres type (applied by the plugin at submit, not an input: changing it keeps the call cache; empty = any GPU of the partition) and the Parabricks GPU count (even) behind that switch. |
 | `stage_inputs` | `{}` | Per-stage input overrides, below. |
 | `profile` | `{}` | The profile `init --profile` applied: `name`, `path`, `sha256`, `applied` (the keys it set). Informational. |
@@ -157,7 +159,41 @@ entrypoint, miniwdl checks the rest when the run starts, and
 not a stage input but the `deepvariant` key above, which sets `use_gpu` and
 `use_parabricks_deepvariant` consistently for both stages (the GPU type
 reaches the plugin outside the inputs, chapter 12); `stage_inputs` still
-win over it.
+win over it. The same holds for the `aligner` key.
+
+### Choosing pblab's tools (preview)
+
+PacBio's pblab release ships a new aligner, pbweave, and pbdv, a
+reimplementation of DeepVariant 1.10.0's PacBio model; PacBio marks every
+tool of it Preview. A project can use either or both in the place of pbmm2
+and DeepVariant:
+
+```bash
+ugc-wgw init <project> ... --profile pblab                         # pbweave + pbdv on one GPU
+ugc-wgw init <project> ... --aligner pbweave --deepvariant pbdv-cpu  # the same without a GPU
+ugc-wgw init <project> ... --deepvariant pbdv                      # the caller alone
+```
+
+or, in an existing project, the two keys in `config.json` (`"aligner":
+"pbweave"`, `"deepvariant": "pbdv"`). Nothing else changes: the stages, the
+outputs and their names are the same, and every later tool reads the new
+BAM and VCF as it read the old ones. What to know before choosing them:
+
+- The default stays pbmm2 and DeepVariant. The evidence for the pblab tools
+  is PacBio's own HG002 figures and this pipeline's comparison on chr20 of
+  the GIAB trio (chapter 12); production genomes compared on the cluster
+  are what would make them the default.
+- A sample is recomputed from the changed step on: with pbweave from the
+  alignment (everything), with pbdv alone from the small-variant call
+  (alignments and SV discovery replay from the cache).
+- Every run records which aligner and caller it used (`tools` in its
+  manifest; pbdv writes DeepVariant's own VCF header, so nothing in the
+  files says it). The sample page names them, and a cohort whose members
+  were made with different sets shows the warning `mixed_tools`: nothing is
+  refused, but joint calls and frequencies can show the difference as a
+  batch effect, so keep a cohort on one set unless you are comparing.
+- The fail-reads path of `upstream` (a few tandem-repeat loci) keeps pbmm2;
+  a sample that enters as an aligned BAM skips the aligner whatever the key.
 
 ```mermaid
 flowchart TD

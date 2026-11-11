@@ -1,6 +1,6 @@
-##tr_map_generator=scripts/make-strchive-map.py 1.0.0
+##tr_map_generator=scripts/make-strchive-map.py 1.1.0
 ##tr_map_source=STRchive v2.4.4 (https://strchive.org, https://github.com/dashnowlab/STRchive), licensed CC BY 4.0; thresholds are STRchive's, in repeat copies; this table is a derived subset
-##tr_map_rules=join by locus id; motifs matched on the reference strand (exact, rotation, IUPAC-compatible rotation); nested ranges accepted: HMNR7_VWA1, pre-MIR7-2_CHNG3
+##tr_map_rules=join by locus id; motifs matched on the reference strand (exact, rotation, IUPAC-compatible rotation); nested ranges accepted: HMNR7_VWA1, pre-MIR7-2_CHNG3; not assessable by copy count: ADTKD_MUC1
 ##tr_map_input=strchive	STRchive-loci.v2.4.4.json@v2.4.4	sha256:bbfe882349aa260acff7cb79d0e5997ab3f90d4d01895dbb917d01abb9755530
 ##tr_map_input=catalog	adotto_strchive_20250827.hg38.bed.gz	sha256:e10bb3ba113749d08467ebfd6f2eb69a93c4b8187652c30121416deaeb37d56e
 ordinary_trid	named_trid	overlap_bp

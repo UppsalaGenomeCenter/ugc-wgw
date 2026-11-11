@@ -52,7 +52,7 @@ flowchart TD
 
 | Driver fills | You may override |
 |---|---|
-| `sample_id`, `hifi_reads`, `fail_reads` | `use_alignment_chunking` (true), `use_gpu` (false), `use_parabricks_deepvariant` (false) |
+| `sample_id`, `hifi_reads`, `fail_reads` | `use_alignment_chunking` (true), `use_gpu` (false), `use_parabricks_deepvariant` (false), `use_pbdv` (false), `aligner` (pbmm2); the last four through the project's `deepvariant` and `aligner` keys (chapter 05) |
 
 Outputs: the 96 upstream outputs by name plus the two ugc-wgw ones (chapter 07).
 Task set: catalog preparation, pbmm2 per BAM (16 chunks) against the
@@ -101,7 +101,7 @@ flowchart TD
 
 | Driver fills | You may override |
 |---|---|
-| `sample_id`, `hifi_reads`, `fail_reads` | `run_sawfish_call` (true), `use_alignment_chunking` (true), `use_gpu`, `use_parabricks_deepvariant` |
+| `sample_id`, `hifi_reads`, `fail_reads` | `run_sawfish_call` (true), `use_alignment_chunking` (true), `use_gpu`, `use_parabricks_deepvariant`, `use_pbdv`, `aligner` |
 
 `run_sawfish_call = true` gives every sample its own SV VCF, so `downstream`
 can run without a multi-sample call; set it to `false` only when
@@ -574,17 +574,22 @@ AAGGG and the other four, not the benign AAAAG), or the allele length over
 the motif length where the table matched none (`measure` says which). The
 class per allele: `normal` inside the benign range, `pathogenic` at or
 above the pathogenic minimum, `intermediate` in STRchive's intermediate
-range, `above_benign` (or `below_pathogenic` where no benign range is
-known) for the gaps the thresholds leave, `below_benign`, and `uncalled`.
-The row's class is the worse allele's. `mode_match` codes the fit to the
+range, `above_benign` and `below_benign` for the gaps around the benign
+range, `below_pathogenic` at a locus without a benign maximum (the seven
+FAME loci, SCA31 and XDP: the pathogenic motif is absent in most people,
+and every allele short of the pathogenic minimum gets this class),
+`not_assessable` where the reference table says the thresholds do not
+count the repeat unit (ADTKD_MUC1: the disease variant is one inserted
+base inside a unit, so the alleles are reported and nothing is classed),
+and `uncalled`. The row's class is the worse allele's. `mode_match` codes the fit to the
 locus's inheritance: `consistent`, or `carrier` for one pathogenic allele
 at a recessive locus (X-linked recessive: a haploid call is consistent).
 `borderline` marks an allele whose class would change within 6 bp of
 sequence or within TRGT's own allele-length range. Notes worth knowing:
 `expanded_other_motif` (long by length, short by the pathogenic motif:
-an expansion of a benign or unlisted motif), `hom_call` at a recessive
-locus (a haplotype dropout looks the same: check the spanning reads per
-allele), `ploidy_sex_mismatch` (TRGT's karyotype for the run disagrees
+an expansion of a benign or unlisted motif), `hom_call` on a homozygous
+pathogenic or intermediate call at a recessive locus (a haplotype dropout
+looks the same: check the spanning reads per allele), `ploidy_sex_mismatch` (TRGT's karyotype for the run disagrees
 with the sex group), `catalog_motifs_changed` (the installed catalog is
 not the one the table was made from). The pathogenic motif's longest pure
 segment and the allele's mean methylation ride along; neither decides a
@@ -596,6 +601,23 @@ class.
 > locus. A class is a reason to look at the reads (`trgt plot` with the
 > member's `trgt_spanning_reads`), nothing more. No QC flag is raised for
 > a class.
+
+**Reading the screen on a real cohort.** The per-locus table
+(`screen_loci.tsv`, and "Named loci" on the cohort page) is the first
+thing to read, before any member's row: it says where the classes can be
+trusted. `call_note` is `ok`; `few_uncalled` or `mostly_uncalled`;
+`not_assessable`; or `threshold_or_frame_suspect` when more than a fifth
+of the cohort's alleles fall above or below the benign range, which is a
+statement about the thresholds and TRGT's frame at that locus, not about
+the members (on the first 864-member cohort: CPEO_POLG and DBQD2_XYLT1
+almost entirely above benign, OPDM1_LRP12, SCA8 and DMD largely below it,
+FRAXE with 271 members intermediate). The cohort page lists the
+pathogenic and intermediate rows and any call in doubt; the other classes
+are counted there and per locus, and every row is in `screen.tsv`. Some
+pathogenic-class counts are large because the allele is common and
+incompletely penetrant, not because the screen is wrong (FECD3_TCF4: 64
+of 864 members), and at a recessive locus most rows are carriers
+(`mode_match`).
 
 **The outlier scan.** At every locus of the catalog (937,195), over the
 called alleles of the cohort: median, MAD, quantiles. A member and locus
@@ -614,15 +636,19 @@ table keeps `al_p99` and `al_max` for that), and anything at a locus with
 too few calls. The 62 ordinary loci that overlap a named one (the same
 repeat genotyped a second time under another motif) carry `named_locus`,
 and outliers there or at the named loci do not count towards the
-per-member figure that the cohort page plots and flags.
+per-member figure that the cohort page plots and flags
+(`tr_outlier_count_high`: beyond the median + 3 scaled MADs). On the first
+production cohort that figure had a median of 75 per member; it was
+higher for the members whose ancestry was rare in the cohort (11 of 14
+flagged) and rose as depth fell (r = −0.43), so a flagged member is first
+of all one of those two, and only then a sample to look at.
 
 | Driver fills | You may override |
 | --- | --- |
 | `cohort_id`, `sample_ids`, `sample_sexes` (the sex group as `cohort_freq` derives it), `trgt_vcf`, `trgt_vcf_index`, `trgt_lps` (the cohort's `cohort_merge` outputs) | `outlier_min_bp` (50), `outlier_mad_min` (5.0), `outlier_min_called` (20), `outlier_max_carrier_fraction` (0.01), `outlier_max_carriers_min` (2), `screen_borderline_bp` (6), `top_outliers_per_member` (20), `tr_disease_loci_override`, `stats_mem_gb` (2), `screen_mem_gb` (2), `gather_mem_gb` (4) |
 
-Resources: chapter 12. Two minutes on the smoke cohort; at hundreds of
-members the per-shard `bcftools query` dominates (the merged VCF's lines
-are 10 kB and more).
+Resources: chapter 12. Two minutes on the smoke cohort; half a core-hour
+on 864 members (26 shards of about 30 seconds, 444 MB at most).
 
 Outputs (`<cohort_id>.tr.GRCh38_GIABv3.`): `screen.tsv` (one row per
 member and named locus), `screen_loci.tsv` (one row per named locus),

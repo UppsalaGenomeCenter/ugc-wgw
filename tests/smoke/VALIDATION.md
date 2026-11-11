@@ -32,3 +32,17 @@ version its runs were made at: the 0.16.0 rows are the smoke of the 0.17.0
 release (sawfish 2.3.0 as the default), the 0.17.0 rows the smoke of
 0.18.0. Identical scores across the two are expected: no caller changed
 between them.
+
+The smoke of 0.19.0 (rows at 0.18.0, as above), with the routes a project
+can choose since that release: the first row is the default (pbmm2 and
+DeepVariant), the second pbdv on the same alignments, the third pbweave
+and pbdv. The run column names the aligner when it is not pbmm2; the
+caller comes from the run manifest's `tools` block, because pbdv writes
+DeepVariant's own VCF header. All three use the same truth, regions and
+scorers.
+
+| date | ugc-wgw | upstream | run | small-variant caller | SV caller | SNV R / P / F1 | indel R / P / F1 | SV bench R / P / F1 | SV refine R / P / F1 | SV GT concordance (bench) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2026-11-11 | 0.18.0 | v4.0.0 | HG002 singleton (chr20) | DeepVariant 1.10.0 | sawfish 2.3.0 | 0.9983 / 0.9988 / 0.9985 | 0.9503 / 0.9495 / 0.9499 | 0.8092 / 0.8671 / 0.8372 | 0.9252 / 0.9314 / 0.9283 | 0.9077 |
+| 2026-11-11 | 0.18.0 | v4.0.0 | HG002 singleton (chr20) | pbdv (gpu; DeepVariant 1.10.0 model) | sawfish 2.3.0 | 0.9983 / 0.9988 / 0.9985 | 0.9502 / 0.9494 / 0.9498 | 0.8092 / 0.8671 / 0.8372 | 0.9252 / 0.9314 / 0.9283 | 0.9077 |
+| 2026-11-11 | 0.18.0 | v4.0.0 | HG002 singleton (chr20, pbweave) | pbdv (gpu; DeepVariant 1.10.0 model) | sawfish 2.3.0 | 0.9979 / 0.9988 / 0.9984 | 0.9515 / 0.9488 / 0.9502 | 0.8067 / 0.8693 / 0.8368 | 0.9239 / 0.9325 / 0.9282 | 0.9091 |

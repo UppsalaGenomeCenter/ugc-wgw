@@ -6,7 +6,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import Config
+from .config import GPU_MODES, Config
 from .layout import run_files
 from .outputs import error_info
 from .stages import wdl_path
@@ -31,7 +31,7 @@ GPU_TYPE_ENV = "MINIWDL__UGC_WGW__GPU_TYPE"   # miniwdl's environment override o
 def run_env(cfg: Config) -> dict[str, str]:
     """Environment the driver adds to every miniwdl run: the project's GPU type for the plugin (a GPU
     flavour only; '' = any GPU of the partition). Not a workflow input, so changing it keeps the call cache."""
-    if cfg.deepvariant == "cpu":
+    if cfg.deepvariant not in GPU_MODES:
         return {}
     return {GPU_TYPE_ENV: cfg.gpu_type}
 

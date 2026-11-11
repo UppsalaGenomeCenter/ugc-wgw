@@ -40,6 +40,12 @@ workflow ugc_wgw_singleton {
     use_gpu: {
       description: "Use GPU when possible"
     }
+    aligner: {
+      description: "The aligner of the HiFi reads: pbmm2 (default) or pbweave (pblab, preview). Set by the driver from the project's aligner key; the fail-reads path keeps pbmm2"
+    }
+    use_pbdv: {
+      description: "Call small variants with pbdv (pblab, preview) instead of DeepVariant or Parabricks: on one GPU with use_gpu, else on CPUs. Set by the driver from the project's deepvariant key (pbdv, pbdv-cpu)"
+    }
     declared_sex: {
       description: "The sample sheet's sex (MALE or FEMALE), when it has one: the first source of the sex the sex-dependent callers use (declared, else mosdepth's coverage inference, else somalier's chrX heterozygosity)"
     }
@@ -102,6 +108,8 @@ workflow ugc_wgw_singleton {
     Boolean use_alignment_chunking = true
     Boolean use_gpu = false
     Boolean use_parabricks_deepvariant = false
+    String aligner = "pbmm2"
+    Boolean use_pbdv = false
     String? declared_sex
     Int somalier_sex_min_x_sites = 50
     Float somalier_sex_min_x_depth = 5.0
@@ -180,6 +188,8 @@ workflow ugc_wgw_singleton {
     single_sample = true,
     use_gpu = use_gpu,
     use_parabricks_deepvariant = use_parabricks_deepvariant,
+    aligner = aligner,
+    use_pbdv = use_pbdv,
     declared_sex = declared_sex,
     somalier_sites_vcf = somalier_sites_vcf,
     somalier_sex_min_x_sites = somalier_sex_min_x_sites,

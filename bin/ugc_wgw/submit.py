@@ -12,7 +12,7 @@ from typing import IO
 
 from . import accounting, engine, escalate, failures, inputs, layout, manifest, preflight, progress, resources, slurm
 from . import lease as lease_mod
-from .config import Config
+from .config import GPU_MODES, Config
 from .db import DB, RunRecord
 from .log import LOGGER, Events
 from .outputs import MissingOutputError
@@ -177,6 +177,7 @@ class Submitter:
         self.failed_subjects: set[tuple[str, str, str]] = set()  # subjects whose latest attempt this session failed
         self.launched = 0
         self.blocked_reported: set[str] = set()
+        self.rerun_started: set[tuple[str, str, str]] = set()  # --rerun: subjects that have their new attempt
 
     # ---- run creation -----------------------------------------------------
 
@@ -196,6 +197,7 @@ class Submitter:
         attempt_path = layout.make_attempt_dir(stage_path / f"attempt-{attempt}")
         files = layout.run_files(attempt_path)
         sha = inputs.write_inputs(files.inputs, doc)
+        tools = inputs.tools_record(cand.stage, doc, ctx.kind(cand.subject_id)) if cand.subject_type == "sample" else None
         # the escalations the previous attempt ran with, plus the one its resource failure asked for
         escalations = escalate.carry(self.db.latest_run(cand.subject_type, cand.subject_id, cand.stage, self.ugc_wgw_version))
         run = RunRecord(
@@ -204,12 +206,16 @@ class Submitter:
             ugc_wgw_version=self.ugc_wgw_version, run_dir=str(attempt_path), status="pending", attempt=attempt,
             cohort_id=cand.cohort_id, inputs_path=str(files.inputs), inputs_sha256=sha, host=hostname(),
             meta={"members": members, "resource_policy": resources.policy_ref(self.cfg),
-                  **({"gpu_type": self.cfg.gpu_type} if self.cfg.deepvariant != "cpu" else {}),
+                  **({"gpu_type": self.cfg.gpu_type} if self.cfg.deepvariant in GPU_MODES else {}),
+                  **({"tools": tools} if tools else {}),
                   **({"escalations": escalations} if escalations else {}),
+                  **({"rerun_of": cand.rerun_of} if cand.rerun_of else {}),
                   **({"entry": inputs.entry_record(ctx)} if cand.subject_type == "sample" else {}),
                   **({"allow_standalone_members": True} if self.sel.allow_standalone_members and cand.subject_type == "cohort" else {})},
         )
         self.db.insert_run(run)
+        if cand.rerun_of:
+            self.rerun_started.add((cand.subject_type, cand.subject_id, cand.stage))
         self.events.emit("run.created", run_id=run.run_id, subject=run.subject_id, stage=run.stage, attempt=attempt,
                          run_dir=run.run_dir)
         return run, doc
@@ -251,7 +257,7 @@ class Submitter:
 
     def _launch_wave(self) -> Plan:
         plan = compute(self.db, self.cfg, self.sel, self.ugc_wgw_version, any_version=self.any_version,
-                       retry_failed=self.retry_failed, max_attempts=self.max_attempts)
+                       retry_failed=self.retry_failed, max_attempts=self.max_attempts, rerun_started=self.rerun_started)
         for b in plan.blocked:
             key = f"{b.candidate.label()}: {b.reason}"
             if key not in self.blocked_reported:
@@ -259,7 +265,9 @@ class Submitter:
                 self.events.emit("run.blocked", subject=b.candidate.subject_id, stage=b.candidate.stage, reason=b.reason)
         while len(self.children) < self.max_inflight and plan.runnable and not self.stop:
             cand = plan.runnable.pop(0)
-            if cand.note:
+            if cand.rerun_of:
+                self.events.emit("run.rerun", subject=cand.subject_id, stage=cand.stage, reason=cand.note)
+            elif cand.note:
                 self.events.emit("run.auto_retry", subject=cand.subject_id, stage=cand.stage, reason=cand.note)
             try:
                 run, doc = self.create_run(cand)
@@ -421,7 +429,7 @@ def dry_run(cfg: Config, db: DB, ugc_wgw_version: str, sel: Selection, *, any_ve
         attempt = max(db.next_attempt(cand.subject_type, cand.subject_id, cand.stage, ugc_wgw_version),
                       (layout.existing_attempts(stage_path) or [0])[-1] + 1)
         attempt_path = stage_path / f"attempt-{attempt}"
-        print(f"\n## {cand.label()} -> {attempt_path}", file=out)
+        print(f"\n## {cand.label()} -> {attempt_path}" + (f"  ({cand.note})" if cand.rerun_of else ""), file=out)
         try:
             doc, _ = inputs.generate(ctx, cand.stage)
         except UgcError as exc:

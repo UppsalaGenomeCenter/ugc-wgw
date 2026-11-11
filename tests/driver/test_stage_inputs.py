@@ -72,7 +72,10 @@ class SourcesTest(unittest.TestCase):
         self.cfg.deepvariant, self.cfg.gpu_type = "parabricks", "a100"
         self.gen("singleton", "sample", "S1")
         self.gen("upstream", "sample", "S1", "joint")
-        self.cfg.deepvariant, self.cfg.gpu_type = "cpu", ""
+        self.cfg.deepvariant, self.cfg.gpu_type, self.cfg.aligner = "pbdv", "", "pbweave"   # pblab's tools
+        self.gen("singleton", "sample", "S1")
+        self.gen("upstream", "sample", "S1", "joint")
+        self.cfg.deepvariant, self.cfg.gpu_type, self.cfg.aligner = "cpu", "", "pbmm2"
         # joint chain
         for sid in MEMBERS:
             self.seed("upstream", "sample", sid, "joint", inferred_sex="MALE", fail_reads=["/x"] if sid == "S1" else None)

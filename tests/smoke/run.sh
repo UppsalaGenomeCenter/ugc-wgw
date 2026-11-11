@@ -31,11 +31,14 @@
 #                                              v5.0q benchmark on chr20: small variants with aardvark, SVs with truvari bench
 #                                              and refine; tables under logs/validate-<stamp>/ and the row for VALIDATION.md;
 #                                              reports only, unless --min-f1 sets a floor
-#   run.sh eval sawfish23 [compare]            a second project (project-sawfish23/, results-sawfish23/) initialised with
-#                                              the eval-sawfish23 profile, its standalone phase, then per member truvari
-#                                              bench of its phased SV VCF against the production project's and the sawfish
-#                                              tasks' resources of both (ugc-wgw usage); "compare" repeats the comparison
-#                                              alone on the finished runs; init accepts --profile NAME too
+#   run.sh eval <name> [compare]               a second project (project-<name>/, results-<name>/) with other tools on the
+#                                              same data: sawfish23 (the eval-sawfish23 profile), pblab (pbweave + pbdv on
+#                                              a GPU), pblab-cpu, pbdv, pbdv-cpu, pbweave. Its standalone phase and
+#                                              validate, then per member against the production project: truvari bench of
+#                                              the phased SV VCFs, the PASS small variants and TRGT allele lengths shared
+#                                              and not, the per-sample digests side by side (compare_runs.py) and the
+#                                              changed tasks' resources (ugc-wgw usage); "compare" repeats the comparison
+#                                              alone on the finished runs; init accepts --profile NAME and --aligner too
 #
 # Environment:
 #   UGC_WGW_SMOKE_DIR   root with data/ and references/ from prepare.sh (default: $HOME/ugc-smoke);
@@ -99,10 +102,13 @@ sif_of() {
   echo "$dir/$name"
 }
 
+# the deepvariant flavours whose calling task asks for a GPU (config.GPU_MODES)
+gpu_flavour() { case "$1" in gpu|parabricks|pbdv) return 0 ;; *) return 1 ;; esac; }
+
 # ---- init --------------------------------------------------------------------
 cmd_init() {
   local install="" code="$repo" miniwdl="$repo/.venv/bin/miniwdl" cfg="" sif="$repo/bundle/out/sif-cache" inflight="" force=0
-  local deepvariant=cpu gpu_type="" parabricks_gpus="" hifiasm_threads="" profile=""
+  local deepvariant=cpu gpu_type="" parabricks_gpus="" hifiasm_threads="" profile="" aligner=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --install) install="$2"; shift 2 ;;
@@ -112,6 +118,7 @@ cmd_init() {
       --sif-cache) sif="$2"; shift 2 ;;
       --inflight) inflight="$2"; shift 2 ;;
       --deepvariant) deepvariant="$2"; shift 2 ;;
+      --aligner) aligner="$2"; shift 2 ;;
       --gpu-type) gpu_type="$2"; shift 2 ;;
       --parabricks-gpus) parabricks_gpus="$2"; shift 2 ;;
       --hifiasm-threads) hifiasm_threads="$2"; shift 2 ;;
@@ -125,7 +132,7 @@ cmd_init() {
   # default runs in flight: two, except a GPU flavour without SLURM, where every task sees every GPU and two
   # call_variants processes on one card end in CUDA_ERROR_OUT_OF_MEMORY (SLURM confines devices per job)
   if [ -z "$inflight" ]; then
-    if [ -z "$install" ] && [ "$deepvariant" != cpu ]; then inflight=1; else inflight=2; fi
+    if [ -z "$install" ] && gpu_flavour "$deepvariant"; then inflight=1; else inflight=2; fi
   fi
   local ref_map build subdir
   if [ -n "$install" ]; then
@@ -149,7 +156,10 @@ cmd_init() {
           -e "s|{{RESOURCES_FILE}}|$smoke/resources.tsv|" "$here/miniwdl.local.cfg.template" > "$cfg"
       grep -q '{{' "$cfg" && die "unrendered placeholder in $cfg"
       # a GPU flavour needs the host driver in the container (the installer does this from SINGULARITY_NV=1)
-      [ "$deepvariant" = cpu ] || sed -i 's/"hostfs"\]/"hostfs", "--nv"]/' "$cfg"
+      if gpu_flavour "$deepvariant"; then
+        sed -i 's/^run_options = \[/run_options = ["--nv", /' "$cfg"
+        grep -q '^run_options = \["--nv", ' "$cfg" || die "could not add --nv to [singularity] run_options in $cfg"
+      fi
     fi
     local missing=0 p
     while IFS=$'\t' read -r _ p; do
@@ -169,7 +179,8 @@ cmd_init() {
   [ -z "$gpu_type" ] || gpu_args+=(--gpu-type "$gpu_type")
   [ -z "$parabricks_gpus" ] || gpu_args+=(--parabricks-gpus "$parabricks_gpus")
   [ -z "$profile" ] || gpu_args+=(--profile "$profile")
-  if [ "$deepvariant" != cpu ] && ! grep -q -- '--nv' "$cfg"; then
+  [ -z "$aligner" ] || gpu_args+=(--aligner "$aligner")
+  if gpu_flavour "$deepvariant" && ! grep -q -- '--nv' "$cfg"; then
     log "warning: $cfg has no --nv in [singularity] run_options; the GPU tasks will not see a device (site.cfg SINGULARITY_NV=1)"
   fi
   "$code/bin/ugc-wgw" init "$project" --code "$code" --miniwdl "$miniwdl" --cfg "$cfg" \
@@ -590,7 +601,15 @@ for line in open(f"{out}/runs.tsv"):
     dv = header_value(f"{out}/in-{t}/small.vcf.gz", "##DeepVariant_version=")
     glnexus = header_value(f"{out}/in-{t}/small.vcf.gz", "##GLnexusVersion=")
     caller = ("DeepVariant " + dv if dv else "") + (" GLnexus " + glnexus if glnexus else "")
-    md.append("| " + " | ".join([datetime.date.today().isoformat(), str((man.get("ugc_pacbio_wgw") or {}).get("version", "")), tag, f"{member} {stage} ({region})",
+    # pbdv writes DeepVariant's header verbatim: the run manifest's tools block (0.19.0) says which of them called, and
+    # which aligner made the BAM (named in the run column when it is not pbmm2)
+    tools = man.get("tools") or {}
+    if tools.get("small_variant_caller") == "pbdv":
+        caller = f"pbdv ({tools.get('small_variant_device', '?')}; DeepVariant {dv} model)"
+    elif tools.get("small_variant_caller") == "parabricks_deepvariant":
+        caller = f"Parabricks {caller}".strip()
+    route = f", {tools['aligner']}" if tools.get("aligner") not in (None, "pbmm2") else ""
+    md.append("| " + " | ".join([datetime.date.today().isoformat(), str((man.get("ugc_pacbio_wgw") or {}).get("version", "")), tag, f"{member} {stage} ({region}{route})",
                                   caller.strip() or "-", header_value(f"{out}/in-{t}/sv.vcf.gz", "##source=") or "-",
                                   " / ".join(by["snv"][7:10]), " / ".join(by["indel"][7:10]), " / ".join(sv[0][7:10]), " / ".join(sv[1][7:10]), sv[0][10]]) + " |")
     f1 = {"snv": float(by["snv"][9]), "indel": float(by["indel"][9]), "sv": float(sv[1][9])}
@@ -614,16 +633,32 @@ PY
 }
 
 # ---- eval -------------------------------------------------------------------
-cmd_eval() {  # cmd_eval sawfish23 [compare]: a second project with the eval-sawfish23 profile, its standalone phase, then the comparison; "compare" = the comparison alone, on finished runs
-  local what=${1:-} step=${2:-}
-  [ "$what" = sawfish23 ] || die "eval: the known evaluations: sawfish23"
+# the evaluations: <name> -> the init options of its project, and the tasks whose resources the comparison prints
+eval_init_args() {
+  case "$1" in
+    sawfish23) echo "--profile eval-sawfish23" ;;
+    pblab) echo "--aligner pbweave --deepvariant pbdv" ;;        # what the pblab profile sets, as flags (a flag wins over a profile)
+    pblab-cpu) echo "--aligner pbweave --deepvariant pbdv-cpu" ;;
+    pbdv) echo "--deepvariant pbdv" ;;                           # the caller alone: alignments replay from the cache
+    pbdv-cpu) echo "--deepvariant pbdv-cpu" ;;
+    pbweave) echo "--aligner pbweave" ;;                         # the aligner alone, DeepVariant on its BAM
+    *) return 1 ;;
+  esac
+}
+eval_tasks() { case "$1" in sawfish23) echo "sawfish" ;; *) echo "pbmm2|pbweave|deepvariant|pbdv|pbsamoa_merge" ;; esac; }
+
+cmd_eval() {  # cmd_eval <name> [compare]: a second project with the evaluation's tools, its standalone phase, validate, then the comparison; "compare" = the comparison alone, on finished runs
+  local what=${1:-} step=${2:-} init_args
+  init_args=$(eval_init_args "$what") || die "eval: the known evaluations: sawfish23 pblab pblab-cpu pbdv pbdv-cpu pbweave"
   [ -z "$step" ] || [ "$step" = compare ] || die "eval: the second word is 'compare' or nothing"
   [ -z "$variant" ] || die "eval: run it without UGC_WGW_SMOKE_VARIANT (it sets the variant itself)"
   set_ugc   # the production project is the base of the comparison
   if [ -z "$step" ]; then
-    log "eval $what: project-$what (profile eval-$what, the same data, references, cache and SIFs), then the comparison with $project"
-    UGC_WGW_SMOKE_VARIANT=$what "$0" init --force --profile "eval-$what"
+    log "eval $what: project-$what (init $init_args; the same data, references, cache and SIFs), then the comparison with $project"
+    # shellcheck disable=SC2086  # the options are words
+    UGC_WGW_SMOKE_VARIANT=$what "$0" init --force $init_args
     UGC_WGW_SMOKE_VARIANT=$what "$0" all standalone || log "eval $what: the standalone phase reported failures (see above); comparing what finished"
+    UGC_WGW_SMOKE_VARIANT=$what "$0" validate || log "eval $what: validate did not finish (see above)"
   else
     [ -d "$smoke/project-$what/.ugc-wgw" ] || die "eval: no project-$what yet; run 'eval $what' first"
     log "eval $what: the comparison alone (project-$what against $project)"
@@ -700,17 +735,28 @@ cmd_entry() {  # the entry kinds: a variant project whose members enter as an al
   return $rc
 }
 
-eval_compare() {  # <what> <base results> <comp results> <comp project>: truvari bench per member on the phased SV VCFs; the sawfish tasks' resources
+eval_compare() {  # <what> <base results> <comp results> <comp project>: per member truvari bench of the phased SV VCFs, the small-variant and TRGT call sets and the digests side by side; the changed tasks' resources
   local what=$1 base=$2 comp=$3 comp_project=$4
-  local code version stamp out truvari_sif
+  local code version stamp out truvari_sif base_sif tasks
   code=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["code_dir"])' "$project/.ugc-wgw/config.json")
   version=$(cat "$code/VERSION")
   stamp=$(date -u +%Y%m%dT%H%M%SZ)
   out=$smoke/logs/eval-$what-$stamp
   mkdir -p "$out"
   truvari_sif=$(sif_of "$code/image_manifest.ugc-wgw.txt" quay.io/biocontainers/truvari)
+  base_sif=$(sif_of "$code/vendor/hifi-human-wgs-wdl/image_manifest.txt" quay.io/pacbio/pb_wdl_base)
+  tasks=$(eval_tasks "$what")
+  # the benchmark regions of the truth entry (the smoke's chr20): the call sets are compared inside and outside them,
+  # because outside (centromere, satellites, segmental duplications) two aligners place reads differently and neither is scored
+  local region=chr20 fasta truth smbed="" stbed=""
+  fasta=$(python3 -c 'import json,sys
+m = dict(l.rstrip("\n").split("\t", 1) for l in open(json.load(open(sys.argv[1]))["ref_map_file"]) if "\t" in l)
+print(m["fasta"])' "$project/.ugc-wgw/config.json")
+  truth=${fasta%%/hifi-wdl-resources-*}/$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["bundles"]["ugc-wgw-truth"]["install_subdir"])' "$code/references.lock")
+  [ ! -s "$truth/HG002_GRCh38_v5.0q_smvar.benchmark.$region.bed" ] || smbed=$truth/HG002_GRCh38_v5.0q_smvar.benchmark.$region.bed
+  [ ! -s "$truth/HG002_GRCh38_v5.0q_stvar.benchmark.$region.bed" ] || stbed=$truth/HG002_GRCh38_v5.0q_stvar.benchmark.$region.bed
   local m b c
-  printf 'member\tbase_calls\tcomp_calls\tTP_base\tTP_comp\tFP\tFN\tprecision\trecall\tF1\tgt_concordance\n' > "$out/sv.tsv"
+  printf 'member\tscope\tbase_calls\tcomp_calls\tTP_base\tTP_comp\tFP\tFN\tprecision\trecall\tF1\tgt_concordance\n' > "$out/sv.tsv"
   for m in $(members); do
     b=$(find "$base/samples/$m/$version/singleton/current/out/phased_sv_vcf" -name '*.vcf.gz' 2>/dev/null | head -1)
     c=$(find "$comp/samples/$m/$version/singleton/current/out/phased_sv_vcf" -name '*.vcf.gz' 2>/dev/null | head -1)
@@ -719,23 +765,82 @@ eval_compare() {  # <what> <base results> <comp results> <comp project>: truvari
     mkdir -p "$out/in-$m"
     ln -sfn "$b" "$out/in-$m/base.vcf.gz"; ln -sfn "${b%/phased_sv_vcf/*}/phased_sv_vcf_index/$(basename "$b").tbi" "$out/in-$m/base.vcf.gz.tbi"
     ln -sfn "$c" "$out/in-$m/comp.vcf.gz"; ln -sfn "${c%/phased_sv_vcf/*}/phased_sv_vcf_index/$(basename "$c").tbi" "$out/in-$m/comp.vcf.gz.tbi"
-    apptainer exec --bind "$smoke","$code" "$truvari_sif" truvari bench -b "$out/in-$m/base.vcf.gz" -c "$out/in-$m/comp.vcf.gz" -o "$out/truvari-$m" \
-        --sizemin 50 --sizefilt 50 --pctseq 0 > "$out/truvari-$m.log" 2>&1 || { log "eval: truvari bench failed for $m (see $out/truvari-$m.log)"; continue; }
-    python3 - "$m" "$out/truvari-$m/summary.json" >> "$out/sv.tsv" <<'PY'
+    local scope
+    for scope in all benchmark; do
+      local -a bed=()
+      if [ "$scope" = benchmark ]; then
+        [ -n "$stbed" ] || continue
+        bed=(--includebed "$stbed")
+      fi
+      apptainer exec --bind "$smoke","$code","$truth" "$truvari_sif" truvari bench -b "$out/in-$m/base.vcf.gz" -c "$out/in-$m/comp.vcf.gz" -o "$out/truvari-$m-$scope" \
+          --sizemin 50 --sizefilt 50 --pctseq 0 "${bed[@]}" > "$out/truvari-$m-$scope.log" 2>&1 || { log "eval: truvari bench failed for $m (see $out/truvari-$m-$scope.log)"; continue; }
+      python3 - "$m" "$scope" "$out/truvari-$m-$scope/summary.json" >> "$out/sv.tsv" <<'PY'
 import json, sys
-m, d = sys.argv[1], json.load(open(sys.argv[2]))
+m, scope, d = sys.argv[1], sys.argv[2], json.load(open(sys.argv[3]))
 f = lambda k, n=4: ("%.*f" % (n, d[k])) if isinstance(d.get(k), (int, float)) and d.get(k) is not None else "NA"
-print("\t".join([m, str(d.get("base cnt", "NA")), str(d.get("comp cnt", "NA")), str(d.get("TP-base", "NA")), str(d.get("TP-comp", "NA")), str(d.get("FP", "NA")),
+print("\t".join([m, scope, str(d.get("base cnt", "NA")), str(d.get("comp cnt", "NA")), str(d.get("TP-base", "NA")), str(d.get("TP-comp", "NA")), str(d.get("FP", "NA")),
                  str(d.get("FN", "NA")), f("precision"), f("recall"), f("f1"), f("gt_concordance")]))
 PY
+    done
   done
-  log "eval: SV sets, production (base) vs $what (comp), truvari bench --sizemin 50 --pctseq 0:"
+  log "eval: SV sets, production (base) vs $what (comp), truvari bench --sizemin 50 --pctseq 0, everywhere and inside the SV benchmark regions of $region:"
   column -t -s $'\t' "$out/sv.tsv" >&2
-  # the sawfish tasks' resources in both projects (the call cache replayed everything else)
+  # the call sets themselves: PASS small variants (site, alleles, genotype without phase) and TRGT allele lengths per locus
+  printf 'member\twhat\tshared\tonly_a\tonly_b\n' > "$out/pairs.tsv"
+  local kind q side run f
+  for m in $(members); do
+    for side in base comp; do
+      if [ "$side" = base ]; then run=$base/samples/$m/$version/singleton/current/out; else run=$comp/samples/$m/$version/singleton/current/out; fi
+      f=$(find "$run/phased_small_variant_vcf" -name '*.vcf.gz' 2>/dev/null | head -1)
+      [ -z "$f" ] || apptainer exec --bind "$smoke","$code" "$base_sif" bcftools query --include '(FILTER="PASS" || FILTER=".") && GT="alt"' \
+          --format '%CHROM\t%POS\t%REF\t%ALT[\t%GT]\n' "$f" 2>/dev/null | tr '|' '/' | sed 's#\t1/0$#\t0/1#' | LC_ALL=C sort > "$out/in-$m/small.$side.txt"
+      f=$(find "$run/phased_trgt_vcf" -name '*.vcf.gz' 2>/dev/null | head -1)
+      [ -z "$f" ] || apptainer exec --bind "$smoke","$code" "$base_sif" bcftools query --include 'GT!="mis"' \
+          --format '%INFO/TRID[\t%AL]\n' "$f" 2>/dev/null | LC_ALL=C sort > "$out/in-$m/trgt.$side.txt"
+    done
+    # the small variants in three scopes: inside the benchmark regions, the rest of the region, the rest of the genome
+    if [ -s "$out/in-$m/small.base.txt" ] && [ -s "$out/in-$m/small.comp.txt" ]; then
+      for side in base comp; do
+        if [ -n "$smbed" ]; then
+          awk -F'\t' 'NR == FNR { n[$1]++; s[$1, n[$1]] = $2; e[$1, n[$1]] = $3; next }
+                      { hit = 0; for (i = 1; i <= n[$1]; i++) if ($2 > s[$1, i] && $2 <= e[$1, i]) { hit = 1; break } print > (hit ? inside : outside) }' \
+              inside="$out/in-$m/small-bench.$side.txt" outside="$out/in-$m/small-rest.$side.txt" "$smbed" "$out/in-$m/small.$side.txt"
+          touch "$out/in-$m/small-bench.$side.txt" "$out/in-$m/small-rest.$side.txt"
+        else
+          cp "$out/in-$m/small.$side.txt" "$out/in-$m/small-rest.$side.txt"
+        fi
+        awk -F'\t' -v r="$region" '$1 == r' "$out/in-$m/small-rest.$side.txt" > "$out/in-$m/small-region.$side.txt"
+        awk -F'\t' -v r="$region" '$1 != r' "$out/in-$m/small-rest.$side.txt" > "$out/in-$m/small-off.$side.txt"
+      done
+    fi
+    for kind in small-bench small-region small-off trgt; do
+      if [ ! -s "$out/in-$m/$kind.base.txt" ] || [ ! -s "$out/in-$m/$kind.comp.txt" ]; then continue; fi
+      case "$kind" in
+        small-bench) q="PASS small variants inside the benchmark regions of $region" ;;
+        small-region) q="PASS small variants on $region outside them" ;;
+        small-off) q="PASS small variants off $region" ;;
+        *) q="TRGT loci (allele lengths)" ;;
+      esac
+      printf '%s\t%s\t%s\t%s\t%s\n' "$m" "$q" "$(LC_ALL=C comm -12 "$out/in-$m/$kind.base.txt" "$out/in-$m/$kind.comp.txt" | wc -l)" \
+          "$(LC_ALL=C comm -23 "$out/in-$m/$kind.base.txt" "$out/in-$m/$kind.comp.txt" | wc -l)" \
+          "$(LC_ALL=C comm -13 "$out/in-$m/$kind.base.txt" "$out/in-$m/$kind.comp.txt" | wc -l)" >> "$out/pairs.tsv"
+    done
+  done
+  # the digests of both projects, made here so they are of the same code and thresholds
+  local -a ids; mapfile -t ids < <(members)
+  "$code/bin/ugc-wgw" --project "$project" summary --mode standalone --any-version --samples "${ids[@]}" --out-dir "$out/digests-base" > "$out/summary-base.log" 2>&1 \
+    || log "eval: summary of the production project failed (see $out/summary-base.log)"
+  "$code/bin/ugc-wgw" --project "$comp_project" summary --mode standalone --any-version --samples "${ids[@]}" --out-dir "$out/digests-$what" > "$out/summary-$what.log" 2>&1 \
+    || log "eval: summary of project-$what failed (see $out/summary-$what.log)"
+  log "eval: production against $what, member by member (the digests and the call sets; $out/compare.tsv):"
+  python3 "$here/compare_runs.py" --a-label production --b-label "$what" --digests-a "$out/digests-base" --digests-b "$out/digests-$what" \
+      --pairs "$out/pairs.tsv" --out "$out/compare.tsv" "${ids[@]}" >&2 || log "eval: the digest comparison did not run"
+  # the changed tasks' resources in both projects (the call cache replayed everything else)
   "$code/bin/ugc-wgw" --project "$project" usage --by task --any-version --json > "$out/usage-base.json" 2>/dev/null || true
   "$code/bin/ugc-wgw" --project "$comp_project" usage --by task --any-version --json > "$out/usage-$what.json" 2>/dev/null || true
-  python3 - "$out/usage-base.json" "$out/usage-$what.json" "$what" > "$out/sawfish.tsv" <<'PY'
-import json, sys
+  python3 - "$out/usage-base.json" "$out/usage-$what.json" "$what" "$tasks" > "$out/tasks.tsv" <<'PY'
+import json, re, sys
+want = re.compile(sys.argv[4])
 rows = ["project\ttask\tjobs\telapsed_s\tcore_h_alloc\tpeak_rss_mb"]
 for label, path in (("production", sys.argv[1]), (sys.argv[3], sys.argv[2])):
     try:
@@ -743,13 +848,13 @@ for label, path in (("production", sys.argv[1]), (sys.argv[3], sys.argv[2])):
     except (OSError, ValueError):
         continue
     for task, u in sorted(by_task.items()):
-        if "sawfish" in task:
+        if want.search(task):
             rows.append("\t".join([label, task, str(u.get("jobs", "")), "%.0f" % float(u.get("elapsed_s") or 0), "%.3f" % float(u.get("core_h_alloc") or 0), "%.0f" % float(u.get("peak_rss_mb") or 0)]))
 print("\n".join(rows))
 PY
-  log "eval: sawfish tasks' resources (ugc-wgw usage --by task; on the dev machine without sacct the memory is an estimate):"
-  column -t -s $'\t' "$out/sawfish.tsv" >&2
-  log "eval: written to $out (sv.tsv, sawfish.tsv, truvari-<member>/); paste both tables into tests/smoke/README.md"
+  log "eval: the changed tasks' resources (ugc-wgw usage --by task, every run of each project; without sacct the memory is an estimate):"
+  column -t -s $'\t' "$out/tasks.tsv" >&2
+  log "eval: written to $out (sv.tsv, compare.tsv, pairs.tsv, tasks.tsv, truvari-<member>/); paste the tables into tests/smoke/README.md"
 }
 
 [ $# -ge 1 ] || usage 2

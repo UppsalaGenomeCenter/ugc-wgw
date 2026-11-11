@@ -137,7 +137,7 @@ summary" below); `ugc-wgw export --domains identity` copies the tables.
 | Output | What it is |
 |---|---|
 | `tr_pathogenic_screen` | `<cohort_id>.tr.GRCh38_GIABv3.screen.tsv`: one row per member and named disease locus (73 per member, the uncalled ones included): genotype, ploidy, the row's `class` and each allele's (`a1_`, `a2_`: copies of the pathogenic motif, class, length, TRGT's length range, longest pure segment, spanning reads, purity, methylation, motif counts; a1 is the allele with more copies), `n_alleles_pathogenic`, `mode_match`, `measure`, `borderline`, the overlapping ordinary locus's lengths (`twin_al`), `notes`. Chapter 08 explains the classes. A research screen, not a diagnostic result. |
-| `tr_screen_loci` | `.screen_loci.tsv`: one row per named locus: STRchive's thresholds, members expected and called, the copies distribution, members per class, alleles above benign, median methylation per sex group, `call_note`. |
+| `tr_screen_loci` | `.screen_loci.tsv`: one row per named locus: STRchive's thresholds, members expected and called, the copies distribution, members per class (`n_below_pathogenic` and `n_not_assessable` among them), the fractions of alleles above and below the benign range, median methylation per sex group, `call_note` (`ok`, `few_uncalled`, `mostly_uncalled`, `not_assessable`, `threshold_or_frame_suspect`). Read it before any member's row (chapter 08). |
 | `tr_locus_summary` | `.loci.tsv.gz`: every locus of the catalog: called members and alleles, allele-length minimum, median, MAD, p95, p99, maximum, reference length, the carriers that met the outlier rule and `outlier_status` (`listed`, `common`, `none`, `below_min_called`); `named_locus` on the named loci and the ordinary loci overlapping them. |
 | `tr_allele_spectrum` | `.spectrum.tsv.gz`: `trid`, `al`, `n_alleles`, `n_members`: the cohort's allele-length distribution at every locus, the tandem-repeat counterpart of the frequency files; no member is named. |
 | `tr_outlier_pairs`, `tr_outliers_top` | `.outliers.tsv.gz`: every member and locus pair listed (the longer allele, the other one, spanning reads, the excess in bp, repeat units and scaled MADs, the cohort's median and MAD, how many members are listed at the locus, `both_alleles`); `.outliers_top.tsv`: per member the 20 strongest, what the pages read. |
@@ -260,7 +260,8 @@ failure. `<stage>/current/run_manifest.json` is the record to cite.
 | `run_id`, `run_dir`, `attempt`, `status`, `exit_code` | The attempt and how it ended. |
 | `started_at`, `finished_at`, `host`, `slurm_job_ids` | Timestamps in UTC; the SLURM job ids of every task that was submitted (read from the task directories; empty without SLURM). |
 | `resource_policy` | The site resource policy at launch, `path` and `sha256` (chapter 12); `null` when the install has none. |
-| `gpu_type` | The gres type the `ugc_wgw_resources` plugin applied to the GPU tasks (chapter 12): `""` means any GPU, `null` the cpu flavour. |
+| `gpu_type` | The gres type the `ugc_wgw_resources` plugin applied to the GPU tasks (chapter 12): `""` means any GPU, `null` a flavour without a GPU. |
+| `tools` | `singleton`, `upstream` and `intake` runs since 0.19.0: `aligner` (`pbmm2`, `pbweave`, `external`), `small_variant_caller` (`deepvariant`, `parabricks_deepvariant`, `pbdv`, `external`) and `small_variant_device` (`cpu`, `gpu`), read from the run's final inputs. `null` on earlier runs, which were pbmm2 and DeepVariant (or Parabricks, by the project's `deepvariant` key). pbdv writes DeepVariant's own VCF header, so this block is the record of which caller ran. |
 | `error` | Only when the status is not `success`: `class`, `kind`, `message`, `engine_message`, `exit_code`, `exit_status`, `task_dir`, `node`, `evidence` (the log file and line that decided the kind), `not_before` (earliest automatic re-attempt). |
 | `ugc_wgw_manifest` | Only on success: the workflow's own manifest, embedded (below). |
 
@@ -449,6 +450,21 @@ haplotype, GC, N bases, telomeric contig ends and the contigs with the most
 non-Hap bases. A sample with only an assembly gets these sections,
 provenance and the files table like any other.
 
+Each sample page names the aligner and small-variant caller behind it
+under "Runs summarised" (from the run's `tools` block; pbmm2 and
+DeepVariant for runs before 0.19.0) and says when one is a preview tool. A
+cohort whose members were made with more than one such set carries the
+warning `mixed_tools` in its Overview, with the sets and their member
+counts, and an "aligner and caller sets" card; typing a tool's name in the
+member finder lists the members that are not on the default set. Nothing
+is refused for it: joint calls, frequencies and outlier statistics can
+show the difference as a batch effect, and the page says so.
+
+The cohort page's menu on the left holds every member below the section
+links, each with a dot for its QC status (red fail, orange warn); the box
+above the list narrows it as you type an id, a status or a flag name
+(`fail`, `related_hub`, `gos_08`), and Enter opens the first match.
+
 The cohort page lists the members with their QC status (each row links to
 the sample page), draws every metric across the members (median,
 interquartile box, outliers beyond median ± 3 MAD in red, QC thresholds as
@@ -522,10 +538,10 @@ a hub) and
 background beyond the median + `methyl_events_mad_max`, 3, MADs, from
 `cohort_methyl`'s samples table) warns too, as does
 `tr_outlier_count_high` (a member's expansion outliers at ordinary
-tandem-repeat loci beyond the median + `tr_outlier_count_mad_max`, 3, MADs,
-from `cohort_tr`'s samples table: a sample problem, or an ancestry that is
-rare in the cohort); no flag is raised for a class of the disease-locus
-screen;
+tandem-repeat loci beyond the median + `tr_outlier_count_mad_max`, 3,
+scaled MADs, from `cohort_tr`'s samples table: an ancestry that is rare in
+the cohort, a lower depth than the others, or a sample problem); no flag
+is raised for a class of the disease-locus screen;
 `sex_mismatch` also fires for a member whose own run predates the extract
 when the stage's chrX call disagrees with its sheet or coverage. They join
 the member's flags and QC status on the cohort page and in the export, not
@@ -604,9 +620,9 @@ most members carrying an event, the recurrent regions, the imprinting
 screen and the comparisons; each sample page lists its own imprinting
 regions under Methylation. Digest schema 5 (0.16): every per-sample digest
 rebuilds once. The "Tandem repeats (cohort_tr)" section (0.18) shows the
-disease-locus screen's rows worth a look (a class outside the benign
-range, a borderline value or a note), each with the member's own dropout
-class at the locus, the per-locus table, the expansion outliers per member
+disease-locus screen's pathogenic and intermediate rows and any call in
+doubt, each with the member's own dropout class at the locus (the other
+classes are counted, and summarised per locus), the per-locus table, the expansion outliers per member
 with `tr_outlier_count_high`, and the loci with the most listed members;
 with `summary --cohort` a member's page shows its own rows and strongest
 outliers under Tandem repeats. That block is joined when the page is made:
@@ -627,7 +643,7 @@ file `samples add --drop-empty` left out), `sample.removed`,
 progress summary, when the counts change or `progress_interval` elapses),
 `run.created`, `run.preflight` (the raw read files checked just before
 launch, with their number), `run.submitted` (with the command line),
-`run.running`, `run.blocked`, `run.auto_retry`, `run.terminating`,
+`run.running`, `run.blocked`, `run.auto_retry`, `run.rerun`, `run.terminating`,
 `run.success`, `run.failed`, `run.cancelled` (each with the kind, message,
 task directory, node and SLURM job ids), `run.reconciled`, `run.scancel`,
 `run.accounting` (the sacct read: `ok`, `partial` or `failed`, with the job

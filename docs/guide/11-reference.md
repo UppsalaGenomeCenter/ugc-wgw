@@ -25,7 +25,8 @@ when stderr is a terminal and `NO_COLOR` is unset. The file log
 | `--max-inflight N` | `4` | Default concurrency for `submit`. |
 | `--poll-interval SEC` | `30` | Default poll period. |
 | `--no-assembly-parents` | off | Assembly never trio-bins. |
-| `--deepvariant cpu\|gpu\|parabricks` | `cpu` | Small-variant caller of `singleton`/`upstream` (chapter 12). |
+| `--deepvariant cpu\|gpu\|parabricks\|pbdv\|pbdv-cpu` | `cpu` | Small-variant caller of `singleton`/`upstream`; `pbdv` and `pbdv-cpu` are pblab's preview caller on one GPU or on CPUs (chapters 05, 12). |
+| `--aligner pbmm2\|pbweave` | `pbmm2` | Aligner of the HiFi reads; `pbweave` is pblab's preview aligner (chapters 05, 12). |
 | `--gpu-type TYPE` | empty | SLURM gres type of the GPU tasks; empty = any GPU. |
 | `--parabricks-gpus N` | `4` | GPUs per Parabricks task; even. |
 
@@ -93,6 +94,7 @@ run of the project reported two of the IDs as the same individual
 | `--dry-run` | off | Print the first wave and the plan; change nothing. |
 | `--takeover` | off | Take the project lease from a driver on another host that is known to be dead. |
 | `--max-attempts N` | `3` | `retry` only: refuse a new attempt at or past this count. |
+| `--rerun` | off | `submit` only, with `--stage`: a new attempt for each selected subject whose latest run of the stage succeeded (chapter 06, "Running a finished stage again"). A per-sample stage needs `--samples` or `--samples-file`. Later stages are named, not rerun. |
 
 ### `ugc-wgw status`
 
@@ -278,7 +280,8 @@ SIGINT or SIGTERM.
 | `summary_thresholds` | `{}` | `ugc-wgw summary` QC thresholds, e.g. `{"depth_mean_min": 25}` (chapter 07). |
 | `input_thresholds` | `{}` | Floors of the input BAM check at `samples add` and `samples check`: `file_reads_min` (1000), `sample_gbases_min` (30); `0` disables one (chapter 05). |
 | `project_url` | the public repository | Repository link printed in the analysis summaries. |
-| `deepvariant` | `"cpu"` | `cpu`, `gpu` or `parabricks`: the small-variant caller of `singleton` and `upstream` (chapter 12). |
+| `deepvariant` | `"cpu"` | `cpu`, `gpu`, `parabricks`, `pbdv` or `pbdv-cpu`: the small-variant caller of `singleton` and `upstream` (chapter 12). |
+| `aligner` | `"pbmm2"` | `pbmm2` or `pbweave` (pblab, preview): the aligner of the HiFi reads in `singleton` and `upstream`. |
 | `gpu_type` | `""` | SLURM gres type behind `--gres gpu:<type>:N`; empty = `gpu:N`, any GPU of the partition. Passed to the plugin per run (`MINIWDL__UGC_WGW__GPU_TYPE`), not a workflow input, so changing it keeps the call cache (chapter 12). |
 | `parabricks_gpus` | `4` | GPUs per Parabricks task; even (partition mode). |
 | `prices` | `{}` | Unit prices for `usage` and `report` cost figures, e.g. `{"cpu_hour": 0.04, "gpu_hour": 2.5, "currency": "EUR"}` (chapter 07). |
@@ -370,7 +373,7 @@ reported in `error.json` (`CommandFailed` and others). Failure kinds:
 (chapter 09). Events: `sample.added`, `sample.warning`,
 `sample.input_dropped`, `sample.removed`, `cohort.frozen`, `submit.start`,
 `submit.stop`, `run.created`, `run.preflight`, `run.submitted`,
-`run.running`, `run.blocked`, `run.auto_retry`,
+`run.running`, `run.blocked`, `run.auto_retry`, `run.rerun`,
 `run.terminating`, `run.success`, `run.failed`, `run.cancelled`,
 `run.reconciled`, `run.scancel`, `run.accounting`, `submit.progress`.
 miniwdl log lines the report reads: `runtime.cpu adjusted to host limit`

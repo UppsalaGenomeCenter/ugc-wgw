@@ -97,9 +97,22 @@ class StrchiveMapTest(unittest.TestCase):
         arx = by["PRTS_ARX"]
         self.assertEqual((arx["pathogenic_catalog_motifs"], arx["motif_match"], arx["benign_max"], arx["inheritance"]), ("NGC", "iupac", "", "XR"))
         self.assertEqual((by["HMNR7_VWA1"]["benign_max"], by["HMNR7_VWA1"]["pathogenic_min"]), ("2", "1"))   # the accepted nested range
+        self.assertEqual({r["assessable"] for r in rows}, {"yes"})                # none of the fixture's loci is on the list
+        self.assertTrue(any("not assessable by copy count: ADTKD_MUC1" in h for h in head))
         _h, pairs = self.table("overlaps.tsv")
         self.assertEqual(pairs, [{"ordinary_trid": "chr4_90_260_GCC", "named_trid": "HD_HTT", "overlap_bp": "100"}])
         self.assertIn("5 named loci (1 with a twin), 1 overlap pairs", res.stderr)
+
+    def test_shipped_table_marks_muc1(self):
+        """The table the pipeline ships: 73 loci, one of them not assessable by copy count, with its reason."""
+        text = (REPO / "references" / "tr_disease_loci.strchive-2.4.4.tsv").read_text().splitlines()
+        cols = next(l for l in text if not l.startswith("##")).split("\t")
+        rows = [dict(zip(cols, l.split("\t"))) for l in text if not l.startswith("##")][1:]
+        self.assertEqual(len(rows), 73)
+        no = [r for r in rows if r["assessable"] == "no"]
+        self.assertEqual([r["trid"] for r in no], ["ADTKD_MUC1"])
+        self.assertIn("7-cytosine tract", no[0]["assessable_note"])
+        self.assertTrue(all(r["assessable_note"] == "" for r in rows if r["assessable"] == "yes"))
 
     def test_refusals(self):
         res = self.run_script(LOCI[:-1])                                   # a named catalog locus without a STRchive entry

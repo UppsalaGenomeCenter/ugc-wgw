@@ -16,6 +16,7 @@ class Selection:
     samples: list[str] | None = None
     cohort: str | None = None
     allow_standalone_members: bool = False   # joint mode: a vcf member without a gVCF phases its own VCFs and skips cohort_call
+    rerun: bool = False   # `submit --rerun`: a new attempt of the one named stage for subjects whose latest run succeeded
 
 
 @dataclass
@@ -25,6 +26,7 @@ class Candidate:
     subject_id: str
     cohort_id: str | None = None
     note: str | None = None   # why a previously failed subject is runnable again (automatic retry)
+    rerun_of: int | None = None   # `submit --rerun`: the successful attempt this candidate runs again
 
     def label(self) -> str:
         return f"{self.subject_type} {self.subject_id} / {self.stage}"
@@ -173,10 +175,51 @@ def prerequisites(db: DB, mode: str, stage: str, subject_type: str, subject_id: 
     return None
 
 
+def check_rerun(sel: Selection) -> None:
+    """`--rerun` names what it repeats: one stage, and for a per-sample stage the samples. Never a whole mode, never
+    every member of a cohort by default."""
+    if not sel.rerun:
+        return
+    if not sel.stage:
+        raise UgcError("--rerun needs --stage: it runs one stage again, never a whole mode")
+    if stage_spec(sel.stage).subject_type == "sample" and not sel.samples:
+        raise UgcError(f"--rerun of the per-sample stage {sel.stage} needs --samples or --samples-file: name the samples to run again")
+
+
+def rerun_followups(db: DB, sel: Selection, ugc_wgw_version: str, *, any_version: bool = False) -> list[str]:
+    """The stages after `sel.stage` that already succeeded for the rerun's subjects and so keep the outputs of the
+    attempt being replaced until they are run again themselves: `stage (n samples)` or `stage (cohort id)`, in the
+    mode's order. Empty for an optional stage, which no stage reads."""
+    if not sel.rerun or not sel.stage or stage_spec(sel.stage).optional:
+        return []
+    cohort = _cohort(db, sel)
+    version = None if any_version else ugc_wgw_version
+    samples = _subjects(db, sel, cohort)
+    stages = planned_stages(db, sel.mode, samples)
+    if sel.stage not in stages:
+        return []
+    out: list[str] = []
+    for later in stages[stages.index(sel.stage) + 1:]:
+        if stage_spec(later).subject_type == "sample":
+            n = sum(1 for sid in samples
+                    if later in member_stages(db, sel.mode, sid, allow_standalone=sel.allow_standalone_members)
+                    and db.latest_success("sample", sid, later, version) is not None)
+            if n:
+                out.append(f"{later} ({n} sample{'s' if n != 1 else ''})")
+        elif cohort is not None and db.latest_success("cohort", cohort.cohort_id, later, version) is not None:
+            out.append(f"{later} (cohort {cohort.cohort_id})")
+    return out
+
+
 def compute(db: DB, cfg: Config, sel: Selection, ugc_wgw_version: str, *, any_version: bool = False,
-            retry_failed: bool = False, max_attempts: int | None = None, now: str | None = None) -> Plan:
-    """`now` (UTC_FMT) decides whether a backoff has elapsed; tests inject it."""
+            retry_failed: bool = False, max_attempts: int | None = None, now: str | None = None,
+            rerun_started: set[tuple[str, str, str]] | None = None) -> Plan:
+    """`now` (UTC_FMT) decides whether a backoff has elapsed; tests inject it. With `sel.rerun`, a subject whose
+    latest run of the stage succeeded is a candidate again (once: `rerun_started` holds the subjects this invocation
+    has already given their new attempt, as (subject_type, subject_id, stage)); a failed or active latest run is
+    handled as always."""
     now = now or utc_now()
+    check_rerun(sel)
     cohort = _cohort(db, sel)
     if sel.mode == "joint" and cohort is None:
         raise UgcError("joint mode needs --cohort (cohort_call and downstream run in a cohort context)")
@@ -210,7 +253,16 @@ def compute(db: DB, cfg: Config, sel: Selection, ugc_wgw_version: str, *, any_ve
         for cand in candidates:
             latest = db.latest_run(cand.subject_type, cand.subject_id, stage, ugc_wgw_version)
             if latest is not None and latest.status == "success":
-                plan.done.append(cand)
+                if not sel.rerun or (cand.subject_type, cand.subject_id, stage) in (rerun_started or ()):
+                    plan.done.append(cand)
+                    continue
+                cand.rerun_of = latest.attempt
+                cand.note = f"rerun of the successful attempt {latest.attempt}"
+                reason = prerequisites(db, sel.mode, stage, cand.subject_type, cand.subject_id, cohort, lookup_version, allow_standalone=allow)
+                if reason:
+                    plan.blocked.append(Blocked(cand, reason))
+                else:
+                    plan.runnable.append(cand)
                 continue
             if latest is not None and latest.is_active:
                 plan.active.append(latest)

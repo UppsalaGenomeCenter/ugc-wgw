@@ -18,7 +18,7 @@ from pathlib import Path
 
 from . import summary_parsers as sp
 from . import summary_svg as sv
-from .config import Config
+from .config import PREVIEW_TOOLS, Config
 from .db import DB, Cohort, RunRecord
 from .inputs import SEX_TO_GROUP
 from .layout import run_files
@@ -56,7 +56,7 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "related_relatedness_max": 0.2,       # an undeclared pair at or above this warns `related`
     "related_hub_min": 10,                # a member related (undeclared) to this many members or more fails `related_hub`: contamination, not kinship; its partners are not flagged on its account
     "het_ratio_mad_max": 3.0,             # het/(het+hom-alt) beyond median ± this many MADs across the cohort warns `het_outlier`
-    "tr_outlier_count_mad_max": 3.0,      # a member's expansion outliers at ordinary loci (cohort_tr) beyond median + this many MADs across the cohort warns `tr_outlier_count_high`
+    "tr_outlier_count_mad_max": 3.0,      # a member's expansion outliers at ordinary loci (cohort_tr) beyond median + this many scaled MADs across the cohort warns `tr_outlier_count_high`
     "methyl_events_mad_max": 3.0,         # a member's methylation events (cohort_methyl) beyond median + this many MADs across the cohort warns `methyl_outlier`
     "sex_unknown_fails": 1,               # 1: a sample no source could sex fails `sex_not_inferred`; 0: it warns
 }
@@ -809,6 +809,12 @@ SUMMARY_CSS = """
 body{max-width:none;padding:0}
 nav.side{position:fixed;left:0;top:0;bottom:0;width:200px;overflow:auto;border-right:1px solid var(--line);background:var(--panel);padding:16px 12px;box-sizing:border-box;font-size:12px}
 nav.side a{display:block;padding:4px 6px;color:var(--fg);text-decoration:none;border-radius:3px}nav.side a:hover{background:var(--head)}
+nav.side{display:flex;flex-direction:column}nav.side>*{flex:0 0 auto}
+nav.side .members{flex:1 1 0;min-height:12em;overflow:auto;margin:4px -4px 0;padding:0 4px;border-top:1px solid var(--line)}
+nav.side .members a{padding:2px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}nav.side .members a[hidden]{display:none}
+nav.side input.navfilter{width:100%;box-sizing:border-box;margin:2px 0 6px;padding:4px 6px;font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:3px}
+nav.side .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;background:var(--line)}
+nav.side .dot-fail{background:var(--bad)}nav.side .dot-warn{background:var(--warn)}nav.side .navcount{color:var(--muted);margin:0 6px 4px;font-size:10px}
 nav.side .brand{font-weight:600;margin-bottom:10px;color:var(--accent);word-break:break-all}nav.side .sub{color:var(--muted);margin:10px 6px 4px;text-transform:uppercase;letter-spacing:0.06em;font-size:10px}
 main{margin-left:200px;padding:24px 28px 48px;max-width:1240px;box-sizing:border-box}
 section{scroll-margin-top:12px}h2{margin-top:40px}h3{font-size:13px;margin:18px 0 6px}h4{font-size:12px;margin:12px 0 4px;color:var(--muted)}
@@ -843,10 +849,78 @@ def _nav(brand: str, items: list[tuple[str, str]], extra: str = "") -> str:
     return f'<nav class="side"><div class="brand">{_esc(brand)}</div>{links}{extra}</nav>'
 
 
+# the member finder of the cohort page's side list: every member is a link; typing narrows the list by id, QC status
+# or flag name; Enter opens the first match
+NAV_JS = """
+document.querySelectorAll('nav.side input.navfilter').forEach(function(inp){var box=inp.parentNode.querySelector('.members');
+if(!box)return;var links=Array.from(box.querySelectorAll('a')),count=inp.parentNode.querySelector('.navcount');
+function apply(){var q=inp.value.trim().toLowerCase().split(/\\s+/).filter(Boolean),n=0;links.forEach(function(a){
+var k=a.dataset.k,hit=q.every(function(w){return k.indexOf(w)>=0;});a.hidden=!hit;n+=hit?1:0;});
+if(count)count.textContent=q.length?n+' of '+links.length:links.length+' members';}
+inp.addEventListener('input',apply);inp.addEventListener('keydown',function(e){if(e.key==='Enter'){
+var first=links.find(function(a){return !a.hidden;});if(first)location.href=first.href;}});apply();});
+"""
+
+
+TOOL_NAMES = {"pbmm2": "pbmm2", "pbweave": "pbweave", "deepvariant": "DeepVariant", "parabricks_deepvariant": "Parabricks DeepVariant",
+              "pbdv": "pbdv", "external": "external"}
+DEFAULT_TOOLS = "pbmm2 + deepvariant"
+
+
+def member_tools(db: DB, digest: dict[str, object]) -> dict[str, str]:
+    """The aligner and small-variant caller behind a member's results: the `tools` block its first per-sample run
+    recorded (0.19.0), else what every earlier run used (pbmm2 and DeepVariant; `external` for what came with a bam or
+    vcf sample). Read from the state database when a page is made: the per-sample digest does not carry it, so no
+    digest is rebuilt for it. `label` is the pair as one string, the key cohorts are grouped by."""
+    runs: dict[str, dict[str, object]] = digest.get("runs") or {}  # type: ignore[assignment]
+    kind = str((digest.get("sample") or {}).get("entry_kind") or "reads")  # type: ignore[union-attr]
+    tools: dict[str, str] = {"aligner": "pbmm2" if kind == "reads" else "external",
+                             "small_variant_caller": "external" if kind == "vcf" else "deepvariant"}
+    for stage in ("singleton", "upstream", "intake"):
+        ref = runs.get(stage)
+        run = db.get_run(str(ref.get("run_id"))) if isinstance(ref, dict) and ref.get("run_id") else None
+        recorded = run.meta.get("tools") if run is not None else None
+        if isinstance(recorded, dict):
+            tools = {k: str(v) for k, v in recorded.items()}
+            break
+    tools["label"] = f"{tools.get('aligner')} + {tools.get('small_variant_caller')}"
+    return tools
+
+
+def _tools_html(tools: dict[str, str]) -> str:
+    aligner, caller = tools.get("aligner", ""), tools.get("small_variant_caller", "")
+    device = f" on {tools['small_variant_device']}" if tools.get("small_variant_device") and caller != "external" else ""
+    preview = [TOOL_NAMES.get(t, t) for t in (aligner, caller) if t in PREVIEW_TOOLS]
+    note = (f" {' and '.join(preview)} {'are' if len(preview) > 1 else 'is'} from PacBio's pblab, which PacBio marks Preview; "
+            "the default tools are pbmm2 and DeepVariant.") if preview else ""
+    return (f"<p class='small'><b>Aligner and small-variant caller</b>: {_esc(TOOL_NAMES.get(aligner, aligner))}; "
+            f"{_esc(TOOL_NAMES.get(caller, caller))}{_esc(device)}.{_esc(note)}</p>")
+
+
+def member_nav(rows: list[dict[str, object]]) -> str:
+    """The side list of a cohort page: every member present, in the cohort's order, each with a dot for its QC status
+    (fail, warn) and its flags as the tooltip, under a box that narrows the list as one types an id, a status or a
+    flag name. About 150 bytes per member."""
+    if not rows:
+        return ""
+    links = []
+    for r in rows:
+        sid, status = str(r["id"]), str(r.get("qc_status") or "")
+        flags = [str(f) for f in (r.get("flags") or [])]
+        other = str(r.get("tools") or "")
+        key = " ".join([sid.lower(), status, *flags, *([other] if other and other != DEFAULT_TOOLS else [])])
+        tip = f"{status}: {', '.join(flags)}" if flags else status
+        links.append(f'<a href="{_esc(sid)}.summary.html" data-k="{_esc(key)}" title="{_esc(tip)}">'
+                     f'<span class="dot dot-{_esc(status)}"></span>{_esc(sid)}</a>')
+    return (f"<div class='sub'>members</div>"
+            f'<input class="navfilter" type="search" placeholder="find: id, status or flag" aria-label="find a member by id, QC status or flag">'
+            f"<div class='navcount'>{len(rows)} members</div><div class='members'>{''.join(links)}</div>")
+
+
 def _page(title: str, nav: str, body: str) -> str:
     return (f"<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><title>{_esc(title)}</title>"
             f"<style>{REPORT_CSS}{SUMMARY_CSS}</style></head><body>{nav}<main>{body}</main>"
-            f"<script>{REPORT_JS}</script></body></html>")
+            f"<script>{REPORT_JS}{NAV_JS if 'navfilter' in nav else ''}</script></body></html>")
 
 
 def _clip(text: str, n: int) -> Raw:
@@ -1208,7 +1282,8 @@ def _tr_cohort_html(tr_row: dict[str, object], cohort_id: str | None) -> str:
 
 def render_sample(d: dict[str, object], tools: list[dict[str, object]], *, project_name: str, project_url: str,
                   cohort_links: list[tuple[str, str]] | None = None, identity_row: dict[str, object] | None = None,
-                  identity_cohort: str | None = None, tr_row: dict[str, object] | None = None) -> str:
+                  identity_cohort: str | None = None, tr_row: dict[str, object] | None = None,
+                  tools_row: dict[str, str] | None = None) -> str:
     """The sample's page. `identity_row` is the sample's row of the cohort's cohort_qc tables (with the identity flags
     the cohort page computed for it) when the page is made with --cohort and that cohort has a cohort_qc run; `tr_row`
     the sample's part of the cohort's cohort_tr tables (counts, the screen rows worth a look, its strongest outliers):
@@ -1252,6 +1327,7 @@ def render_sample(d: dict[str, object], tools: list[dict[str, object]], *, proje
         + _cards(cards) + "<h3>QC flags</h3>" + _flags_table(qc)
         + "<p class='small muted'>Thresholds: " + _esc(", ".join(f"{k} = {v:g}" for k, v in sorted(qc.get("thresholds", {}).items()))) + "</p>"  # type: ignore[union-attr]
         + "<h3>Runs summarised</h3>" + _table(["stage", "run", "ugc-wgw version", "attempt", "finished"], run_rows, cls="")
+        + (_tools_html(tools_row) if tools_row else "")
         + (f"<p class='small'><b>External input</b>: this sample entered as the <code>{_esc(s.get('entry_kind'))}</code> kind: "
            + ("its aligned BAM" if s.get("entry_kind") == "bam" else "its aligned BAM and its small-variant and SV calls")
            + " were made outside this project; the run manifest names the files and the producing programs.</p>"
@@ -1581,7 +1657,8 @@ def run(cfg: Config, db: DB, code: CodeInfo, *, sample_ids: list[str] | None, co
         from .summary_cohort import build_cohort_digest  # noqa: PLC0415 - keeps the cohort page optional
         cruns = resolve_cohort_runs(db, cohort.cohort_id, mode, version)
         cdigest = build_cohort_digest(cohort, {sid: digests[sid] for sid in cohort.members if sid in digests}, cruns, mode, thr,
-                                      genes_of_interest=cfg.methyl_genes_of_interest)
+                                      genes_of_interest=cfg.methyl_genes_of_interest,
+                                      member_tools={sid: member_tools(db, digests[sid])["label"] for sid in cohort.members if sid in digests})
         ident: dict[str, object] = cdigest.get("identity", {}) or {}  # type: ignore[assignment]
         identity_rows = ident.get("members", {}) or {}  # type: ignore[assignment]
         trd: dict[str, object] = cdigest.get("tandem_repeats", {}) or {}  # type: ignore[assignment]
@@ -1600,7 +1677,7 @@ def run(cfg: Config, db: DB, code: CodeInfo, *, sample_ids: list[str] | None, co
         links = cohort_links or [(c, f"{c}.summary.html") for c in db.sample_cohorts(sid) if (out_dir / f"{c}.summary.html").exists()]
         hpath.write_text(render_sample(digest, tools, project_name=project_name, project_url=cfg.project_url or DEFAULT_PROJECT_URL,
                                        cohort_links=links, identity_row=identity_rows.get(sid), identity_cohort=cohort.cohort_id if cohort else None,
-                                       tr_row=tr_rows.get(sid)))
+                                       tr_row=tr_rows.get(sid), tools_row=member_tools(db, digest)))
         written.append(hpath)
         diag(f"{sid}: digest {'rebuilt' if sid in to_build else 'reused'}, wrote {hpath.name}")
         if (i + 1) % 50 == 0:

@@ -86,6 +86,56 @@ class InputsTest(unittest.TestCase):
         d = self.check_doc("singleton", inputs.generate(self.ctx("sample", "S1"), "singleton")[0])
         self.assertEqual(d["downstream.some_task.threads"], 8)
 
+    def test_pblab_choices(self):
+        """aligner and the pbdv flavours: each alone and together, what the run records as its tools, the refusals."""
+        tools = lambda stage, doc, kind="reads": inputs.tools_record(stage, doc, kind)
+        doc = inputs.generate(self.ctx("sample", "S1"), "singleton")[0]
+        d = self.check_doc("singleton", doc)
+        self.assertNotIn("aligner", d)                       # a default project keeps the inputs document it always had
+        self.assertNotIn("use_pbdv", d)
+        self.assertEqual(tools("singleton", doc), {"aligner": "pbmm2", "small_variant_caller": "deepvariant", "small_variant_device": "cpu"})
+        self.cfg.aligner = "pbweave"                          # the aligner alone
+        doc = inputs.generate(self.ctx("sample", "S1"), "singleton")[0]
+        d = self.check_doc("singleton", doc)
+        self.assertEqual((d["aligner"], d["use_gpu"], d.get("use_pbdv")), ("pbweave", False, None))
+        self.assertEqual(tools("singleton", doc)["aligner"], "pbweave")
+        self.cfg.aligner, self.cfg.deepvariant = "pbmm2", "pbdv"   # the caller alone, on a GPU
+        doc = inputs.generate(self.ctx("sample", "S1", "joint"), "upstream")[0]
+        d = self.check_doc("upstream", doc)
+        self.assertEqual((d.get("aligner"), d["use_gpu"], d["use_pbdv"], d["use_parabricks_deepvariant"]), (None, True, True, False))
+        self.assertNotIn(inputs.PARABRICKS_GPUS_INPUT, d)
+        self.assertEqual(tools("upstream", doc), {"aligner": "pbmm2", "small_variant_caller": "pbdv", "small_variant_device": "gpu"})
+        self.assertEqual(tools("upstream", doc, "bam")["aligner"], "external")   # an aligned BAM came with the sample
+        self.cfg.aligner, self.cfg.deepvariant = "pbweave", "pbdv-cpu"   # both, without a GPU
+        doc = inputs.generate(self.ctx("sample", "S1"), "singleton")[0]
+        d = self.check_doc("singleton", doc)
+        self.assertEqual((d["aligner"], d["use_gpu"], d["use_pbdv"]), ("pbweave", False, True))
+        self.assertEqual(tools("singleton", doc), {"aligner": "pbweave", "small_variant_caller": "pbdv", "small_variant_device": "cpu"})
+        self.cfg.stage_inputs = {"ugc_wgw_singleton": {"aligner": "pbmm2"}}   # an override is told as it ran
+        doc = inputs.generate(self.ctx("sample", "S1"), "singleton")[0]
+        self.assertEqual(tools("singleton", doc)["aligner"], "pbmm2")
+        self.cfg.stage_inputs = {}
+        self.cfg.deepvariant = "parabricks"
+        doc = inputs.generate(self.ctx("sample", "S1"), "singleton")[0]
+        self.assertEqual(tools("singleton", doc)["small_variant_caller"], "parabricks_deepvariant")
+        self.assertEqual(tools("intake", {}), {"aligner": "external", "small_variant_caller": "external"})
+        self.assertIsNone(tools("downstream", {}))
+        # the engine environment: a GPU type only for the flavours that ask for a GPU
+        from ugc_wgw import engine
+        for mode, expect in (("pbdv", True), ("pbdv-cpu", False), ("cpu", False), ("gpu", True)):
+            self.cfg.deepvariant = mode
+            self.assertEqual(bool(engine.run_env(self.cfg)), expect, mode)
+        # validation, in the config and in a profile
+        self.assertEqual(config.check_aligner(" PBweave "), "pbweave")
+        for bad in ("bwa", "", "minimap2"):
+            with self.assertRaises(UgcError):
+                config.check_aligner(bad)
+        self.assertEqual(config.check_deepvariant("pbdv-cpu"), "pbdv-cpu")
+        self.cfg.aligner, self.cfg.deepvariant = "pbweave", "pbdv"
+        config.save(self.cfg)
+        again = config.load(self.cfg.project_dir)
+        self.assertEqual((again.aligner, again.deepvariant), ("pbweave", "pbdv"))
+
     def test_config_keys_round_trip_and_validation(self):
         self.cfg.deepvariant, self.cfg.gpu_type, self.cfg.parabricks_gpus = "gpu", "l40s", 6
         config.save(self.cfg)

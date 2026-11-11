@@ -470,14 +470,14 @@ def _tr_screen_loci(members: list[str]) -> str:
     n = len(members)
     cols = ["trid", "gene", "disease", "inheritance", "chrom", "start", "end", "motifs", "pathogenic_motifs", "benign_min", "benign_max", "intermediate_min",
             "intermediate_max", "pathogenic_min", "pathogenic_max", "measure", "n_expected", "n_called", "call_rate", "n_alleles", "copies_median", "copies_p95",
-            "copies_max", "n_normal", "n_intermediate", "n_above_benign", "n_below_benign", "n_pathogenic", "n_expanded_other_motif",
-            "frac_alleles_above_benign", "am_median_xx", "am_median_xy", "twin_trid", "call_note"]
+            "copies_max", "n_normal", "n_intermediate", "n_above_benign", "n_below_benign", "n_below_pathogenic", "n_not_assessable", "n_pathogenic",
+            "n_expanded_other_motif", "frac_alleles_above_benign", "frac_alleles_below_benign", "am_median_xx", "am_median_xy", "twin_trid", "call_note"]
     htt = ["HD_HTT", "HTT", "HTT disease", "AD", "chr4", "100", "160", "CAG,CCG", "CAG", "6", "26", "27", "39", "40", "250", "mc_pathogenic", str(n), str(n), "1",
-           str(2 * n), "18", "45", "45", str(max(0, n - 1)), "0", "0", "0", "1" if n else "0", "0", "0.1", "0.1", "0.2", "chr4_90_260_GCC", "ok"]
+           str(2 * n), "18", "45", "45", str(max(0, n - 1)), "0", "0", "0", "0", "0", "1" if n else "0", "0", "0.1", "0", "0.1", "0.2", "chr4_90_260_GCC", "ok"]
     called = n - (1 if n >= 3 else 0)
     fmr1 = ["FXS_FMR1", "FMR1", "FMR1 disease", "XD", "chrX", "700", "760", "CGG", "CGG", "5", "44", "45", "200", "201", "2000", "mc_pathogenic", str(n), str(called),
-            f"{called / n:.4f}" if n else "", str(2 * called), "30", "60", "60", str(max(0, called - 1)), "1" if n >= 2 else "0", "0", "0", "0", "0", "0.1", "0.4", "0.9",
-            "", "few_uncalled" if called < n else "ok"]
+            f"{called / n:.4f}" if n else "", str(2 * called), "30", "60", "60", str(max(0, called - 1)), "1" if n >= 2 else "0", "0", "0", "0", "0", "0", "0", "0.1",
+            "0", "0.4", "0.9", "", "few_uncalled" if called < n else "ok"]
     return "\t".join(cols) + "\n" + "\t".join(htt) + "\n" + "\t".join(fmr1) + "\n"
 
 

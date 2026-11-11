@@ -74,6 +74,9 @@ ugc_wgw_pangenome_member_stats_gather	1	2G	-	-	-	cohort_pangenome	workflows/ugc_
 ugc_wgw_pangenome_names	1	2G	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/names.wdl:7	
 ugc_wgw_pangenome_vcf_post	4	8G	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/vcf_post.wdl:7	cpu from input default; memory from input default; command uses threads
 ugc_wgw_pav	8	40G	-	-	-	assembly_call	workflows/ugc_wgw/assembly/pav.wdl:7	cpu from workflow input default; cpu input: pav_threads; memory from workflow input default; memory input: pav_mem_gb; command uses threads
+ugc_wgw_pbdv_call_cpu	32	64G	-	-	-	singleton,upstream	workflows/ugc_wgw/pblab/pblab.wdl:282	cpu from input default; memory from input default; command uses threads
+ugc_wgw_pbdv_call_gpu	16	64G	-	-	-	singleton,upstream	workflows/ugc_wgw/pblab/pblab.wdl:154	cpu from input default; memory from input default; command uses threads; gpu
+ugc_wgw_pbweave_align	24	96G	-	-	-	singleton,upstream	workflows/ugc_wgw/pblab/pblab.wdl:9	cpu from input default; memory from input default; command uses threads; command uses mem
 ugc_wgw_qc_summary	1	2G	-	-	-	cohort_qc	workflows/ugc_wgw/qc/somalier.wdl:609	
 ugc_wgw_regions_prepare	1	1G	-	-	-	cohort_call,cohort_merge,cohort_freq,cohort_tr	workflows/ugc_wgw/cohort/regions.wdl:9	
 ugc_wgw_reliable_regions	1	4G	-	-	-	assembly_call	workflows/ugc_wgw/assembly/masking.wdl:93	
@@ -84,7 +87,7 @@ ugc_wgw_somalier_ped	1	1G	-	-	-	cohort_qc	workflows/ugc_wgw/qc/somalier.wdl:320
 ugc_wgw_somalier_relate	2	4G	-	-	-	cohort_qc	workflows/ugc_wgw/qc/somalier.wdl:406	cpu from workflow input default; cpu input: relate_threads; memory from workflow input default; memory input: relate_mem_gb
 ugc_wgw_somalier_relate_one	1	1G	-	-	-	singleton,upstream,intake	workflows/ugc_wgw/qc/somalier.wdl:100	
 ugc_wgw_svx_merge	8	-	-	-	-	cohort_merge	workflows/ugc_wgw/cohort/svx.wdl:9	cpu from workflow input default; cpu input: svx_threads; memory: "~{mem_gb} GiB" where mem_gb = svx_mem = select_first([svx_mem_gb, 8 + ceil(n_samples * 0.05)]); memory scales with N; command uses threads
-ugc_wgw_tr_gather	2	4G	-	-	-	cohort_tr	workflows/ugc_wgw/tr/cohort.wdl:661	cpu from input default; memory from workflow input default; memory input: gather_mem_gb; command uses threads
+ugc_wgw_tr_gather	2	4G	-	-	-	cohort_tr	workflows/ugc_wgw/tr/cohort.wdl:674	cpu from input default; memory from workflow input default; memory input: gather_mem_gb; command uses threads
 ugc_wgw_tr_locus_stats	2	2G	-	-	-	cohort_tr	workflows/ugc_wgw/tr/cohort.wdl:9	cpu from input default; memory from workflow input default; memory input: stats_mem_gb
 ugc_wgw_tr_screen	1	2G	-	-	-	cohort_tr	workflows/ugc_wgw/tr/cohort.wdl:300	cpu from input default; memory from workflow input default; memory input: screen_mem_gb
 ugc_wgw_trgt_lps	4	16G	-	-	-	cohort_merge	workflows/ugc_wgw/cohort/trgt_merge_lps.wdl:122	cpu from workflow input default; cpu input: trgt_lps_threads; memory from input default; command uses threads

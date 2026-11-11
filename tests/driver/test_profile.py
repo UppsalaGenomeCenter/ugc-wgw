@@ -32,17 +32,23 @@ class ProfileTest(unittest.TestCase):
 
     def test_shipped_profiles_apply_and_their_keys_are_real_inputs(self):
         shipped = sorted(p.stem for p in (REPO / "backends" / "hpc" / "profiles").glob("*.json"))
-        self.assertEqual(shipped, ["assembly", "cpu", "eval-sawfish23", "parabricks"])
+        self.assertEqual(shipped, ["assembly", "cpu", "eval-sawfish23", "parabricks", "pblab"])
         for name in shipped:
             code, err, cfg = self.init("--profile", name)
             self.assertEqual(code, 0, err)
             doc = json.loads((REPO / "backends" / "hpc" / "profiles" / f"{name}.json").read_text())
-            self.assertEqual(cfg.stage_inputs, doc["stage_inputs"])
+            self.assertEqual(cfg.stage_inputs, doc.get("stage_inputs", {}))
+            if name == "pblab":
+                self.assertEqual((cfg.aligner, cfg.deepvariant), ("pbweave", "pbdv"))
             self.assertEqual((cfg.max_inflight, cfg.deepvariant), (doc.get("max_inflight", 4), doc.get("deepvariant", "cpu")))
             self.assertEqual(cfg.gpu_type, doc.get("gpu_type", ""))
             self.assertEqual(cfg.profile["name"], name)
             self.assertTrue(cfg.profile["path"].endswith(f"backends/hpc/profiles/{name}.json"))
             self.assertRegex(cfg.profile["sha256"], r"^[0-9a-f]{64}$")
+            if "stage_inputs" not in doc:   # pblab: project keys only
+                self.assertEqual(sorted(cfg.profile["applied"]), sorted(k for k in doc if k != "description"))
+                self.assertIn(f"profile {name} (", err)
+                continue
             stage, inputs = next(iter(doc["stage_inputs"].items()))
             self.assertIn(f"stage_inputs.{stage}.{next(iter(inputs))}", cfg.profile["applied"])
             if "max_inflight" in doc:

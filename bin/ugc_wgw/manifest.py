@@ -80,6 +80,7 @@ def build(run: RunRecord, result: RunResult, code: CodeInfo, engine: dict[str, s
         "slurm_job_ids": list(run.meta.get("slurm_job_ids", [])),  # type: ignore[arg-type]
         "exit_code": result.exit_code,
         "resource_policy": run.meta.get("resource_policy"),  # {path, sha256} of the site policy at launch, or None
+        "tools": run.meta.get("tools"),  # singleton/upstream/intake: {aligner, small_variant_caller, small_variant_device}; None before 0.19.0 (pbmm2, DeepVariant)
         "gpu_type": run.meta.get("gpu_type"),  # the gres type the plugin applied to GPU tasks ('' = any); None for the cpu flavour
         "escalations": run.meta.get("escalations"),  # task -> {time_factor, memory_factor} this attempt ran with (escalate.py); None without
         "escalation_next": run.meta.get("escalation"),  # what the next attempt carries after a time/memory failure; None otherwise

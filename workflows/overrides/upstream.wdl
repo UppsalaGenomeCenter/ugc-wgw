@@ -1,8 +1,8 @@
 version 1.0
 
-# ugc-pacbio-wgw — upstream subworkflow with a prebuilt pbmm2 reference index and the sex resolved before sawfish (override of upstream subworkflow: imports overrides/pbmm2.wdl, pbmm2_index input passed to the HiFi and fail-reads alignments; somalier extract, one-sample relate and ugc_wgw_resolve_sex after mosdepth, sawfish_discover gets the resolved sex; mitorsaw's chrM genotypes collapsed to diploid and haplogrouped after mitorsaw)
+# ugc-pacbio-wgw — upstream subworkflow with a prebuilt pbmm2 reference index and the sex resolved before sawfish (override of upstream subworkflow: imports overrides/pbmm2.wdl, pbmm2_index input passed to the HiFi and fail-reads alignments; somalier extract, one-sample relate and ugc_wgw_resolve_sex after mosdepth, sawfish_discover gets the resolved sex; mitorsaw's chrM genotypes collapsed to diploid and haplogrouped after mitorsaw; since 0.19.0 pblab's pbweave and pbdv as project choices: aligner, use_pbdv)
 # origin: vendor/hifi-human-wgs-wdl/workflows/upstream/upstream.wdl @ v4.0.0
-# see docs/DESIGN.md §18 (2026-10-15, 2026-11-05 ×3), DERIVED_FILES.md
+# see docs/DESIGN.md §18 (2026-10-15, 2026-11-05 ×3, 2026-11-11 pblab), DERIVED_FILES.md
 
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/structs.wdl"
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/kivvi.wdl" as Kivvi
@@ -17,6 +17,7 @@ import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/parab
 import "pbmm2.wdl" as Pbmm2  # ugc-wgw override of the alignment subworkflow: prebuilt reference index
 import "../ugc_wgw/qc/somalier.wdl" as Somalier  # ugc-wgw: somalier extract and the sex resolution
 import "../ugc_wgw/mito/collapse.wdl" as Mito  # ugc-wgw: mitorsaw's chrM genotypes collapsed, haplogroups
+import "../ugc_wgw/pblab/pblab.wdl" as PbLab  # ugc-wgw: pblab's preview tools (pbweave, pbdv) as a project choice
 import "../ugc_wgw/intake/checks.wdl" as Checks  # ugc-wgw: the checks of an aligned BAM given instead of reads (the bam entry kind)
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl" as Pbmm2Tasks  # upstream's tasks for the fail-reads path
 
@@ -274,6 +275,12 @@ workflow upstream {
     use_gpu: {
       description: "Use GPU when possible"
     }
+    aligner: {
+      description: "ugc-wgw: the aligner of the HiFi reads: pbmm2 (default) or pbweave (pblab, preview: one task for all of the sample's read files, no chunking). The fail-reads path keeps pbmm2; an aligned_bam_in skips both"
+    }
+    use_pbdv: {
+      description: "ugc-wgw: call small variants with pbdv (pblab, preview: DeepVariant 1.10.0's PACBIO model reimplemented) instead of DeepVariant or Parabricks: on one GPU with use_gpu, else on CPUs"
+    }
     declared_sex: {
       description: "ugc-wgw: the sample sheet's sex (MALE or FEMALE), when it has one; the first source of the resolved sex"
     }
@@ -329,6 +336,8 @@ workflow upstream {
     Boolean single_sample = false
     Boolean use_gpu
     Boolean use_parabricks_deepvariant
+    String aligner = "pbmm2"
+    Boolean use_pbdv = false
     String? declared_sex
     File somalier_sites_vcf
     Int somalier_sex_min_x_sites = 50
@@ -352,7 +361,21 @@ workflow upstream {
     }
   }
 
-  if (!defined(aligned_bam_in)) {
+  # ugc-wgw: pbweave (pblab, preview) aligns all read files of the sample in one task, when the project chose it
+  Boolean use_pbweave = aligner == "pbweave"
+  if (!defined(aligned_bam_in) && use_pbweave) {
+    call PbLab.ugc_wgw_pbweave_align { input:
+      sample_id = sample_id,
+      bams = hifi_reads,
+      ref_fasta = ref_fasta,
+      ref_index = ref_index,
+      ref_name = ref_name,
+      ugc_wgw_container_registry = ugc_wgw_container_registry,
+      runtime_attributes = default_runtime_attributes
+    }
+  }
+
+  if (!defined(aligned_bam_in) && !use_pbweave) {
     scatter (hifi_read_bam in hifi_reads) {
       call Pbmm2.pbmm2 as pbmm2 { input:
         sample_id = sample_id,
@@ -387,10 +410,12 @@ workflow upstream {
 
   File aligned_bam_data = select_first([
     aligned_bam_in,
+    ugc_wgw_pbweave_align.aligned_bam,
     aligned_from_reads
   ])
   File aligned_bam_index = select_first([
     aligned_bam_in_index,
+    ugc_wgw_pbweave_align.aligned_bam_index,
     aligned_from_reads_index
   ])
 
@@ -439,7 +464,34 @@ workflow upstream {
     String resolved_sex_defined = ugc_wgw_resolve_sex.resolved_sex
   }
 
-  if (use_gpu && use_parabricks_deepvariant) {
+  # ugc-wgw: pbdv (pblab, preview) in the place of DeepVariant and Parabricks, on a GPU or on CPUs (two tasks: a
+  # task that declares gpuCount is given a GPU by the SLURM backend whatever the count)
+  if (use_pbdv && use_gpu) {
+    call PbLab.ugc_wgw_pbdv_call_gpu { input:
+      sample_id = sample_id,
+      aligned_bam = aligned_bam_data,
+      aligned_bam_index = aligned_bam_index,
+      ref_fasta = ref_fasta,
+      ref_index = ref_index,
+      ref_name = ref_name,
+      ugc_wgw_container_registry = ugc_wgw_container_registry,
+      runtime_attributes = default_runtime_attributes
+    }
+  }
+  if (use_pbdv && !use_gpu) {
+    call PbLab.ugc_wgw_pbdv_call_cpu { input:
+      sample_id = sample_id,
+      aligned_bam = aligned_bam_data,
+      aligned_bam_index = aligned_bam_index,
+      ref_fasta = ref_fasta,
+      ref_index = ref_index,
+      ref_name = ref_name,
+      ugc_wgw_container_registry = ugc_wgw_container_registry,
+      runtime_attributes = default_runtime_attributes
+    }
+  }
+
+  if (!use_pbdv && use_gpu && use_parabricks_deepvariant) {
     call ParabricksDeepVariant.parabricks_deepvariant { input:
       sample_id = sample_id,
       aligned_bam = aligned_bam_data,
@@ -451,7 +503,7 @@ workflow upstream {
     }
   }
 
-  if (!use_parabricks_deepvariant || (!use_gpu && use_parabricks_deepvariant)) {
+  if (!use_pbdv && (!use_parabricks_deepvariant || (!use_gpu && use_parabricks_deepvariant))) {
     call DeepVariant.deepvariant { input:
       sample_id = sample_id,
       aligned_bams = [
@@ -469,18 +521,26 @@ workflow upstream {
   }
 
   File deepvariant_vcf = select_first([
+    ugc_wgw_pbdv_call_gpu.vcf,
+    ugc_wgw_pbdv_call_cpu.vcf,
     parabricks_deepvariant.vcf,
     deepvariant.vcf
   ])
   File deepvariant_vcf_index = select_first([
+    ugc_wgw_pbdv_call_gpu.vcf_index,
+    ugc_wgw_pbdv_call_cpu.vcf_index,
     parabricks_deepvariant.vcf_index,
     deepvariant.vcf_index
   ])
   File deepvariant_gvcf = select_first([
+    ugc_wgw_pbdv_call_gpu.gvcf,
+    ugc_wgw_pbdv_call_cpu.gvcf,
     parabricks_deepvariant.gvcf,
     deepvariant.gvcf
   ])
   File deepvariant_gvcf_index = select_first([
+    ugc_wgw_pbdv_call_gpu.gvcf_index,
+    ugc_wgw_pbdv_call_cpu.gvcf_index,
     parabricks_deepvariant.gvcf_index,
     deepvariant.gvcf_index
   ])
@@ -757,6 +817,7 @@ workflow upstream {
     # qc messages
     Array[String] msg = flatten([
       flatten(select_first([pbmm2.msg, []])),
+      select_first([ugc_wgw_pbweave_align.msg, []]),
       select_first([bam_in_checks.msg, []]),
       [
         include_fail_reads

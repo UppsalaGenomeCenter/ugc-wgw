@@ -36,5 +36,5 @@ somalier_1kg_tar	<local_path_prefix>/ugc-wgw-qc-0.1.0/1kg.somalier.tar.gz
 methbat_report_regions_tsv	<local_path_prefix>/ugc-wgw-methyl-0.1.0/methbat_report_regions.hg38.tsv
 methbat_map	<local_path_prefix>/ugc-wgw-methyl-0.1.0/methbat_map.GRCh38_GIABv3.tsv
 methbat_atlas_tsv	<local_path_prefix>/ugc-wgw-methyl-0.1.0/nanomix_39Bisulfite.methbat.tsv
-tr_disease_loci_tsv	<local_path_prefix>/ugc-wgw-tr-0.1.0/tr_disease_loci.strchive-2.4.4.tsv
-tr_named_overlaps_tsv	<local_path_prefix>/ugc-wgw-tr-0.1.0/tr_named_overlaps.tsv
+tr_disease_loci_tsv	<local_path_prefix>/ugc-wgw-tr-0.2.0/tr_disease_loci.strchive-2.4.4.tsv
+tr_named_overlaps_tsv	<local_path_prefix>/ugc-wgw-tr-0.2.0/tr_named_overlaps.tsv

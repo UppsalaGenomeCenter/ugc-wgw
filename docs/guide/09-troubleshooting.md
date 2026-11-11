@@ -186,7 +186,12 @@ what the warnings prevent.
   the arguments, 2 MB on Linux: about 4,000 samples at two files each.
 - **`ugc-wgw resources`: `run_options has no --nv`**, or the task fails with
   `could not find a GPU` / `CUDA_ERROR_NO_DEVICE` / TensorFlow listing no
-  GPU: the containers do not see the node's driver. Set `SINGULARITY_NV=1`
+  GPU, or pbdv stops within seconds with `CUDA error
+  cudaErrorInsufficientDriver ... CUDA driver version is insufficient for
+  CUDA runtime version` (and `nvidia-smi: command not found` above it in
+  the task's `stderr.txt`): the containers do not see the node's driver.
+  With `--nv` in place the same pbdv message means what it says, a host
+  driver older than the tool needs. Set `SINGULARITY_NV=1`
   in the site file and reinstall (`--force`), or add `"--nv"` to
   `[singularity] run_options` of the installed `miniwdl.cfg`.
 - **`ugc-wgw resources`: `no GPU partition`**, or the job sits pending with

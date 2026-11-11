@@ -32,11 +32,14 @@ Reading the tables:
 | `ugc_wgw_cactus_split` | 32 | 128G | cohort_pangenome | cpu from workflow input default; cpu input: split_cpu; memory from workflow input default; memory input: split_mem_gb; command uses threads; command uses mem |
 | `pbmm2_align_wgs` | 32 | 64G | singleton, upstream | cpu from input default; memory from input default; command uses threads |
 | `ugc_wgw_flagger_align` | 32 | 64G | assembly | cpu from workflow input default; cpu input: flagger_align_threads; memory from workflow input default; memory input: flagger_align_mem_gb; command uses threads |
+| `ugc_wgw_pbdv_call_cpu` | 32 | 64G | singleton, upstream | cpu from input default; memory from input default; command uses threads |
 | `pbsamoa_merge` | 32 | 32G | singleton, upstream | cpu from input default; memory from input default; command uses threads; command uses mem |
 | `glnexus` | 32 | - | cohort_call, cohort_merge | cpu from workflow input default; cpu input: glnexus_threads; memory: "~{mem_gb} GiB" where mem_gb = glnexus_mem_gb = glnexus_mem = select_first([glnexus_mem_gb, 32 + ceil(n_samples * 0.1)]); memory scales with N; command uses threads; command uses mem |
+| `ugc_wgw_pbweave_align` | 24 | 96G | singleton, upstream | cpu from input default; memory from input default; command uses threads; command uses mem |
 | `ugc_wgw_yak_count` | 24 | - | assembly | cpu from workflow input default; cpu input: yak_threads; memory: "~{mem_gb} GiB" where mem_gb = yak_mem_gb_used = select_first([yak_mem_gb, if low_depth then 70 else 50]); command uses threads |
 | `sawfish_discover` | 16 | 128G | singleton, upstream | cpu from input default; memory from input default; command uses threads |
 | `hiphase` | 16 | 96G | singleton, downstream | cpu from input default; memory from input default; command uses threads |
+| `ugc_wgw_pbdv_call_gpu` | 16 | 64G | singleton, upstream | cpu from input default; memory from input default; command uses threads; gpu |
 | `ugc_wgw_dipcall` | 16 | 48G | assembly_call | cpu from workflow input default; cpu input: dipcall_threads; memory from workflow input default; memory input: dipcall_mem_gb |
 | `index_input_bam` | 16 | 32G | singleton, upstream | cpu from input default; memory from input default; command uses threads |
 | `sawfish_call` | 16 | 32G | singleton, upstream, cohort_call | cpu from input default; memory from input default; command uses threads |
@@ -49,13 +52,14 @@ Reading the tables:
 
 ## ugc_wgw_singleton
 
-35 tasks, in first-call order.
+38 tasks, in first-call order.
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
 | `filter_trgt_catalog` | 4 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/process_trgt_catalog/process_trgt_catalog.wdl:74` |
 | `create_pbmm2_index` | 8 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:88` |
 | `ugc_wgw_input_checks` | 1 | 2G | - | `workflows/ugc_wgw/intake/checks.wdl:9` |
+| `ugc_wgw_pbweave_align` | 24 | 96G | cpu from input default; memory from input default; command uses threads; command uses mem | `workflows/ugc_wgw/pblab/pblab.wdl:9` |
 | `index_input_bam` | 16 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:154` |
 | `pbmm2_align_wgs` | 32 | 64G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:269` |
 | `pbsamoa_merge` | 32 | 32G | cpu from input default; memory from input default; command uses threads; command uses mem | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/pbsamoa.wdl:5` |
@@ -63,6 +67,8 @@ Reading the tables:
 | `ugc_wgw_somalier_extract` | 1 | 2G | memory from input default; memory from workflow input default; memory input: extract_mem_gb | `workflows/ugc_wgw/qc/somalier.wdl:9` |
 | `ugc_wgw_somalier_relate_one` | 1 | 1G | - | `workflows/ugc_wgw/qc/somalier.wdl:100` |
 | `ugc_wgw_resolve_sex` | 1 | 1G | - | `workflows/ugc_wgw/qc/somalier.wdl:176` |
+| `ugc_wgw_pbdv_call_gpu` | 16 | 64G | cpu from input default; memory from input default; command uses threads; gpu | `workflows/ugc_wgw/pblab/pblab.wdl:154` |
+| `ugc_wgw_pbdv_call_cpu` | 32 | 64G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/pblab/pblab.wdl:282` |
 | `run_parabricks_deepvariant` | 48 | 192G | cpu from input default; memory from input default; command uses threads; gpu | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/parabricks/parabricks_deepvariant.wdl:94` |
 | `deepvariant_make_examples` | 8 | 32G | cpu from call site; cpu from input default; memory from call site; memory from input default; command uses threads; command uses mem | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:160` |
 | `deepvariant_call_variants_cpu` | 64 | 28G | cpu from workflow input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:330` |
@@ -91,13 +97,14 @@ Reading the tables:
 
 ## ugc_wgw_upstream
 
-25 tasks, in first-call order.
+28 tasks, in first-call order.
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
 | `filter_trgt_catalog` | 4 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/process_trgt_catalog/process_trgt_catalog.wdl:74` |
 | `create_pbmm2_index` | 8 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:88` |
 | `ugc_wgw_input_checks` | 1 | 2G | - | `workflows/ugc_wgw/intake/checks.wdl:9` |
+| `ugc_wgw_pbweave_align` | 24 | 96G | cpu from input default; memory from input default; command uses threads; command uses mem | `workflows/ugc_wgw/pblab/pblab.wdl:9` |
 | `index_input_bam` | 16 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:154` |
 | `pbmm2_align_wgs` | 32 | 64G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:269` |
 | `pbsamoa_merge` | 32 | 32G | cpu from input default; memory from input default; command uses threads; command uses mem | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/pbsamoa.wdl:5` |
@@ -105,6 +112,8 @@ Reading the tables:
 | `ugc_wgw_somalier_extract` | 1 | 2G | memory from input default; memory from workflow input default; memory input: extract_mem_gb | `workflows/ugc_wgw/qc/somalier.wdl:9` |
 | `ugc_wgw_somalier_relate_one` | 1 | 1G | - | `workflows/ugc_wgw/qc/somalier.wdl:100` |
 | `ugc_wgw_resolve_sex` | 1 | 1G | - | `workflows/ugc_wgw/qc/somalier.wdl:176` |
+| `ugc_wgw_pbdv_call_gpu` | 16 | 64G | cpu from input default; memory from input default; command uses threads; gpu | `workflows/ugc_wgw/pblab/pblab.wdl:154` |
+| `ugc_wgw_pbdv_call_cpu` | 32 | 64G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/pblab/pblab.wdl:282` |
 | `run_parabricks_deepvariant` | 48 | 192G | cpu from input default; memory from input default; command uses threads; gpu | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/parabricks/parabricks_deepvariant.wdl:94` |
 | `deepvariant_make_examples` | 8 | 32G | cpu from call site; cpu from input default; memory from call site; memory from input default; command uses threads; command uses mem | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:160` |
 | `deepvariant_call_variants_cpu` | 64 | 28G | cpu from workflow input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:330` |
@@ -226,7 +235,7 @@ Reading the tables:
 | `ugc_wgw_regions_prepare` | 1 | 1G | - | `workflows/ugc_wgw/cohort/regions.wdl:9` |
 | `ugc_wgw_tr_screen` | 1 | 2G | cpu from input default; memory from workflow input default; memory input: screen_mem_gb | `workflows/ugc_wgw/tr/cohort.wdl:300` |
 | `ugc_wgw_tr_locus_stats` | 2 | 2G | cpu from input default; memory from workflow input default; memory input: stats_mem_gb | `workflows/ugc_wgw/tr/cohort.wdl:9` |
-| `ugc_wgw_tr_gather` | 2 | 4G | cpu from input default; memory from workflow input default; memory input: gather_mem_gb; command uses threads | `workflows/ugc_wgw/tr/cohort.wdl:661` |
+| `ugc_wgw_tr_gather` | 2 | 4G | cpu from input default; memory from workflow input default; memory input: gather_mem_gb; command uses threads | `workflows/ugc_wgw/tr/cohort.wdl:674` |
 
 ## ugc_wgw_cohort_methyl
 

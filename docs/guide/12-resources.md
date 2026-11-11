@@ -256,6 +256,65 @@ hom-alt and indels, and a higher Ts/Tv on the same BAM. Treat it as a
 flavour to validate against a truth set for your data before production
 use, not as a drop-in accelerator.
 
+## The pblab tools
+
+A project that chose pblab's preview tools (chapter 05) runs three other
+tasks in `singleton` and `upstream`, all from one image of ours (PacBio's
+release tarball on upstream's base image):
+
+| Task | When | Default request | What it does |
+|---|---|---|---|
+| `ugc_wgw_pbweave_align` | `aligner: pbweave` | 24 cores, 96 GiB | Builds the reference index (seconds), aligns all read files of the sample and sorts, in one task: no chunks, no merge. The sort is in memory up to the request less a margin, then spills to `TMPDIR` (the node's scratch when the site has one). |
+| `ugc_wgw_pbdv_call_gpu` | `deepvariant: pbdv` | 16 cores, 64 GiB, 1 GPU | pbdv with its networks on the GPU; `make_examples` stays on the cores. |
+| `ugc_wgw_pbdv_call_cpu` | `deepvariant: pbdv-cpu` | 32 cores, 64 GiB | The same on CPUs alone. |
+
+Their inputs are nested keys like any task's
+(`upstream.ugc_wgw_pbweave_align.threads`, `…mem_gb`;
+`upstream.ugc_wgw_pbdv_call_gpu.threads`), and policy rows apply by task
+name. The GPU task needs what the other GPU tasks need (`--nv`, a GPU
+partition; `ugc-wgw resources` warns when they are missing) and takes the
+project's `gpu_type`; it used 6.7 GB of GPU memory on an 11 GB card here,
+and PacBio's own runs are on an L4 and an RTX PRO 6000.
+
+What is measured so far. PacBio's figures for a 60 Gb HG002 genome:
+pbweave 30 s on 64 cores with 61 GB (pbmm2: 15 minutes), pbdv 2 min 45 s
+on 16 cores and one L4 with 33 GB (DeepVariant on 64 cores: 23.5 minutes).
+On the dev machine, chr20 of HG002 at 48.7x on 24 cores: the index 16 s
+and 10 GB, alignment and sort 26 s; pbdv 52 to 128 s with a GPU (an RTX
+2080 Ti) and 9 min 52 s without. The whole-genome figures on the
+cluster's nodes are still to be measured: start from the defaults and read
+`ugc-wgw usage --by task` after the first samples.
+
+What the tools change in the results, on the same chr20 data against GIAB's
+v5.0q benchmark: pbdv on a pbmm2 BAM scores as DeepVariant does (SNV F1
+0.9985 with the same true and false counts; indel 0.9498 against 0.9499),
+and its call set differs from DeepVariant's in 72 of 316,000 records.
+pbweave followed by pbdv scores 0.9984 and 0.9502. pbdv's CPU and GPU runs
+differ from each other in about 130 records of 400,000, and PacBio notes
+last-digit differences between GPU models, so two runs of one sample on
+different nodes are not byte-identical, as with Parabricks. Unlike
+Parabricks, pbdv is the same model as DeepVariant 1.10.0 and behaves like
+it: over four members its PASS calls differ from DeepVariant's in a
+handful of records per 94,000 inside the benchmark regions, and every tool
+after it (sawfish, TRGT, HiPhase, the methylation pileup) gives the same
+result.
+
+pbweave is a new aligner, 99.65% of whose confident placements are
+pbmm2's. `tests/smoke/run.sh eval pblab` puts a pblab project beside the
+production one member by member (below, "Evaluation profiles"). On chr20
+of the GIAB trio: inside the benchmark regions (58 of the chromosome's 64
+Mb) 99.0 to 99.2% of the PASS small variants are the same record and
+genotype and the SV sets agree at F1 0.98; TRGT's allele lengths are
+identical at 99.1% of the loci; phasing, CpG counts, MethBat's classes and
+StarPhase's diplotypes are unchanged or within a percent. In the 6 Mb the
+benchmark leaves out (centromere, satellites, segmental duplications) the
+two aligners place reads differently: 54% of the small variants there are
+shared, and over all SV calls the agreement falls to F1 0.82 to 0.88.
+Nothing scores those regions, so neither aligner is shown wrong; but a
+cohort's calls there will differ by aligner, which is one more reason not
+to mix the two in one cohort and the thing to look at when production
+genomes are compared.
+
 ## A worked policy
 
 `examples/resources.tsv` is a policy for one real cluster: 48-core,
@@ -522,8 +581,11 @@ hundreds of members), so the task's time is bcftools's reading time and
 its memory flat. `ugc_wgw_tr_screen` (1 cpu, `screen_mem_gb` 2 GB) reads
 135 records and one pass of the trgt-lps table; `ugc_wgw_tr_gather` (2 cpu,
 `gather_mem_gb` 4 GB) concatenates and bgzips, holding the outlier pairs in
-memory. On the chr20 smoke cohort the whole stage is under two minutes;
-the figures at hundreds of members come from the first production run.
+memory. On the chr20 smoke cohort the whole stage is under two minutes.
+Measured on 864 whole genomes (2026-11-11): 26 `ugc_wgw_tr_locus_stats`
+jobs of 32 s on average with a peak of 444 MB, 0.46 core-hours together;
+the screen 26 s; the gather 32 s with 57 MB and 590 MB written. The
+defaults are generous by a factor of four and can stay.
 
 ## The methylation layer and the intake stage
 
@@ -580,6 +642,17 @@ against 28 min and 68 GB for 2.2.1 over the 864, so 2.3.0 became the
 default in 0.17.0. A `resources.tsv` row of 16 GB for `sawfish_discover`
 is safe with it (the task's own request is 128 GB). An evaluation profile
 is never applied to a production project.
+
+The same harness command compares the routes a project can choose:
+`run.sh eval pblab` (pbweave and pbdv), `eval pbdv` (the caller alone, on
+the production alignments), `eval pbweave`, and the `-cpu` variants of the
+first two. Each makes its own project, runs the standalone phase and
+`validate`, and then prints, per member against the production project,
+the SV sets (truvari) and the PASS small variants shared and not, inside
+and outside the benchmark regions, TRGT's allele lengths, the digests side
+by side (`tests/smoke/compare_runs.py`, which also takes two digest
+directories brought back from a cluster) and the changed tasks' resources.
+The first results are in "The pblab tools" above and in the smoke README.
 
 A comparison between two versions of a tool says whether something
 changed, not whether the calls are right. For that the smoke carries a

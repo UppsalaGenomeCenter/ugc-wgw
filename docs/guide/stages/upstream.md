@@ -40,6 +40,8 @@ flowchart TD
   disc --> swc
   bam --> swc
   classDef data fill:#e9edf1,stroke:#8a8f95,color:#22272e
+  classDef box fill:none,stroke:#8a8f95
+  class cat,per,fr,sc box
 ```
 
 | Driver fills | You may override |

@@ -33,6 +33,8 @@ flowchart TD
   f1 --> c1["concat"] --> sum["summary and samples tables"]
   f2 --> c2["concat"] --> sum
   classDef data fill:#e9edf1,stroke:#8a8f95,color:#22272e
+  classDef box fill:none,stroke:#8a8f95
+  class sm,svs box
 ```
 
 Text version: one `ugc_wgw_regions_prepare`; per shard, `ugc_wgw_bcftools_freq`

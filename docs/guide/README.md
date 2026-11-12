@@ -67,8 +67,9 @@ Text version: slanted box = data or a reference file (grey; green when it
 is a result nothing else reads); rounded box = a per-sample stage (blue);
 hexagon = a cohort stage (amber; dashed border = optional, the stages
 after it never wait for it); diamond = a decision (violet); plain box = a
-step or task. In the generated call graphs a task of this pipeline is
-teal and one of upstream's grey.
+step or task. A frame around several nodes groups them (a scatter, a
+mode, a machine): a grey border and no fill. In the generated call graphs
+a task of this pipeline is teal and one of upstream's grey.
 
 ## Conventions
 

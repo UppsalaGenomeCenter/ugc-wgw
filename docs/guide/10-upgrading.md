@@ -35,6 +35,8 @@ flowchart LR
   v2 --> pol
   cfgA --> r1
   cfgB --> r2
+  classDef box fill:none,stroke:#8a8f95
+  class prefix,proj,proj2,res box
 ```
 
 A bundle installs into its own `versions/<v>/` with its own image

@@ -5,6 +5,29 @@ offline bundle. An entry opens with the upstream tag it is built on and a
 short summary, with anything an existing project has to do; the rest is
 under Details.
 
+## 0.20.1
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin (0.6.0), the
+images and the reference entries unchanged.
+
+A documentation release: the frames around grouped steps in the guide's
+diagrams lose Mermaid's default pale-yellow fill. Workflows, driver and
+results are those of 0.20.0; a site that runs 0.20.0 has no reason to
+install this one, and a site still on 0.19.0 can install it in place of
+0.20.0 with the same commands.
+
+<details>
+<summary>Details</summary>
+
+- **Diagram frames.** A frame (a scatter, a conditional section, a mode,
+  a machine) now has a grey border and no fill, in the hand-written
+  diagrams and in the generated call graphs, on light and dark pages.
+  `scripts/wdl-graph.py` writes the class for every section it draws, and
+  its test checks that none is left out.
+
+</details>
+
 ## 0.20.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

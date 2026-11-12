@@ -388,16 +388,20 @@ def number(root: List[object]) -> Dict[Key, str]:
 # the task nodes' colours: this repository's tasks and upstream's (light fills with dark text: legible on a light and
 # on a dark page). One-letter class names keep the diagrams inside MAX_CHARS.
 CLASS_DEFS = {"o": "classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330", "u": "classDef u fill:#e9edf1,stroke:#8a8f95,color:#22272e"}
+# the section boxes: a grey border and no fill, instead of Mermaid's default pale yellow
+BOX_DEF = "classDef b fill:none,stroke:#8a8f95"
 
 
 def render(root: List[object], edges: Set[Tuple[Key, Key, str]], ids: Dict[Key, str]) -> str:
     lines = ["flowchart TD"]
     used: Set[str] = set()
+    boxes: List[str] = []
 
     def walk(items: List[object], indent: str) -> None:
         for it in items:
             if isinstance(it, Section):
                 lines.append(f'{indent}subgraph {ids[it.key]}["{esc(it.title)}"]')
+                boxes.append(ids[it.key])
                 walk(it.children, indent + "  ")
                 lines.append(f"{indent}end")
             else:
@@ -421,6 +425,8 @@ def render(root: List[object], edges: Set[Tuple[Key, Key, str]], ids: Dict[Key, 
         arrow = "-.->" if style == "ctl" else "-->"
         lines.append(f"  {ids[src]} {arrow} {ids[dst]}")
     lines.extend(f"  {CLASS_DEFS[c]}" for c in sorted(used))
+    if boxes:
+        lines += [f"  {BOX_DEF}", f"  class {','.join(boxes)} b"]
     return "\n".join(lines) + "\n"
 
 
@@ -476,7 +482,8 @@ def markdown(depth: Optional[int] = None, hide: frozenset = HIDE, max_chars: int
         "- `([\"a, b\"])` is a declaration that joins several call outputs, for example",
         "  `select_first` over an optional merge and a single input.",
         "- Boxes are scatter sections (`scatter x in expr`), conditional sections",
-        "  (`if expr`) and inlined workflows (`call name (file.wdl)`).",
+        "  (`if expr`) and inlined workflows (`call name (file.wdl)`); they have a",
+        "  border and no fill.",
         "- A solid arrow means an output of the source feeds an input of the target.",
         "  A dashed arrow means the source feeds the expression that controls a box.",
         "- Workflow inputs and outputs, plain declarations and the",

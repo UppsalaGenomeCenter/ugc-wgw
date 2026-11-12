@@ -31,6 +31,8 @@ flowchart TD
   end
   classDef data fill:#e9edf1,stroke:#8a8f95,color:#22272e
   classDef result fill:#d5ead4,stroke:#3f7d3c,color:#17361a
+  classDef box fill:none,stroke:#8a8f95
+  class slice,shard,sv box
 ```
 
 Why the slicing: `glnexus_cli` ignores gVCF indices and reads every gVCF end

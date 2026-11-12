@@ -49,6 +49,8 @@ flowchart TD
   classDef data fill:#e9edf1,stroke:#8a8f95,color:#22272e
   classDef result fill:#d5ead4,stroke:#3f7d3c,color:#17361a
   classDef decision fill:#e3dcf5,stroke:#6b56b0,color:#241a4d
+  classDef box fill:none,stroke:#8a8f95
+  class child,trio,pf,hap box
 ```
 
 Text version: `samtools fasta` per child uBAM (and per parent uBAM in trio

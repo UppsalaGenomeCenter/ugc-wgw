@@ -59,6 +59,8 @@ flowchart LR
   end
   build --> tar --> inst --> prefix
   prefix --> drv --> mw --> job --> res
+  classDef box fill:none,stroke:#8a8f95
+  class dev,share,hpc,login,nodes box
 ```
 
 Text version:

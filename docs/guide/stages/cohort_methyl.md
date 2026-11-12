@@ -37,6 +37,8 @@ flowchart TD
   rep --> sum
   comp --> sum
   classDef data fill:#e9edf1,stroke:#8a8f95,color:#22272e
+  classDef box fill:none,stroke:#8a8f95
+  class m,c,j box
 ```
 
 Text version: one `ugc_wgw_methbat_build` (or N with `leave_one_out`);

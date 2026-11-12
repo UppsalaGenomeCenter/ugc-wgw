@@ -18,7 +18,8 @@ Legend:
 - `(["a, b"])` is a declaration that joins several call outputs, for example
   `select_first` over an optional merge and a single input.
 - Boxes are scatter sections (`scatter x in expr`), conditional sections
-  (`if expr`) and inlined workflows (`call name (file.wdl)`).
+  (`if expr`) and inlined workflows (`call name (file.wdl)`); they have a
+  border and no fill.
 - A solid arrow means an output of the source feeds an input of the target.
   A dashed arrow means the source feeds the expression that controls a box.
 - Workflow inputs and outputs, plain declarations and the
@@ -26,7 +27,7 @@ Legend:
 
 ## ugc_wgw_singleton
 
-Source `workflows/ugc_wgw_singleton.wdl`, depth 1, Mermaid source 3712 characters.
+Source `workflows/ugc_wgw_singleton.wdl`, depth 1, Mermaid source 3839 characters.
 
 Inlined workflows:
 
@@ -186,11 +187,13 @@ flowchart TD
   s19 -.-> s22
   classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
   classDef u fill:#e9edf1,stroke:#8a8f95,color:#22272e
+  classDef b fill:none,stroke:#8a8f95
+  class s1,s2,s3,s4,s5,s6,s7,s8,s9,s10,s11,s12,s13,s14,s15,s16,s17,s18,s19,s20,s21,s22 b
 ```
 
 ## ugc_wgw_upstream
 
-Source `workflows/ugc_wgw_upstream.wdl`, depth 1, Mermaid source 2875 characters.
+Source `workflows/ugc_wgw_upstream.wdl`, depth 1, Mermaid source 2986 characters.
 
 Inlined workflows:
 
@@ -312,11 +315,13 @@ flowchart TD
   s3 --> n30
   classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
   classDef u fill:#e9edf1,stroke:#8a8f95,color:#22272e
+  classDef b fill:none,stroke:#8a8f95
+  class s1,s2,s3,s4,s5,s6,s7,s8,s9,s10,s11,s12,s13,s14,s15,s16,s17,s18 b
 ```
 
 ## ugc_wgw_cohort_qc
 
-Source `workflows/ugc_wgw_cohort_qc.wdl`, depth 1, Mermaid source 503 characters.
+Source `workflows/ugc_wgw_cohort_qc.wdl`, depth 1, Mermaid source 560 characters.
 
 Inlined workflows: none.
 
@@ -342,11 +347,13 @@ flowchart TD
   n3 --> n5
   n4 --> n5
   classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
+  classDef b fill:none,stroke:#8a8f95
+  class s1,s2,s3 b
 ```
 
 ## ugc_wgw_cohort_call
 
-Source `workflows/ugc_wgw_cohort_call.wdl`, depth 1, Mermaid source 728 characters.
+Source `workflows/ugc_wgw_cohort_call.wdl`, depth 1, Mermaid source 788 characters.
 
 Inlined workflows:
 
@@ -381,11 +388,13 @@ flowchart TD
   s1 --> n5
   classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
   classDef u fill:#e9edf1,stroke:#8a8f95,color:#22272e
+  classDef b fill:none,stroke:#8a8f95
+  class s1,s2,s3,s4 b
 ```
 
 ## ugc_wgw_intake
 
-Source `workflows/ugc_wgw_intake.wdl`, depth 1, Mermaid source 473 characters.
+Source `workflows/ugc_wgw_intake.wdl`, depth 1, Mermaid source 524 characters.
 
 Inlined workflows: none.
 
@@ -409,11 +418,13 @@ flowchart TD
   n4 --> n5
   classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
   classDef u fill:#e9edf1,stroke:#8a8f95,color:#22272e
+  classDef b fill:none,stroke:#8a8f95
+  class s1 b
 ```
 
 ## ugc_wgw_downstream
 
-Source `workflows/ugc_wgw_downstream.wdl`, depth 1, Mermaid source 951 characters.
+Source `workflows/ugc_wgw_downstream.wdl`, depth 1, Mermaid source 1011 characters.
 
 Inlined workflows:
 
@@ -462,11 +473,13 @@ flowchart TD
   s1 -.-> s4
   classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
   classDef u fill:#e9edf1,stroke:#8a8f95,color:#22272e
+  classDef b fill:none,stroke:#8a8f95
+  class s1,s2,s3,s4 b
 ```
 
 ## ugc_wgw_cohort_merge
 
-Source `workflows/ugc_wgw_cohort_merge.wdl`, depth 1, Mermaid source 2260 characters.
+Source `workflows/ugc_wgw_cohort_merge.wdl`, depth 1, Mermaid source 2363 characters.
 
 Inlined workflows:
 
@@ -560,11 +573,13 @@ flowchart TD
   n19 --> n22
   classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
   classDef u fill:#e9edf1,stroke:#8a8f95,color:#22272e
+  classDef b fill:none,stroke:#8a8f95
+  class s1,s2,s3,s4,s5,s6,s7,s8,s9,s10,s11,s12,s13,s14,s15,s16 b
 ```
 
 ## ugc_wgw_cohort_freq
 
-Source `workflows/ugc_wgw_cohort_freq.wdl`, depth 1, Mermaid source 773 characters.
+Source `workflows/ugc_wgw_cohort_freq.wdl`, depth 1, Mermaid source 836 characters.
 
 Inlined workflows: none.
 
@@ -604,11 +619,13 @@ flowchart TD
   n6 --> n8
   n7 --> n8
   classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
+  classDef b fill:none,stroke:#8a8f95
+  class s1,s2,s3,s4,s5 b
 ```
 
 ## ugc_wgw_cohort_tr
 
-Source `workflows/ugc_wgw_cohort_tr.wdl`, depth 1, Mermaid source 372 characters.
+Source `workflows/ugc_wgw_cohort_tr.wdl`, depth 1, Mermaid source 423 characters.
 
 Inlined workflows: none.
 
@@ -628,11 +645,13 @@ flowchart TD
   n2 -.-> s1
   n3 --> n4
   classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
+  classDef b fill:none,stroke:#8a8f95
+  class s1 b
 ```
 
 ## ugc_wgw_cohort_methyl
 
-Source `workflows/ugc_wgw_cohort_methyl.wdl`, depth 1, Mermaid source 972 characters.
+Source `workflows/ugc_wgw_cohort_methyl.wdl`, depth 1, Mermaid source 1044 characters.
 
 Inlined workflows: none.
 
@@ -676,11 +695,13 @@ flowchart TD
   n6 --> n9
   n7 --> n9
   classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
+  classDef b fill:none,stroke:#8a8f95
+  class s1,s2,s3,s4,s5,s6,s7,s8 b
 ```
 
 ## ugc_wgw_assembly
 
-Source `workflows/ugc_wgw_assembly.wdl`, depth 1, Mermaid source 1421 characters.
+Source `workflows/ugc_wgw_assembly.wdl`, depth 1, Mermaid source 1496 characters.
 
 Inlined workflows: none.
 
@@ -745,11 +766,13 @@ flowchart TD
   n12 --> n13
   classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
   classDef u fill:#e9edf1,stroke:#8a8f95,color:#22272e
+  classDef b fill:none,stroke:#8a8f95
+  class s1,s2,s3,s4,s5,s6,s7,s8,s9 b
 ```
 
 ## ugc_wgw_assembly_call
 
-Source `workflows/ugc_wgw_assembly_call.wdl`, depth 1, Mermaid source 845 characters.
+Source `workflows/ugc_wgw_assembly_call.wdl`, depth 1, Mermaid source 905 characters.
 
 Inlined workflows: none.
 
@@ -791,11 +814,13 @@ flowchart TD
   n7 --> n10
   n8 --> n9
   classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
+  classDef b fill:none,stroke:#8a8f95
+  class s1,s2,s3,s4 b
 ```
 
 ## ugc_wgw_cohort_pangenome
 
-Source `workflows/ugc_wgw_cohort_pangenome.wdl`, depth 1, Mermaid source 932 characters.
+Source `workflows/ugc_wgw_cohort_pangenome.wdl`, depth 1, Mermaid source 992 characters.
 
 Inlined workflows: none.
 
@@ -842,4 +867,6 @@ flowchart TD
   n9 --> n10
   n11 --> n12
   classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
+  classDef b fill:none,stroke:#8a8f95
+  class s1,s2,s3,s4 b
 ```

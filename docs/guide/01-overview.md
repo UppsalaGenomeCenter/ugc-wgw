@@ -53,6 +53,8 @@ flowchart LR
   classDef sample fill:#cfe4f5,stroke:#2f6f8f,color:#12303f
   classDef cohort fill:#f6dfb8,stroke:#b9770e,color:#3d2a05
   classDef optional fill:#f6dfb8,stroke:#b9770e,color:#3d2a05,stroke-dasharray:5 3
+  classDef box fill:none,stroke:#8a8f95
+  class standalone,joint,assembly box
 ```
 
 Rounded nodes run once per sample. Hexagons run once per cohort and start only

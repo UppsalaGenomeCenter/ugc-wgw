@@ -40,6 +40,8 @@ flowchart TD
   tv --> out
   classDef data fill:#e9edf1,stroke:#8a8f95,color:#22272e
   classDef result fill:#d5ead4,stroke:#3f7d3c,color:#17361a
+  classDef box fill:none,stroke:#8a8f95
+  class per box
 ```
 
 Text version: `ugc_wgw_pangenome_names` maps each sample ID to a Cactus-safe

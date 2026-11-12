@@ -51,6 +51,8 @@ flowchart TD
   prep --> p1
   prep --> g1
   classDef data fill:#e9edf1,stroke:#8a8f95,color:#22272e
+  classDef box fill:none,stroke:#8a8f95
+  class svx,svs,bcf,bs,tr,ph,gl box
 ```
 
 Why the genome-wide BND job: svx keeps only breakends whose mates are inside

@@ -34,6 +34,8 @@ flowchart TD
   sd --> hp
   hp --> cs["consolidate stats"]
   classDef data fill:#e9edf1,stroke:#8a8f95,color:#22272e
+  classDef box fill:none,stroke:#8a8f95
+  class a,b box
 ```
 
 | Driver fills | You may override |

@@ -28,6 +28,8 @@ flowchart TD
   kg[/"1000 Genomes set, if installed"/]:::data --> anc["somalier ancestry"] --> summ
   ex --> anc
   classDef data fill:#e9edf1,stroke:#8a8f95,color:#22272e
+  classDef box fill:none,stroke:#8a8f95
+  class legacy box
 ```
 
 Text version: `ugc_wgw_somalier_extract` for each member without an

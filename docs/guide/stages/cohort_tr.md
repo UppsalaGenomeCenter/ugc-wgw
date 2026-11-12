@@ -29,6 +29,8 @@ flowchart TD
   scr --> g["gather: tables, top outliers per member, samples, summary"]
   st --> g
   classDef data fill:#e9edf1,stroke:#8a8f95,color:#22272e
+  classDef box fill:none,stroke:#8a8f95
+  class s box
 ```
 
 Text version: one `ugc_wgw_tr_screen`; `ugc_wgw_regions_prepare`, then per

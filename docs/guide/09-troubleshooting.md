@@ -65,7 +65,7 @@ rest from miniwdl.
 
 ```mermaid
 flowchart TD
-  s{"kind, from ugc-wgw status --failed"}
+  s{"kind, from ugc-wgw status --failed"}:::decision
   s -->|"transient"| r["nothing to do: the driver re-attempts after the backoff; ugc-wgw retry to skip the wait"]
   s -->|"version"| v["remove the ugc_wgw_version override or re-init the project, retry"]
   s -->|"resource, sbatch refused"| ref["the request exceeds a node: set TASK_CPU_MAX and TASK_MEMORY_MAX in site.cfg (chapter 12), retry"]
@@ -73,10 +73,11 @@ flowchart TD
   s -->|"resource, time limit"| t["the driver re-attempts with the time doubled (chapter 06); exhausted: a policy row's time for that task, retry"]
   s -->|"input"| i["preflight message: re-copy the file, ugc-wgw samples check; else fix the path in the sheet or reference map; visible on compute nodes?; retry"]
   s -->|"cancelled"| cx["you stopped it: ugc-wgw retry when ready"]
-  s -->|"tool or unknown"| c{"what does the task's stderr say?"}
+  s -->|"tool or unknown"| c{"what does the task's stderr say?"}:::decision
   c -->|"apptainer: unable to pull or open image"| sif["SIF missing from image_cache: check the name, repopulate"]
   c -->|"NoResult, launch_error in miniwdl.stderr"| m["config or environment problem; fix, retry"]
   c -->|"tool error"| tool["read the tool's message; data problem or upstream bug"]
+  classDef decision fill:#e3dcf5,stroke:#6b56b0,color:#241a4d
 ```
 
 ## Cores, memory and wall time

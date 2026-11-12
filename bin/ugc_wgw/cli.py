@@ -341,7 +341,8 @@ def cmd_init(a: argparse.Namespace) -> int:
         aligner=str(pick(a.aligner, "aligner", "pbmm2")),
         parabricks_gpus=int(pick(a.parabricks_gpus, "parabricks_gpus", 4)),  # type: ignore[arg-type]
         stage_inputs=profile.get("stage_inputs"), prices=profile.get("prices"),  # type: ignore[arg-type]
-        summary_thresholds=profile.get("summary_thresholds"), profile=meta,  # type: ignore[arg-type]
+        summary_thresholds=profile.get("summary_thresholds"), input_thresholds=profile.get("input_thresholds"),  # type: ignore[arg-type]
+        profile=meta,
     )
     DB(cfg.db_path).close()
     diag(f"initialised {cfg.ugc_wgw_dir} (ugc-wgw version {config.read_version(cfg.code_dir)}, results {cfg.results_dir})")

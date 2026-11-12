@@ -574,6 +574,9 @@ task ugc_wgw_methyl_summary {
       imprinting: {
         description: "<out_prefix>.imprinting.tsv: sample_id, the methbat report row, report_source (run or stage)"
       },
+      deconvolution_table: {
+        description: "<out_prefix>.deconvolution.tsv: one row per member with an estimate: sample_id, atlas_md5, methbat_version, residual_error (NNLS), raw_fraction_sum (the fractions before normalisation: below 1 where the atlas explains less), top_cell_type, top_fraction, then the normalised fraction of every cell type of the atlas; header only when deconvolution did not run"
+      },
       samples: {
         description: "<out_prefix>.samples.tsv: one row per member: labels, event counts, summary-label counts, imprinting counts, report_source, deconvolution's top cell type"
       }
@@ -765,18 +768,38 @@ task ugc_wgw_methyl_summary {
             out.write("\t".join(c) + "\n")
     region_anomalous = Counter(c[1 + ii["region_label"]] for c in imp_rows if c[1 + ii["report_summary"]] in ("Anomalous", "AnomalousQcWarning")) if imp_rows else Counter()
 
-    # ---- deconvolution
+    # ---- deconvolution: each member's estimate as one row of a table (the cell types in the atlas's order), with what
+    # says how well the atlas explained the member: the NNLS residual and the sum of the fractions before normalisation
     top_cell = {}
+    estimates = []
+    cell_types = []
     for sid, path in zip(ids, deconvs):
         try:
-            frac = json.load(open(path)).get("metrics", {}).get("normalized_fraction", {})
+            doc = json.load(open(path))
         except (OSError, ValueError):
-            frac = {}
-        if frac:
-            cell, value = max(frac.items(), key=lambda kv: kv[1])
-            top_cell[sid] = (cell, value)
-            add("deconvolution", "top_cell_type", sid, cell)
-            add("deconvolution", "top_fraction", sid, f"{value:.3f}")
+            doc = {}
+        metrics = doc.get("metrics", {}) if isinstance(doc.get("metrics"), dict) else {}
+        frac = metrics.get("normalized_fraction", {}) if isinstance(metrics.get("normalized_fraction"), dict) else {}
+        if not frac:
+            continue
+        for cell in frac:
+            if cell not in cell_types:
+                cell_types.append(cell)
+        raw = metrics.get("nnls_raw_fraction", {}) if isinstance(metrics.get("nnls_raw_fraction"), dict) else {}
+        estimates.append((sid, frac, metrics.get("nnls_residual_error"), sum(raw.values()) if raw else None, doc.get("atlas_md5sum", ""), doc.get("version", "")))
+        cell, value = max(frac.items(), key=lambda kv: kv[1])
+        top_cell[sid] = (cell, value)
+        add("deconvolution", "top_cell_type", sid, cell)
+        add("deconvolution", "top_fraction", sid, f"{value:.3f}")
+    with open(prefix + ".deconvolution.tsv", "w") as out:
+        out.write("\t".join(["sample_id", "atlas_md5", "methbat_version", "residual_error", "raw_fraction_sum", "top_cell_type", "top_fraction"] + cell_types) + "\n")
+        for sid, frac, resid, raw_sum, md5, version in estimates:
+            cell, value = top_cell[sid]
+            out.write("\t".join([sid, str(md5), str(version), f"{resid:.4f}" if isinstance(resid, (int, float)) else "",
+                                 f"{raw_sum:.4f}" if raw_sum is not None else "", cell, f"{value:.4f}"]
+                                + [f"{float(frac.get(c, 0.0)):.4f}" for c in cell_types]) + "\n")
+    add("deconvolution", "n_members", "", len(estimates))
+    add("deconvolution", "n_cell_types", "", len(cell_types))
 
     # ---- samples table
     with open(prefix + ".samples.tsv", "w") as out:
@@ -851,6 +874,7 @@ task ugc_wgw_methyl_summary {
     File cohort_events = "~{out_prefix}.events.tsv"
     File imprinting = "~{out_prefix}.imprinting.tsv"
     File samples = "~{out_prefix}.samples.tsv"
+    File deconvolution_table = "~{out_prefix}.deconvolution.tsv"
   }
 
   runtime {

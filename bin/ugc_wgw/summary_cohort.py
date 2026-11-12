@@ -3,6 +3,7 @@ the cohort stages' own small outputs (merged SV VCF header and INFO, trgt-lps di
 See docs/guide/07-results.md ("Analysis summary")."""
 from __future__ import annotations
 
+import math
 import statistics
 from pathlib import Path
 
@@ -119,6 +120,71 @@ def _outliers(values: dict[str, float]) -> tuple[float | None, float | None, lis
         return med, mad, []
     lim = 3 * 1.4826 * mad
     return med, mad, sorted(k for k, v in values.items() if abs(v - med) > lim)
+
+
+# The atlas's cell types by lineage, for reading a composition at a glance (nanomix's 39 bisulfite cell types; a type the
+# map does not know is `other`). The fractions themselves are never regrouped: the flag and the tables use the cell types.
+CELL_GROUPS: dict[str, tuple[str, ...]] = {
+    "blood": ("granulocyte", "monocyte", "T-cell", "B-cell", "NK-cell", "erythrocyte_progenitor"),
+    "epithelial": ("kidney_epithelial", "thyroid_epithelial", "fallopian_epithelial", "ovary_epithelial", "epiderminal_keratinocyte",
+                   "head_neck_epithelial", "lung_epithelial", "prostate_epithelial", "bladder_epithelial", "breast_luminal", "breast_basal",
+                   "lung_alveolar_epithelial", "gallbladder", "gastric_epithelial", "colon_epithelial", "small_int_epithelial"),
+    "mesenchymal": ("adipocyte", "endothelial_cell", "colon_fibroblasts", "heart_fibroblasts", "dermal_fibroblast", "skeletal_muscle",
+                    "smooth_muscle", "heart_cardiomyocyte", "bone_osteoblast"),
+    "neural": ("oligodendrocyte", "neuron"),
+    "liver and pancreas": ("hepatocyte", "pancreas_duct", "pancreas_acinar", "pancreas_delta", "pancreas_beta", "pancreas_alpha"),
+}
+CELL_GROUP_OF = {cell: group for group, cells in CELL_GROUPS.items() for cell in cells}
+
+
+def _cell_composition(parsed: dict[str, object] | None, present: dict[str, dict[str, object]], thr: dict[str, float]) -> dict[str, object]:
+    """The cohort's cell-type composition from cohort_methyl's deconvolution table: per cell type the median, 5th and
+    95th percentile and maximum over the members; per member its fractions (above 0.1%), its lineage sums, and its
+    distance from the cohort's median composition (total variation distance: half the summed absolute differences,
+    0 = the median, 1 = nothing shared). `cell_composition_outlier` (warn): a distance beyond the cohort's median +
+    `cell_composition_mad_max` scaled MADs and at least `cell_composition_distance_min`: another tissue or sample
+    type, a cell line, contamination, or an unusual blood picture. Cohort-relative, so a saliva cohort is judged
+    against saliva."""
+    members: dict[str, dict[str, object]] = {sid: m for sid, m in ((parsed or {}).get("members") or {}).items() if sid in present}  # type: ignore[union-attr]
+    if not members:
+        return {"available": False}
+    cell_types: list[str] = list((parsed or {}).get("cell_types") or [])  # type: ignore[arg-type]
+    fr = {sid: m["fractions"] for sid, m in members.items()}  # type: ignore[index]
+    stats: dict[str, dict[str, float]] = {}
+    for cell in cell_types:
+        vals = sorted(float(f.get(cell, 0.0)) for f in fr.values())  # type: ignore[union-attr]
+        n = len(vals)
+        stats[cell] = {"median": statistics.median(vals), "p5": vals[max(0, math.ceil(0.05 * n) - 1)], "p95": vals[max(0, math.ceil(0.95 * n) - 1)],
+                       "max": vals[-1], "n_above_5pct": sum(1 for v in vals if v >= 0.05)}
+    distance = {sid: 0.5 * sum(abs(float(f.get(c, 0.0)) - stats[c]["median"]) for c in cell_types) for sid, f in fr.items()}  # type: ignore[union-attr]
+    med, mad, _ = _outliers(distance)
+    floor = float(thr.get("cell_composition_distance_min", 0.25))
+    k = float(thr.get("cell_composition_mad_max", 4.0))
+    limit = max(floor, med + k * 1.4826 * mad) if (med is not None and mad is not None and len(distance) >= 4) else None
+    flags: dict[str, list[dict[str, object]]] = {}
+    out_members: dict[str, dict[str, object]] = {}
+    for sid, m in members.items():
+        f: dict[str, float] = fr[sid]  # type: ignore[assignment]
+        groups: dict[str, float] = {}
+        for cell, v in f.items():
+            g = CELL_GROUP_OF.get(cell, "other")
+            groups[g] = groups.get(g, 0.0) + float(v)
+        out_members[sid] = {"fractions": {c: round(float(v), 4) for c, v in f.items() if float(v) >= 0.001},
+                            "groups": {g: round(v, 4) for g, v in sorted(groups.items(), key=lambda kv: -kv[1]) if v >= 0.001},
+                            "distance": round(distance[sid], 4), "top_cell_type": m.get("top_cell_type"),
+                            "residual_error": m.get("residual_error"), "raw_fraction_sum": m.get("raw_fraction_sum")}
+        if limit is not None and distance[sid] > limit:
+            diffs = sorted(cell_types, key=lambda c: -abs(float(f.get(c, 0.0)) - stats[c]["median"]))[:3]
+            shown = ", ".join(f"{c} {float(f.get(c, 0.0)):.0%} against {stats[c]['median']:.0%}" for c in diffs)
+            flags[sid] = [{"code": "cell_composition_outlier", "severity": "warn",
+                           "message": f"cell-type composition far from the cohort's (distance {distance[sid]:.2f}, limit {limit:.2f}; {shown}): another "
+                                      "tissue or sample type, a cell line, contamination or an unusual blood picture; read the member's methylation "
+                                      "events with it", "value": round(distance[sid], 4), "threshold": round(limit, 4)}]
+    order = sorted(cell_types, key=lambda c: (-stats[c]["median"], -stats[c]["max"], c))
+    atlas = next((str(m.get("atlas_md5")) for m in members.values() if m.get("atlas_md5")), "")
+    return {"available": True, "n_members": len(members), "cell_types": order, "stats": {c: {k2: round(v, 4) for k2, v in stats[c].items()} for c in order},
+            "members": out_members, "distance": {"median": med, "mad": mad, "limit": limit}, "flags": flags, "atlas_md5": atlas,
+            "group_of": {c: CELL_GROUP_OF.get(c, "other") for c in order}}
 
 
 def _manifest_of(run: RunRecord | None) -> dict[str, object]:
@@ -560,6 +626,9 @@ def build_cohort_digest(cohort: Cohort, members: dict[str, dict[str, object]], c
                 p = outs.opt("methyl_regions")
                 if isinstance(p, str) and Path(p).exists():
                     entry["regions"] = sp.parse_methyl_regions(sp.read_lines(Path(p)))
+                p = outs.opt("methyl_deconvolution")   # 0.20.0; absent on earlier runs
+                if isinstance(p, str) and Path(p).exists():
+                    entry["deconvolution"] = sp.parse_methyl_deconvolution(sp.read_lines(Path(p)))
                 p = outs.opt("methyl_events")
                 if isinstance(p, str) and Path(p).exists():
                     entry["events"] = sp.parse_methyl_events(sp.read_lines(Path(p)), genes=genes_of_interest or ())
@@ -649,8 +718,18 @@ def build_cohort_digest(cohort: Cohort, members: dict[str, dict[str, object]], c
         if values:
             distributions["methyl_events"] = {"label": "methylation events (cohort_methyl)", "digits": 0, "unit": "", "values": values, "median": med, "mad": mad,
                                               "outliers": sorted(mflags), "threshold": None, "direction": "max", "beyond_threshold": [], "below_threshold": []}
+        deconv = _cell_composition(me_entry.pop("deconvolution", None), present_members, thr)  # type: ignore[arg-type]
+        for sid, fl in (deconv.get("flags") or {}).items():  # type: ignore[union-attr]
+            mflags.setdefault(sid, []).extend(fl)
+        for r in present:
+            fl = (deconv.get("flags") or {}).get(str(r["id"]), [])  # type: ignore[union-attr]
+            if fl:
+                r["flags"] = sorted(set(r["flags"]) | {str(f["code"]) for f in fl})  # type: ignore[arg-type]
+                r["qc_status"] = _worst([str(r.get("qc_status", "pass"))] + [str(f["severity"]) for f in fl])
         msumm: dict[str, dict[str, object]] = me_entry.get("summary") if isinstance(me_entry.get("summary"), dict) else {}  # type: ignore[assignment]
-        methylation.update({"flags": mflags, "counts": {"methyl_outlier": len(mflags)},
+        methylation.update({"flags": mflags, "counts": {"methyl_outlier": sum(1 for fl in mflags.values() if any(f["code"] == "methyl_outlier" for f in fl)),
+                                                        "cell_composition_outlier": len(deconv.get("flags") or {})},  # type: ignore[arg-type]
+                            "deconvolution": deconv,
                             "members": {sid: by_id_m.get(sid, {"sample_id": sid}) for sid in cohort.members},
                             "legacy_reported": [sid for sid, r in by_id_m.items() if str(r.get("report_source")) == "stage"],
                             # each comparison's summary_comparison counts and where its differing regions lie (chrX, chrY, autosomal)
@@ -998,14 +1077,82 @@ def _methyl_html(meth: dict[str, object], cme: dict[str, object], events_dist: d
         body += "<h3>Group comparisons (methbat compare)</h3>" + _table(["pair (baseline:compare)", "summary_comparison counts", "where, note"], crow, cls="")
         body += ("<p class='small muted'>The default <code>XX:XY</code> pair is a check as much as a result: chrX regions should differ and little else. "
                  "Each comparison file is an output of the stage.</p>")
-    dec = summ.get("deconvolution", {}).get("top_cell_type", {}) or {}
-    if dec:
+    body += _cell_composition_html(meth.get("deconvolution") or {}, summ, thr, link)  # type: ignore[arg-type]
+    return body
+
+
+def _cell_composition_html(dec: dict[str, object], summ: dict[str, dict[str, dict[str, object]]], thr: dict[str, float], link) -> str:  # type: ignore[no-untyped-def]
+    """Cell-type composition under Methylation: the cohort's composition per cell type, the members' spread for the
+    main types, the members far from the cohort. A run from before the table (0.16 to 0.19 with run_deconvolve) has
+    only each member's top cell type."""
+    if not dec.get("available"):
+        top = summ.get("deconvolution", {}).get("top_cell_type", {}) or {}
+        if not top:
+            return ""
         counts_c: dict[str, int] = {}
-        for cell in dec.values():
+        for cell in top.values():
             counts_c[str(cell)] = counts_c.get(str(cell), 0) + 1
-        body += ("<h3>Cell-type deconvolution (methbat deconvolve, nanomix 39Bisulfite atlas, an example)</h3>"
-                 + sv.bars_h(sorted(((c, float(n), "") for c, n in counts_c.items()), key=lambda t: -t[1]), width=300, label_w=140)
-                 + "<p class='small muted'>Each member's largest estimated fraction; the atlas is not validated for our tissue.</p>")
+        return ("<h3>Cell-type composition (methbat deconvolve)</h3>"
+                + sv.bars_h(sorted(((c, float(n), "") for c, n in counts_c.items()), key=lambda t: -t[1]), width=300, label_w=140)
+                + "<p class='small muted'>Each member's largest estimated fraction; the stage's run predates the composition table (rerun cohort_methyl "
+                  "for the full picture).</p>")
+    stats: dict[str, dict[str, float]] = dec.get("stats", {})  # type: ignore[assignment]
+    members: dict[str, dict[str, object]] = dec.get("members", {})  # type: ignore[assignment]
+    group_of: dict[str, str] = dec.get("group_of", {})  # type: ignore[assignment]
+    flags: dict[str, object] = dec.get("flags", {})  # type: ignore[assignment]
+    dist: dict[str, object] = dec.get("distance", {})  # type: ignore[assignment]
+    shown = [c for c in dec.get("cell_types", []) if stats[c]["max"] >= 0.01]  # type: ignore[union-attr]
+    blood = sorted(float((m.get("groups") or {}).get("blood", 0.0)) for m in members.values())  # type: ignore[union-attr]
+    pct = lambda v: f"{100 * float(v):.1f}%"  # noqa: E731
+    body = ("<h3>Cell-type composition (methbat deconvolve)</h3>"
+            + _cards([("members with an estimate", dec.get("n_members")), ("cell types above 1% in a member", len(shown)),
+                      ("blood lineage, cohort median", pct(statistics.median(blood)) if blood else "–"),
+                      ("members flagged cell_composition_outlier", len(flags))])
+            + "<p class='small muted'><b>An estimate for research, not a blood count.</b> Each member's 5mC pileup is explained as a mixture of the atlas's "
+              "39 cell types (nanomix, built from bisulfite data; non-negative least squares). The main lineages of a blood sample come out as expected "
+              "(granulocytes, T cells, monocytes); fractions of a few percent in unrelated tissues are the method's noise, and closely related cell types "
+              "share their signal (B and NK cells often read 0). Composition is the first thing to check behind a member with many methylation events.</p>")
+    # the picture first: every member as one column, sorted by the cohort's main cell type
+    main_types = shown[:5]
+    if main_types and len(members) >= 2:
+        columns = []
+        for sid, m in members.items():
+            fr: dict[str, float] = m.get("fractions") or {}  # type: ignore[assignment]
+            vals = {c: float(fr.get(c, 0.0)) for c in main_types}
+            vals["other"] = max(0.0, sum(float(v) for v in fr.values()) - sum(vals.values()))
+            columns.append((sid, vals))
+        columns.sort(key=lambda cv: (-cv[1][main_types[0]], cv[0]))
+        body += (sv.ribbon(columns, main_types + ["other"], width=700, marked=set(flags))
+                 + f"<p class='small muted'>One column per member (above {sv.RIBBON_COLUMNS} members, the mean of adjacent ones), sorted by "
+                   f"{_esc(main_types[0])}: the five cell types with the largest cohort medians and the rest. The members flagged below stand at the "
+                   "right with a red tick, one column each; hover for the member and its fractions.</p>")
+    rows = [[c, group_of.get(c, "other"), pct(stats[c]["median"]), f"{pct(stats[c]['p5'])} – {pct(stats[c]['p95'])}", pct(stats[c]["max"]),
+             sv.fmt(stats[c]["n_above_5pct"])] for c in shown]
+    body += big_table(["cell type", "lineage", "median", "5th – 95th percentile", "maximum", "members at 5% or more"], rows,
+                      what=f"{len(rows)} cell types above 1% in at least one member", open_below=20)
+    main = [c for c in shown if stats[c]["median"] >= 0.02][:6]
+    if main and len(members) >= 2:
+        body += sv.strip_or_band([{"label": c, "points": sorted((sid, 100 * float((m.get("fractions") or {}).get(c, 0.0))) for sid, m in members.items()),  # type: ignore[union-attr]
+                                   "outliers": sorted(flags), "threshold": None, "beyond": [], "digits": 0, "unit": "%"} for c in main], width=700)
+        body += ("<p class='small muted'>The members' fractions for the cell types with a cohort median of 2% or more; red points are the members flagged "
+                 "below.</p>")
+    if flags:
+        frows = []
+        for sid in sorted(flags, key=lambda s: -float(members[s].get("distance") or 0.0)):  # type: ignore[arg-type]
+            m = members[sid]
+            fr = sorted((m.get("fractions") or {}).items(), key=lambda kv: -kv[1])[:4]  # type: ignore[union-attr]
+            frows.append([link(sid), sv.fmt(m.get("distance"), 2), ", ".join(f"{c} {pct(v)}" for c, v in fr),
+                          ", ".join(f"{g} {pct(v)}" for g, v in list((m.get("groups") or {}).items())[:3])])  # type: ignore[union-attr]
+        body += ("<h4>Members far from the cohort's composition</h4>"
+                 + big_table(["member", "distance", "largest fractions", "lineages"], frows, what=f"{len(frows)} members", open_below=30))
+    lim = dist.get("limit")
+    body += ("<p class='small muted'>Distance: half the summed absolute differences between a member's fractions and the cohort's medians (0 = the median "
+             "composition, 1 = nothing shared). <code>cell_composition_outlier</code> (warn): beyond the cohort's median + "
+             + _esc(sv.fmt(thr.get("cell_composition_mad_max", 4.0), 1)) + " scaled MADs and at least "
+             + _esc(sv.fmt(thr.get("cell_composition_distance_min", 0.25), 2))
+             + (f" (here {_esc(sv.fmt(lim, 2))})" if isinstance(lim, (int, float)) else " (needs four members)")
+             + ": another tissue or sample type, a cell line, contamination, or an unusual blood picture. The stage's table has every fraction "
+               "(<code>ugc-wgw export --domains methyl</code>).</p>")
     return body
 
 

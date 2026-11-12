@@ -134,6 +134,21 @@ class FixtureTest(unittest.TestCase):
         self.assertIn((n["hub"], "-.->", s[quoted_if[0]]), edges)
         self.assertEqual(graph.linked, [("sub", str(pathlib.Path(self.tmp.name) / "sub.wdl"))])
 
+    def test_task_nodes_are_coloured_by_origin(self):
+        """A task node carries its class (o: this repository's ugc_wgw_* task by the callee's name, u: upstream's) and the
+        diagram defines the classes it uses; workflow and hub nodes carry none."""
+        text, _, (nodes, _, _) = self.render(0)
+        self.assertIn(f'{nodes["t1"]}["t1"]:::u', text)
+        self.assertIn("classDef u fill:", text)
+        self.assertNotIn("classDef o", text)                     # the fixture has no task of ours
+        self.assertNotIn(":::", next(l for l in text.splitlines() if '[["sub"]]' in l))
+        real = self.mod.graph_for(self.mod.REPO / "workflows" / "ugc_wgw_cohort_tr.wdl")[0]
+        self.assertEqual(real.count(":::o"), 5)                  # every call of that stage is ours
+        self.assertIn("classDef o fill:", real)
+        up = self.mod.graph_for(self.mod.REPO / "workflows" / "ugc_wgw_upstream.wdl", self.mod.DEPTH.get("ugc_wgw_upstream", self.mod.DEFAULT_DEPTH))[0]
+        self.assertRegex(up, r'\["bam_in_checks"\]:::o')         # an aliased call of our task: by the callee, not the call name
+        self.assertRegex(up, r'\["mosdepth"\]:::u')
+
     def test_escape_and_truncate(self):
         _, _, (_, sections, _) = self.render(0)
         title = next(t for t in sections if t.startswith("if defined(hub)"))

@@ -129,30 +129,34 @@ the gVCFs for its optional GLnexus.
 
 ```mermaid
 flowchart LR
-  ubam[/"HiFi uBAMs"/] --> up(["upstream"])
-  up --> bam[/"aligned BAM"/]
-  up --> gvcf[/"gVCF"/]
-  up --> disc[/"sawfish discover tar"/]
-  up --> sex[/"inferred sex"/]
-  gvcf --> cc{{"cohort_call"}}
+  ubam[/"HiFi uBAMs"/]:::data --> up(["upstream"]):::sample
+  up --> bam[/"aligned BAM"/]:::data
+  up --> gvcf[/"gVCF"/]:::data
+  up --> disc[/"sawfish discover tar"/]:::data
+  up --> sex[/"inferred sex"/]:::data
+  gvcf --> cc{{"cohort_call"}}:::cohort
   disc -.->|"run_sawfish_joint_call"| cc
   bam -.->|"run_sawfish_joint_call"| cc
-  cc --> split[/"per-sample small-variant VCF, cohort-consistent"/]
-  cc -.->|"run_sawfish_joint_call"| splitsv[/"per-sample SV VCF"/]
-  split --> ds(["downstream"])
+  cc --> split[/"per-sample small-variant VCF, cohort-consistent"/]:::data
+  cc -.->|"run_sawfish_joint_call"| splitsv[/"per-sample SV VCF"/]:::data
+  split --> ds(["downstream"]):::sample
   splitsv -.-> ds
   up -->|"own SV VCF otherwise"| ds
   bam --> ds
   sex --> ds
-  ds --> phased[/"phased small-variant and SV VCFs, haplotagged BAM"/]
-  ds --> trgt[/"TRGT VCF"/]
-  phased --> cm{{"cohort_merge"}}
+  ds --> phased[/"phased small-variant and SV VCFs, haplotagged BAM"/]:::data
+  ds --> trgt[/"TRGT VCF"/]:::data
+  phased --> cm{{"cohort_merge"}}:::cohort
   trgt --> cm
-  cm --> cohort[/"cohort SV VCF, cohort TRGT VCF, LPS table"/]
-  cc --> jointvcf[/"cohort small-variant VCF"/]
-  jointvcf --> cf{{"cohort_freq"}}
+  cm --> cohort[/"cohort SV VCF, cohort TRGT VCF, LPS table"/]:::data
+  cc --> jointvcf[/"cohort small-variant VCF"/]:::data
+  jointvcf --> cf{{"cohort_freq"}}:::cohort
   cohort --> cf
-  cf --> freq[/"sites-only frequency VCFs, summary"/]
+  cf --> freq[/"sites-only frequency VCFs, summary"/]:::result
+  classDef sample fill:#cfe4f5,stroke:#2f6f8f,color:#12303f
+  classDef cohort fill:#f6dfb8,stroke:#b9770e,color:#3d2a05
+  classDef data fill:#e9edf1,stroke:#8a8f95,color:#22272e
+  classDef result fill:#d5ead4,stroke:#3f7d3c,color:#17361a
 ```
 
 Dashed arrows are optional paths, taken only when the named switch is set.

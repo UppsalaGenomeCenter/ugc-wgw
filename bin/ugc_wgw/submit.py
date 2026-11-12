@@ -214,7 +214,9 @@ class Submitter:
                   **({"allow_standalone_members": True} if self.sel.allow_standalone_members and cand.subject_type == "cohort" else {})},
         )
         self.db.insert_run(run)
-        if cand.rerun_of:
+        if self.sel.rerun:
+            # every attempt this invocation starts counts as the subject's rerun: also the first run at this version
+            # (no earlier success to repeat), which would otherwise be repeated once more on the next wave
             self.rerun_started.add((cand.subject_type, cand.subject_id, cand.stage))
         self.events.emit("run.created", run_id=run.run_id, subject=run.subject_id, stage=run.stage, attempt=attempt,
                          run_dir=run.run_dir)

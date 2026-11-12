@@ -279,21 +279,22 @@ version is forced to `failed` with class `version_mismatch`.
 
 ```mermaid
 flowchart TD
-  a{"latest run of this stage and subject at this version?"}
+  a{"latest run of this stage and subject at this version?"}:::decision
   a -->|"none"| p
   a -->|"success"| done["done"]
   a -->|"pending, submitted, running"| act["active"]
-  a -->|"failed or cancelled"| r{"is this a retry?"}
+  a -->|"failed or cancelled"| r{"is this a retry?"}:::decision
   r -->|"yes, attempts below --max-attempts"| p
   r -->|"yes, attempts at --max-attempts"| b2["blocked: after N attempts"]
-  r -->|"no"| t{"failed with kind transient, attempt at most auto_retry_max?"}
+  r -->|"no"| t{"failed with kind transient, attempt at most auto_retry_max?"}:::decision
   t -->|"no"| b1["blocked: run ugc-wgw retry --stage S"]
   t -->|"yes, backoff not elapsed"| b5["blocked: backing off until ts"]
   t -->|"yes, backoff elapsed"| p
-  p{"every earlier stage of the mode succeeded for the subject, for a cohort for every member?"}
+  p{"every earlier stage of the mode succeeded for the subject, for a cohort for every member?"}:::decision
   p -->|"no"| b3["blocked: waiting for stage of ids"]
   p -->|"cohort stage without --cohort"| b4["blocked: stage needs --cohort"]
   p -->|"yes"| run["runnable"]
+  classDef decision fill:#e3dcf5,stroke:#6b56b0,color:#241a4d
 ```
 
 Text version:
@@ -392,7 +393,7 @@ alone, whatever has changed since. `--rerun` asks for a new attempt of one
 named stage:
 
 ```bash
-ugc-wgw submit --mode joint --cohort C1 --stage cohort_tr --rerun
+ugc-wgw submit --mode joint --cohort C1 --stage cohort_tr --rerun --any-version
 ugc-wgw submit --mode standalone --stage singleton --samples S2 S7 --rerun
 ugc-wgw submit --mode joint --cohort C1 --stage cohort_merge --rerun --dry-run
 ```
@@ -417,6 +418,14 @@ reproduced. The rules:
   the tasks that read it and nothing else. A rerun with nothing changed
   replays every task from the cache; miniwdl computes a task again only
   when its cached output files are gone or were modified.
+- The prerequisites are looked up like any submit's: at the running
+  version, unless `--any-version` accepts earlier ones. A cohort whose
+  members ran at an earlier version (every project that was upgraded)
+  needs `--any-version`, with `--rerun` or without; the driver says so
+  when the missing runs exist at another version. And when the stage
+  itself has no run at the running version yet, a plain `submit --stage S
+  --any-version` starts it: `--rerun` is for repeating at the same
+  version.
 - Later stages are not rerun for you. They keep the outputs of the
   replaced attempt until they run again, and the driver names them:
   `rerun of cohort_merge: these later stages already succeeded and keep

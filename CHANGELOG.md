@@ -5,6 +5,67 @@ offline bundle. An entry opens with the upstream tag it is built on and a
 short summary, with anything an existing project has to do; the rest is
 under Details.
 
+## 0.20.0
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin (0.6.0), the
+images and the reference entries unchanged.
+
+Cell-type composition becomes a result of `cohort_methyl`: a table, a
+section on the cohort and sample pages, and a flag for a member whose
+composition is unlike the cohort's. The guide is reorganised (a page per
+stage, a QC flag reference, a chapter on reading the pages) and its
+diagrams are coloured. An existing project runs `ugc-wgw upgrade
+--install`, then `submit --stage cohort_methyl --any-version` once per
+cohort to get the composition; commands on a project whose samples ran at
+an earlier version need `--any-version`, and the driver now says so.
+
+<details>
+<summary>Details</summary>
+
+- **Cell-type composition.** `cohort_methyl` runs `methbat deconvolve` for
+  every member by default (`run_deconvolve`; a minute and 2.5 GB per
+  member, measured on 50 genomes) against the shipped atlas of 39 cell
+  types, and writes `<cohort>.methyl.<ref>.deconvolution.tsv`: a row per
+  member, a column per cell type, with MethBat's residual and raw
+  fraction sum. The cohort page shows a ribbon with one column per member,
+  the cohort's composition per cell type, the members' spread and the
+  members far from the cohort; a member's page shows its fractions beside
+  the cohort's medians; `ugc-wgw export --domains methyl` copies the
+  table. New advisory flag `cell_composition_outlier` (thresholds
+  `cell_composition_mad_max` 4 and `cell_composition_distance_min` 0.25):
+  another tissue or sample type, a cell line, contamination or an unusual
+  blood picture; relative to the cohort, so a saliva cohort is judged
+  against saliva. Checked on both sides: whole-blood samples come out as
+  granulocytes, T cells and monocytes, and the Genome in a Bottle
+  lymphoblastoid lines as 59 to 78% B cells. An estimate for research,
+  not a blood count: fractions of a few percent in unrelated tissues are
+  the method's noise. The per-sample digests are untouched.
+- **pblab on production genomes** (measured with 0.19.0 on 50 genomes at
+  about 20x): the whole joint run cost 20.5 core-hours per sample against
+  about 83 with pbmm2 and Parabricks; pbweave 4 min 15 s and 1.7
+  core-hours per sample, pbdv 5 min 52 s on 16 cores and one GPU. A
+  fourth comparison on chr20 (pbweave with DeepVariant) scores and
+  differs exactly as pbweave with pbdv: what the route changes is the
+  aligner's, and pbdv reproduces DeepVariant. The defaults stay pbmm2 and
+  DeepVariant.
+- **Driver fixes.** A stage blocked on runs that exist only at another
+  version says so and names `--any-version`. `submit --rerun` started a
+  stage twice when the stage had no run at the running version; it starts
+  once. A profile's `input_thresholds` reach the project (they were
+  accepted and dropped).
+- **Guide.** One page per stage under `docs/guide/stages/` with chapter 08
+  as the index; chapter 13, every QC flag in tables (what raises it, the
+  threshold, what to do); chapter 14, reading the cohort and sample pages
+  section by section; chapter 15, measurements and evaluations, taken out
+  of the resources chapter; an operator and an analyst path in the index.
+  Diagrams carry colour as well as shape (per-sample stage blue, cohort
+  stage amber, optional dashed, data grey, result green, decision violet;
+  in the generated call graphs this pipeline's tasks teal, upstream's
+  grey), readable on light and dark pages.
+
+</details>
+
 ## 0.19.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
@@ -18,7 +79,7 @@ not change. The tandem-repeat stage is corrected after its first cohort of
 864 genomes, and a finished stage can be run again with `submit --rerun`.
 An existing project runs `ugc-wgw upgrade --install` (the reference map
 names a new table) and, where `cohort_tr` has run, `submit --stage
-cohort_tr --rerun` once.
+cohort_tr --any-version` once.
 
 <details>
 <summary>Details</summary>

@@ -40,16 +40,19 @@ under `<results>/<samples|cohorts>/<id>/<v>/<stage>/`.
 flowchart LR
   subgraph standalone
     direction LR
-    a1(["singleton"]) --> a0{{"cohort_qc"}} --> a2{{"cohort_merge"}} --> a3{{"cohort_freq"}} --> a5{{"cohort_tr"}} --> a4{{"cohort_methyl"}}
+    a1(["singleton"]):::sample --> a0{{"cohort_qc"}}:::optional --> a2{{"cohort_merge"}}:::cohort --> a3{{"cohort_freq"}}:::cohort --> a5{{"cohort_tr"}}:::optional --> a4{{"cohort_methyl"}}:::cohort
   end
   subgraph joint
     direction LR
-    b1(["upstream"]) --> b0{{"cohort_qc"}} --> b2{{"cohort_call"}} --> b3(["downstream"]) --> b4{{"cohort_merge"}} --> b5{{"cohort_freq"}} --> b7{{"cohort_tr"}} --> b6{{"cohort_methyl"}}
+    b1(["upstream"]):::sample --> b0{{"cohort_qc"}}:::optional --> b2{{"cohort_call"}}:::cohort --> b3(["downstream"]):::sample --> b4{{"cohort_merge"}}:::cohort --> b5{{"cohort_freq"}}:::cohort --> b7{{"cohort_tr"}}:::optional --> b6{{"cohort_methyl"}}:::cohort
   end
   subgraph assembly
     direction LR
-    c1(["assembly"]) --> c2(["assembly_call"]) --> c3{{"cohort_pangenome"}}
+    c1(["assembly"]):::sample --> c2(["assembly_call"]):::sample --> c3{{"cohort_pangenome"}}:::cohort
   end
+  classDef sample fill:#cfe4f5,stroke:#2f6f8f,color:#12303f
+  classDef cohort fill:#f6dfb8,stroke:#b9770e,color:#3d2a05
+  classDef optional fill:#f6dfb8,stroke:#b9770e,color:#3d2a05,stroke-dasharray:5 3
 ```
 
 Rounded nodes run once per sample. Hexagons run once per cohort and start only

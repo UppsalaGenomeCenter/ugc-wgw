@@ -4,15 +4,16 @@
 
 ```mermaid
 flowchart TD
-  q0{"Do you need a de novo assembly?"}
+  q0{"Do you need a de novo assembly?"}:::decision
   q0 -->|"yes"| asm["mode assembly, on its own"]
-  q0 -->|"no, or also variants"| q1{"Must per-sample genotypes be consistent across the cohort, with hom-ref calls at sites variant in other samples?"}
+  q0 -->|"no, or also variants"| q1{"Must per-sample genotypes be consistent across the cohort, with hom-ref calls at sites variant in other samples?"}:::decision
   q1 -->|"no"| sa["mode standalone"]
-  q1 -->|"yes"| q2{"Is the cohort complete? Adding a sample later re-runs cohort_call and every downstream."}
+  q1 -->|"yes"| q2{"Is the cohort complete? Adding a sample later re-runs cohort_call and every downstream."}:::decision
   q2 -->|"yes"| jo["mode joint"]
   q2 -->|"no, still growing"| both["mode standalone now, joint later on the final cohort"]
-  sa --> q3{"Trio to phase by pedigree?"}
+  sa --> q3{"Trio to phase by pedigree?"}:::decision
   q3 -->|"yes"| fam["run upstream family.wdl by hand, then cohort_merge"]
+  classDef decision fill:#e3dcf5,stroke:#6b56b0,color:#241a4d
 ```
 
 Text version: assembly is its own mode and can run beside either of the other

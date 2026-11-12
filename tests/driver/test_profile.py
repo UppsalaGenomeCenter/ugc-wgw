@@ -129,6 +129,30 @@ class ProfileTest(unittest.TestCase):
         with self.assertRaises(UgcError):
             config.find_profile(str(self.tmp / "missing.json"), install=None, code=REPO)
 
+    def test_every_profile_key_reaches_the_project(self):
+        """One profile with every key a profile may set, each at a value that is not the default: all of them are in
+        the project's config.json afterwards. `input_thresholds` was accepted, validated, listed as applied and dropped
+        (until 0.19.1); a key added to PROFILE_KEYS has to be added here."""
+        values: dict[str, object] = {
+            "max_inflight": 7, "poll_interval": 11, "assembly_use_parents": False, "pangenome_sv_cohort": "ROUND1",
+            "methyl_label_columns": ["batch"], "methyl_genes_of_interest": ["FMR1"], "deepvariant": "pbdv", "aligner": "pbweave",
+            "gpu_type": "l40s", "parabricks_gpus": 2, "stage_inputs": {"ugc_wgw_cohort_merge": {"sv_merge_method": "bcftools"}},
+            "prices": {"cpu_hour": 0.14, "currency": "SEK"}, "summary_thresholds": {"depth_mean_min": 18},
+            "input_thresholds": {"file_reads_min": 500, "sample_gbases_min": 0}, "resource_retry_max": 1, "resource_retry_factor": 1.5,
+            "learn_resources": False,
+        }
+        self.assertEqual(sorted(values), sorted(config.PROFILE_KEYS))
+        mine = self.tmp / "all.json"
+        mine.write_text(json.dumps({"description": "every key", **values}))
+        code, err, cfg = self.init("--profile", str(mine))
+        self.assertEqual(code, 0, err)
+        for key, value in values.items():
+            self.assertEqual(getattr(cfg, key), value, key)
+        self.assertIn("input_thresholds", cfg.profile["applied"])
+        # and the floors are the ones `samples add` uses
+        again = config.load(cfg.project_dir)
+        self.assertEqual(again.input_thresholds, {"file_reads_min": 500, "sample_gbases_min": 0})
+
     def test_bad_profiles_are_refused(self):
         cases = {
             "unknown.json": ({"bogus": 1}, "unknown key 'bogus'"),

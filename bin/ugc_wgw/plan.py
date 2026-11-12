@@ -116,6 +116,15 @@ def gvcf_blockers(db: DB, mode: str, cohort: Cohort | None) -> list[str]:
     return [sid for sid in cohort.members if _kind(db, sid) == ("vcf", False)]
 
 
+OTHER_VERSION_HINT = "a successful run exists at another ugc-wgw version: add --any-version to accept it"
+
+
+def _elsewhere(db: DB, version: str | None, subject_type: str, subject_id: str, stage: str) -> bool:
+    """A prerequisite missing at `version` that has a successful run at another one: the usual state of a project
+    moved to a new version, where the stage being submitted is new or changed and its inputs are not."""
+    return version is not None and db.latest_success(subject_type, subject_id, stage, None) is not None
+
+
 def prerequisites(db: DB, mode: str, stage: str, subject_type: str, subject_id: str,
                   cohort: Cohort | None, version: str | None, *, allow_standalone: bool = False) -> str | None:
     """None when every earlier stage is satisfied, else the reason it is not. A sample's earlier stages are those of
@@ -135,12 +144,14 @@ def prerequisites(db: DB, mode: str, stage: str, subject_type: str, subject_id: 
                 continue
             if espec.subject_type == "sample":
                 if db.latest_success("sample", subject_id, earlier, version) is None:
-                    return f"waiting for {earlier} of {subject_id}"
+                    hint = f" ({OTHER_VERSION_HINT})" if _elsewhere(db, version, "sample", subject_id, earlier) else ""
+                    return f"waiting for {earlier} of {subject_id}{hint}"
             else:
                 if cohort is None:
                     return f"{earlier} needs --cohort"
                 if db.latest_success("cohort", cohort.cohort_id, earlier, version) is None:
-                    return f"waiting for {earlier} of cohort {cohort.cohort_id}"
+                    hint = f" ({OTHER_VERSION_HINT})" if _elsewhere(db, version, "cohort", cohort.cohort_id, earlier) else ""
+                    return f"waiting for {earlier} of cohort {cohort.cohort_id}{hint}"
         return None
     if cohort is None:
         return f"{stage} needs --cohort"
@@ -151,6 +162,7 @@ def prerequisites(db: DB, mode: str, stage: str, subject_type: str, subject_id: 
             return (f"joint mode needs a gVCF from every member; vcf member(s) without one: {shown} (register the gvcf column, "
                     "or submit with --allow-standalone-members to phase them from their own VCFs outside the joint call)")
     missing: list[str] = []
+    elsewhere = 0
     for sid in cohort.members:
         seq = member_stages(db, mode, sid, allow_standalone=allow_standalone)
         if stage not in seq:
@@ -160,10 +172,15 @@ def prerequisites(db: DB, mode: str, stage: str, subject_type: str, subject_id: 
                 break
             if stage_spec(earlier).subject_type == "sample" and db.latest_success("sample", sid, earlier, version) is None:
                 missing.append(f"{earlier} of {sid}")
+                elsewhere += _elsewhere(db, version, "sample", sid, earlier)
                 break
     if missing:
         shown = ", ".join(missing[:5]) + (f" (+{len(missing) - 5} more)" if len(missing) > 5 else "")
-        return f"waiting for {shown}"
+        hint = ""
+        if elsewhere:
+            hint = (f"; {'all' if elsewhere == len(missing) else elsewhere} of these have a successful run at another ugc-wgw version: "
+                    "add --any-version to accept them") if len(missing) > 1 else f" ({OTHER_VERSION_HINT})"
+        return f"waiting for {shown}{hint}"
     for earlier in mode_stages(mode):
         if earlier == stage:
             break
@@ -171,7 +188,8 @@ def prerequisites(db: DB, mode: str, stage: str, subject_type: str, subject_id: 
         if espec.subject_type != "cohort" or espec.optional:
             continue
         if db.latest_success("cohort", cohort.cohort_id, earlier, version) is None:
-            return f"waiting for {earlier} of cohort {cohort.cohort_id}"
+            hint = f" ({OTHER_VERSION_HINT})" if _elsewhere(db, version, "cohort", cohort.cohort_id, earlier) else ""
+            return f"waiting for {earlier} of cohort {cohort.cohort_id}{hint}"
     return None
 
 

@@ -40,6 +40,9 @@ workflow ugc_wgw_cohort_methyl {
       deconvolution: {
         description: "With run_deconvolve: one estimate JSON per member, cohort order"
       },
+      methyl_deconvolution: {
+        description: "<prefix>.deconvolution.tsv: the estimates as one table, a row per member and a column per cell type of the atlas, with the fit (residual, raw fraction sum); header only without run_deconvolve"
+      },
       methyl_summary: {
         description: "Long-format summary: resource, metric, key, value"
       },
@@ -111,7 +114,7 @@ workflow ugc_wgw_cohort_methyl {
       description: "Segment the cohort's methylome jointly from every pileup (one whole-genome task; its memory grows with the cohort)"
     }
     run_deconvolve: {
-      description: "Estimate cell-type proportions per member against the shipped atlas (an example atlas, not validated for our tissue)"
+      description: "Estimate cell-type proportions per member against the shipped atlas (methbat deconvolve, nanomix's 39 cell types from bisulfite data; a minute and 2.5 GB per member). On by default since 0.20.0: blood samples resolve into granulocytes, T cells and monocytes as expected, minor fractions are noise. false skips it"
     }
     build_mem_gb: {
       description: "Memory of methbat build (GB)"
@@ -166,7 +169,7 @@ workflow ugc_wgw_cohort_methyl {
     Float zscore_min = 3.0
     Float methyl_delta_min = 20
     Boolean run_joint_segment = false
-    Boolean run_deconvolve = false
+    Boolean run_deconvolve = true
     Int build_mem_gb = 8
     Int profile_mem_gb = 4
     Int joint_segment_threads = 8
@@ -341,6 +344,7 @@ workflow ugc_wgw_cohort_methyl {
     File methyl_events = ugc_wgw_methyl_summary.cohort_events
     File methyl_imprinting = ugc_wgw_methyl_summary.imprinting
     File methyl_samples = ugc_wgw_methyl_summary.samples
+    File methyl_deconvolution = ugc_wgw_methyl_summary.deconvolution_table
     File methyl_collection = ugc_wgw_methbat_build.collection
     Array[File] member_reports = member_report
     String ugc_wgw_workflow_version = ugc_wgw_version

@@ -299,7 +299,23 @@ class DocsTest(unittest.TestCase):
                 if opt.startswith("--"):
                     self.assertIn(opt, guide, f"{opt} is not documented in guide 11")
         self.assertIn("mito_unexplained_max", guide)
-        self.assertIn("mito_unexplained_max", (Path(__file__).resolve().parents[2] / "docs" / "guide" / "07-results.md").read_text())
+        self.assertIn("mito_unexplained_max", (Path(__file__).resolve().parents[2] / "docs" / "guide" / "13-qc-flags.md").read_text())
+
+    def test_every_flag_and_threshold_is_in_the_flags_chapter(self):
+        """Chapter 13 is the reference for flags: every flag code the driver can raise and every threshold key is named
+        there, so a new flag cannot ship undocumented."""
+        import re
+        from ugc_wgw import summary
+        root = Path(__file__).resolve().parents[2]
+        chapter = (root / "docs" / "guide" / "13-qc-flags.md").read_text()
+        code = (root / "bin" / "ugc_wgw" / "summary.py").read_text() + (root / "bin" / "ugc_wgw" / "summary_cohort.py").read_text()
+        flags = set(re.findall(r'flag\((?:[a-z_]+, )?"([a-z_]+)", "(?:fail|warn|info)"', code)) | set(re.findall(r'"code": "([a-z_]+)", "severity"', code))
+        flags |= {"low_depth", "low_mapped", "low_read_quality"}       # raised from a table of (code, key, threshold)
+        self.assertGreaterEqual(len(flags), 25, sorted(flags))
+        for flag in sorted(flags):
+            self.assertIn(f"`{flag}`", chapter, f"flag {flag} is not in chapter 13")
+        for key in summary.DEFAULT_THRESHOLDS:
+            self.assertIn(f"`{key}`", chapter, f"threshold {key} is not in chapter 13")
 
 
 if __name__ == "__main__":

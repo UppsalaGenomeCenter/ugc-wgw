@@ -46,3 +46,8 @@ scorers.
 | 2026-11-11 | 0.18.0 | v4.0.0 | HG002 singleton (chr20) | DeepVariant 1.10.0 | sawfish 2.3.0 | 0.9983 / 0.9988 / 0.9985 | 0.9503 / 0.9495 / 0.9499 | 0.8092 / 0.8671 / 0.8372 | 0.9252 / 0.9314 / 0.9283 | 0.9077 |
 | 2026-11-11 | 0.18.0 | v4.0.0 | HG002 singleton (chr20) | pbdv (gpu; DeepVariant 1.10.0 model) | sawfish 2.3.0 | 0.9983 / 0.9988 / 0.9985 | 0.9502 / 0.9494 / 0.9498 | 0.8092 / 0.8671 / 0.8372 | 0.9252 / 0.9314 / 0.9283 | 0.9077 |
 | 2026-11-11 | 0.18.0 | v4.0.0 | HG002 singleton (chr20, pbweave) | pbdv (gpu; DeepVariant 1.10.0 model) | sawfish 2.3.0 | 0.9979 / 0.9988 / 0.9984 | 0.9515 / 0.9488 / 0.9502 | 0.8067 / 0.8693 / 0.8368 | 0.9239 / 0.9325 / 0.9282 | 0.9091 |
+| 2026-11-12 | 0.19.0 | v4.0.0 | HG002 singleton (chr20, pbweave) | DeepVariant 1.10.0 | sawfish 2.3.0 | 0.9979 / 0.9988 / 0.9984 | 0.9516 / 0.9488 / 0.9502 | 0.8067 / 0.8693 / 0.8368 | 0.9239 / 0.9325 / 0.9282 | 0.9091 |
+
+The last row is the fourth combination, pbweave with DeepVariant (`eval
+pbweave`): the same scores as pbweave with pbdv, so the small shift from
+the default route is the aligner's.

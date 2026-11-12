@@ -508,6 +508,29 @@ def _tr_summary(members: list[str]) -> str:
     return "resource\tmetric\tkey\tvalue\n" + "\n".join(rows) + "\n"
 
 
+DECONV_CELLS = ["adipocyte", "smooth_muscle", "T-cell", "NK-cell", "monocyte", "granulocyte", "B-cell", "prostate_epithelial"]
+
+
+def _methyl_deconvolution(members: list[str]) -> str:
+    """cohort_methyl's deconvolution table: whole-blood compositions that differ a little from member to member, as the
+    first production examples do (granulocytes about half, then T cells and monocytes, a few percent of noise in an
+    unrelated tissue). A member named in UGC_WGW_FAKE_CELL_OUTLIER (comma-separated) is a B-cell line instead."""
+    import os
+    outliers = {x for x in os.environ.get("UGC_WGW_FAKE_CELL_OUTLIER", "").split(",") if x}
+    rows = []
+    for i, m in enumerate(members):
+        if m in outliers:
+            f = {"B-cell": 0.95, "T-cell": 0.05}
+        else:
+            d = (i % 5) * 0.01
+            f = {"granulocyte": 0.52 + d, "T-cell": 0.27 - d, "monocyte": 0.12, "prostate_epithelial": 0.05, "smooth_muscle": 0.04}
+        top = max(f, key=lambda c: f[c])
+        rows.append("\t".join([m, "6e30a2eafd8da7410d4e7766c7c71d94", "1.1.0-test", "7.5728", "0.9374", top, f"{f[top]:.4f}"]
+                              + [f"{f.get(c, 0.0):.4f}" for c in DECONV_CELLS]) + "\n")
+    return ("\t".join(["sample_id", "atlas_md5", "methbat_version", "residual_error", "raw_fraction_sum", "top_cell_type", "top_fraction"] + DECONV_CELLS)
+            + "\n" + "".join(rows))
+
+
 def _methyl_samples(members: list[str], legacy: list[str], labels: list[str]) -> str:
     rows = []
     for i, m in enumerate(members):
@@ -703,6 +726,8 @@ def fixture_bytes(name: str, sid: str, stage: str, inferred_sex: str = "", index
         text = "trid\tal\tn_alleles\tn_members\nchr1_1000_1090_CAG\t90\t5\t3\nchr1_1000_1090_CAG\t450\t1\t1\n"
     elif name == "methyl_samples":
         text = _methyl_samples(members or [], legacy or [], labels or [])
+    elif name == "methyl_deconvolution":
+        text = _methyl_deconvolution(members or [])
     elif name == "methyl_summary":
         text = _methyl_summary(members or [], legacy or [], labels or [])
     elif name == "methyl_regions":

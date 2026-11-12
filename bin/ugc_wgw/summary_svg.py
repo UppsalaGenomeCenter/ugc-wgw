@@ -267,6 +267,70 @@ def stacked(rows: list[tuple[str, dict[str, float]]], categories: list[str], *, 
     return _svg(label_w + width + 90, y0 + len(rows) * row_h + 4, "".join(parts))
 
 
+RIBBON_COLUMNS = 200   # ribbon() draws one column per member up to here, then the mean of adjacent members per column
+
+
+def ribbon(columns: list[tuple[str, dict[str, float]]], categories: list[str], *, width: int = 700, height: int = 150,
+           marked: set[str] | None = None, max_columns: int = RIBBON_COLUMNS) -> str:
+    """A composition ribbon: one thin stacked column per member, in the order given (the caller sorts), each column
+    its categories as shares of 100%, the categories in the series colours. Beyond `max_columns` members a column is
+    the mean of adjacent members, so the picture and the page stay the same size at any cohort size. `marked`
+    members are never averaged away: they stand at the right, after a gap, one wider column each with a red tick.
+    (label, {category: fraction}); fractions need not sum to 1."""
+    cols = [(label, {c: finite(vals.get(c)) for c in categories}) for label, vals in columns]
+    cols = [(label, vals) for label, vals in cols if sum(vals.values()) > 0]
+    if not cols or not categories:
+        return "<p class='muted'>No data.</p>"
+    marked = marked or set()
+    plain = [c for c in cols if c[0] not in marked]
+    odd = [c for c in cols if c[0] in marked]
+    per = max(1, math.ceil(len(plain) / max_columns))
+    groups = [plain[i:i + per] for i in range(0, len(plain), per)]
+    left, top, legend_h = 34, 6, 18
+    odd_w = min(12.0, max(4.0, width * 0.25 / len(odd))) if odd else 0.0
+    gap = 10.0 if odd and groups else 0.0
+    w = (width - gap - odd_w * len(odd)) / max(1, len(groups))
+    parts = []
+    x = float(left)
+    for i, c in enumerate(categories):
+        parts.append(f'<rect class="{SERIES[i % len(SERIES)]}" x="{x:.0f}" y="3" width="10" height="10"/><text x="{x + 13:.0f}" y="12">{esc(c)}</text>')
+        x += 13 + 7 * len(str(c)) + 14
+    y0 = top + legend_h
+    for tick in (0, 50, 100):
+        y = y0 + height * (1 - tick / 100)
+        parts.append(f'<text x="{left - 4}" y="{y + 3:.1f}" text-anchor="end">{tick}%</text><line x1="{left}" x2="{left + width}" y1="{y:.1f}" y2="{y:.1f}"/>')
+    for g, members in enumerate(groups):
+        mean = {c: sum(vals[c] for _, vals in members) / len(members) for c in categories}
+        total = sum(mean.values()) or 1.0
+        name = members[0][0] if len(members) == 1 else f"{members[0][0]} … {members[-1][0]} ({len(members)} members, mean)"
+        tip = name + ": " + ", ".join(f"{c} {mean[c] / total * 100:.0f}%" for c in categories if mean[c] / total >= 0.005)
+        gx = left + g * w
+        y = float(y0 + height)
+        segs = []
+        for i, c in enumerate(categories):
+            h = mean[c] / total * height
+            if h <= 0:
+                continue
+            y -= h
+            segs.append(f'<rect class="{SERIES[i % len(SERIES)]}" x="{gx:.2f}" y="{y:.1f}" width="{max(w - (0.5 if w >= 3 else 0), 0.5):.2f}" height="{h:.1f}"/>')
+        parts.append(f"<g><title>{esc(tip)}</title>{''.join(segs)}</g>")
+    for k, (label, vals) in enumerate(odd):
+        total = sum(vals.values()) or 1.0
+        gx = left + len(groups) * w + gap + k * odd_w
+        tip = label + ": " + ", ".join(f"{c} {vals[c] / total * 100:.0f}%" for c in categories if vals[c] / total >= 0.005)
+        y = float(y0 + height)
+        segs = []
+        for i, c in enumerate(categories):
+            h = vals[c] / total * height
+            if h <= 0:
+                continue
+            y -= h
+            segs.append(f'<rect class="{SERIES[i % len(SERIES)]}" x="{gx:.2f}" y="{y:.1f}" width="{odd_w - 1:.2f}" height="{h:.1f}"/>')
+        parts.append(f"<g><title>{esc(tip)}</title>{''.join(segs)}"
+                     f'<rect class="bad" x="{gx:.2f}" y="{y0 + height + 2}" width="{odd_w - 1:.2f}" height="5"/></g>')
+    return _svg(left + width + 10, y0 + height + 12, "".join(parts))
+
+
 def track(rows: list[dict[str, object]], *, width: int = 900, row_h: int = 24, label_w: int = 48,
           baseline: float | None = None, vmax: float | None = None, steps_max: float = 4.0,
           area_cls: str = "m1", step_cls: str = "ln3", unit: str = "x") -> str:

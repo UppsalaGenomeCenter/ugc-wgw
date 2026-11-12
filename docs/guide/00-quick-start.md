@@ -7,11 +7,12 @@ bundle carries the engine, every container and the reference data.
 
 ```mermaid
 flowchart LR
-  b[/"bundle tar on the share"/] --> i["1 install (once per version)"]
+  b[/"bundle tar on the share"/]:::data --> i["1 install (once per version)"]
   i --> p["2 project"] --> s["3 samples"] --> c["4 cohort"]
   c --> r["5 check, then submit"] --> w["6 watch, retry"]
   w --> o["7 results, report, summary"]
   o -.-> a["8 more samples later"] -.-> s
+  classDef data fill:#e9edf1,stroke:#8a8f95,color:#22272e
 ```
 
 Text version: install the bundle once, create a project, register the

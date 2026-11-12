@@ -128,9 +128,10 @@ made (chapter 08).
 | `qc_ancestry`, `qc_ancestry_html` | `.somalier-ancestry.tsv` and report: each member's superpopulation probabilities and principal components next to the 2,504 labelled 1000 Genomes samples; absent when the reference set is not installed. |
 | `somalier_extracts` | Every member's genotype sketch, cohort order. |
 
-The flags (`duplicate`, `pedigree_mismatch`, `related_hub`, `related`, `het_outlier`) are
-the driver's, computed on the cohort page from these tables ("Analysis
-summary" below); `ugc-wgw export --domains identity` copies the tables.
+The flags (`duplicate`, `pedigree_mismatch`, `related_hub`, `related`,
+`het_outlier`) are the driver's, computed on the cohort page from these
+tables ("Analysis summary" below); `ugc-wgw export --domains identity`
+copies the tables.
 
 ### `cohort_tr`
 
@@ -162,11 +163,12 @@ summary" below); `ugc-wgw export --domains identity` copies the tables.
 | `methyl_samples` | `.samples.tsv`: one row per member: labels, event counts, summary-label counts, imprinting counts, `report_source`, deconvolution's top cell type. |
 | `member_reports` | The `methbat report` used per member, cohort order. |
 | `joint_segments`, `joint_combined_methyl`, `joint_asm` (with `run_joint_segment`) | `.joint.meth_regions.bed` (segments: Methylated, Unmethylated, AlleleSpecificMethylation), `.joint.combined_methyl.bedgraph`, `.joint.asm.bedgraph`. |
-| `deconvolution` (with `run_deconvolve`) | `<sample_id>.GRCh38_GIABv3.methbat.deconvolution.json` per member: `metrics.normalized_fraction` per cell type of the atlas (nanomix 39Bisulfite, an example). |
+| `methyl_deconvolution` | `.deconvolution.tsv`: one row per member and one column per cell type of the atlas (nanomix's 39 cell types): the estimated fraction of the member's DNA from each, with `residual_error` and `raw_fraction_sum` (how well the atlas explained the member), `top_cell_type` and the atlas's md5. Header only with `run_deconvolve` false. An estimate for research, not a blood count (chapter 08). |
+| `deconvolution` | `<sample_id>.GRCh38_GIABv3.methbat.deconvolution.json` per member: MethBat's own estimate (`metrics.normalized_fraction`, `nnls_raw_fraction`, the residuals per atlas region). |
 
 `ugc-wgw export --domains methyl` copies the background, summary, regions,
-imprinting, samples and events tables and the comparison files
-(`.compare.<baseline>_vs_<compare>.tsv`, one per pair).
+imprinting, samples, events and cell-type composition tables and the
+comparison files (`.compare.<baseline>_vs_<compare>.tsv`, one per pair).
 
 ### `intake`
 
@@ -394,167 +396,32 @@ two numbers to carry into such an estimate.
 
 ## Analysis summary
 
-`ugc-wgw summary [--samples ID... | --samples-file F] [--cohort ID] [--mode M]
-[--any-version] [--out-dir DIR] [--force] [--threshold KEY=VALUE ...]
-[--jobs N] [--pass-list FILE] [--pass-on assembly|identity|all]` writes what the analysis found, as
-self-contained HTML (inline styles, inline SVG charts, nothing fetched from
-the network), one page per sample and one per cohort, under
-`<results>/reports/summary/` (`<id>.summary.html`). It summarises the latest
-successful runs of the mode: `singleton` in standalone mode, `upstream` and
-`downstream` in joint mode, and with `--mode assembly` the assembly stages
-alone, with the cohort's `cohort_pangenome`; a sample's `assembly` and
-`assembly_call` runs join its page in every mode when they exist. Without
-`--samples` or `--cohort` every registered sample is summarised; `--cohort`
-adds the cohort page and covers the cohort's members. `--pass-list FILE`
-also writes the IDs that pass `--pass-on`, in sample-sheet order: `assembly`
-(no assembly QC fail flag: the input of `cohort freeze` for a pangenome
-cohort), `identity` (no identity failure in the cohort's `cohort_qc` run and
-no undeclared relative or duplicate earlier in the sheet; a declared pair
-stays; needs `--cohort`) or `all` (both) (chapter 06). The paths written are printed, one per line.
+`ugc-wgw summary [--samples ID... | --samples-file F] [--cohort ID] [--mode
+M] [--any-version] [--out-dir DIR] [--force] [--threshold KEY=VALUE ...]
+[--jobs N] [--pass-list FILE] [--pass-on assembly|identity|all]` writes what
+the analysis found, as self-contained HTML (inline styles, inline SVG
+charts, nothing fetched from the network), one page per sample and one per
+cohort, under `<results>/reports/summary/` (`<id>.summary.html`). It
+summarises the latest successful runs of the mode: `singleton` in standalone
+mode, `upstream` and `downstream` in joint mode, and with `--mode assembly`
+the assembly stages alone, with the cohort's `cohort_pangenome`; a sample's
+`assembly` and `assembly_call` runs join its page in every mode when they
+exist. Without `--samples` or `--cohort` every registered sample is
+summarised; `--cohort` adds the cohort page and covers the cohort's members.
+`--pass-list FILE` also writes the IDs that pass `--pass-on`, in
+sample-sheet order: `assembly` (no assembly QC fail flag: the input of
+`cohort freeze` for a pangenome cohort), `identity` (no identity failure in
+the cohort's `cohort_qc` run and no undeclared relative or duplicate earlier
+in the sheet; a declared pair stays; needs `--cohort`) or `all` (both)
+(chapter 06). The paths written are printed, one per line.
 
-The sample page has a fixed menu on the left and these sections: overview
-with the QC flags and the sex from every source (sheet, coverage, somalier)
-beside the one the run used; reads; coverage (mean depth per chromosome, the
-chrX/chrY ratios behind the sex inference, depth along the genome in 1 Mb
-bins with sawfish's copy-number segments); small variants (counts, Ts/Tv,
-het/hom, substitution spectrum, indel lengths, site quality and depth
-histograms, runs of homozygosity); structural variants by type and size;
-phasing; tandem repeats (coverage dropouts and the catalog's known disease
-loci with their genotypes); methylation; the targeted callers (Paraphase,
-mitorsaw with the collapsed chrM counts and a haplogroup per haplotype,
-StarPhase, kivvi); the assembly, when the sample has one; with
-`--cohort`, the sample's identity in that cohort (closest relative,
-relatedness and expectation, heterozygosity ratio, somalier's chrX call,
-ancestry, its identity flags) from the cohort's `cohort_qc` run; the
-workflow messages and the files read; software and workflow (tool versions
-as pinned in the WDL, engine versions, ugc-wgw and upstream commits, the
-reference build and its checksums, citations, the project URL).
+Chapter 14 walks through both pages section by section and says how to
+read them; the stage pages (chapter 08) explain each analysis.
 
-The Assembly section reads every file the assembly stages write: the
-haplotypes' contiguity (length, contigs, NG50, LG50 and auNG against a 3.1 Gb
-genome, hifiasm's low-quality regions, the NGx curve); Flagger's composition
-of the diploid assembly (Err, Dup, Hap, Col, Unk as a stacked bar, with the
-bases and the flagged blocks); for trio-binned samples the switch and
-Hamming errors with the contigs that carry the most switches; the
-chromosomes (assembled fraction per chromosome and haplotype, a track of
-`reliable.bed` and `dip.bed` coverage in 1 Mb bins, a per-chromosome table);
-the karyotype with its evidence (non-PAR chrX and chrY fractions against
-the stage's thresholds, dipcall's regrouping); both callers' statistics
-(records, SNVs, indels, Ts/Tv, het and hom-alt genotypes, het/hom, missing
-genotypes, the indel-length and substitution spectra, the reference covered
-by `dip.bed`, the haplotype BEDs and PAV's callable regions; both callers'
-records by FILTER class and type, and PAV's PASS structural variants by
-size); the reliable region in full; and the concordance with the sample's
-read-based SNVs. With the per-contig QC of 0.12.0 it also shows Flagger per
-haplotype, GC, N bases, telomeric contig ends and the contigs with the most
-non-Hap bases. A sample with only an assembly gets these sections,
-provenance and the files table like any other.
-
-Each sample page names the aligner and small-variant caller behind it
-under "Runs summarised" (from the run's `tools` block; pbmm2 and
-DeepVariant for runs before 0.19.0) and says when one is a preview tool. A
-cohort whose members were made with more than one such set carries the
-warning `mixed_tools` in its Overview, with the sets and their member
-counts, and an "aligner and caller sets" card; typing a tool's name in the
-member finder lists the members that are not on the default set. Nothing
-is refused for it: joint calls, frequencies and outlier statistics can
-show the difference as a batch effect, and the page says so.
-
-The cohort page's menu on the left holds every member below the section
-links, each with a dot for its QC status (red fail, orange warn); the box
-above the list narrows it as you type an id, a status or a flag name
-(`fail`, `related_hub`, `gos_08`), and Enter opens the first match.
-
-The cohort page lists the members with their QC status (each row links to
-the sample page), draws every metric across the members (median,
-interquartile box, outliers beyond median ± 3 MAD in red, QC thresholds as
-dashed lines), checks sex consistency (the sheet, the coverage inference,
-somalier's chrX call and the sex each run used, side by side), reads the
-identity stage (`cohort_qc`: the relatedness histogram of every pair with
-the thresholds drawn, the pairs worth a look with their expectation, the
-identity flags, the ancestry projection as superpopulation counts and a
-PC1/PC2 scatter over the 1000 Genomes background, the members extracted in
-the stage), summarises the cohort call sets
-(joint VCF, merged SVs with the support histogram, trgt-lps), the
-`cohort_freq` summary (allele-frequency bins, singletons, call rate, sex
-strata), the targeted callers across the cohort (Paraphase copy-number
-histograms of the regions with the most variation and a table of every
-region, StarPhase diplotype frequencies per gene with the called rate,
-HLA allele frequencies, the mitorsaw unexplained fraction with the members
-above its threshold and the members' haplogroups and macro-haplogroups: the
-same tables `ugc-wgw export` writes), the pangenome graph (`cohort_pangenome`: the chromosomes built
-with their nodes, edges and length, the contigs the split assigned to a
-chromosome or left ambiguous per haplotype, the allele frequencies of the
-vcfwave VCF, truvari's recall, precision, F1 and genotype concordance
-against the read-based SV merge, the reference length and the haplotypes'
-sequence per chromosome, and the members in the graph VCF with the sequence
-the split assigned or left ambiguous for each) and the assemblies: one row
-per member with both haplotypes side by side, the trio QC, Flagger, the
-reliable fraction, the concordance and both callers' counts. The assembly
-metrics are part of the distributions (strips, outliers, threshold
-failures above or below the limit, as each threshold's direction says) and
-the sex section counts the assemblies' karyotypes next to the sheet and the
-coverage inference. The pangenome section further shows the graph's
-structure (haplotype sequence and reference gaps per chromosome, the node
-degree histogram, records by nesting level, vcfwave type and allele length)
-and the members' genotypes in the graph VCF (call rate, singletons, het and
-hom-alt counts as strips with outliers; members below
-`pg_member_call_rate_min`, 0.90, are listed as a signal for the next cohort
-freeze, not as a sample flag).
-
-QC flags are advisory checks by the driver, not the workflow's:
-`low_depth` (`depth_mean_min`, 20x), `low_mapped`
-(`mapped_read_percent_min`, 95 %) and `low_read_quality`
-(`read_quality_median_min`, 25) fail the sample; `sex_not_inferred` fails
-when no source (sheet, coverage, somalier) could sex the sample, because
-sawfish and TRGT then ran with the XX default (`sex_unknown_fails` 0 makes
-it a warning; it is a warning when only the coverage inference is missing);
-`sex_mismatch` (the sources disagree: the message names each and what the
-run used), `tool_status` (kivvi without
-reads, Paraphase regions failed for coverage, mitorsaw without haplotypes)
-and `mito_unexplained_high` (mitorsaw's haplotypes leave more than
-`mito_unexplained_max`, 0.02, of the fingerprint reads unexplained: a
-contamination or NUMT signal; 0.02 is mitorsaw's own passing criterion)
-and `imprinting_anomalous` (`methbat report`: an imprinting region lost its
-expected allele-specific methylation without a QC warning; the message
-names the regions) warn; workflow messages and `external_input` (the sample
-entered as the `bam` or `vcf` kind: its alignment, or its calls too, came
-from outside the project) are informational. The identity flags live on the
-cohort page, because they need the whole cohort: `duplicate` (both members
-of a pair at or above `duplicate_relatedness_min`, 0.9: the same
-individual, a re-delivered sample or monozygotic twins) and
-`pedigree_mismatch` (a declared parent-child pair outside
-`pedigree_relatedness_min`–`pedigree_relatedness_max`, 0.35–0.65: child and
-parent both; a sheet error as often as a swap) and `related_hub` (a member
-related that way to `related_hub_min`, 10, members or more with no
-pedigree link: contamination makes a sample look related to everyone, so
-the member fails and its partners are not flagged on its account; hubs are
-taken out one at a time, the most connected first) fail; `related` (an
-undeclared pair at or above `related_relatedness_max`, 0.2, neither member
-a hub) and
-`het_outlier` (heterozygosity ratio beyond the cohort's median ±
-`het_ratio_mad_max`, 3, scaled MADs: contamination or a sample mix) warn;
-`methyl_outlier` (a member's methylation events against the cohort
-background beyond the median + `methyl_events_mad_max`, 3, MADs, from
-`cohort_methyl`'s samples table) warns too, as does
-`tr_outlier_count_high` (a member's expansion outliers at ordinary
-tandem-repeat loci beyond the median + `tr_outlier_count_mad_max`, 3,
-scaled MADs, from `cohort_tr`'s samples table: an ancestry that is rare in
-the cohort, a lower depth than the others, or a sample problem); no flag
-is raised for a class of the disease-locus screen;
-`sex_mismatch` also fires for a member whose own run predates the extract
-when the stage's chrX call disagrees with its sheet or coverage. They join
-the member's flags and QC status on the cohort page and in the export, not
-in the per-sample digest. The assembly flags
-(`asm_flagger_err`, `asm_hap_length`, `asm_switch_error`,
-`asm_reliable_fraction`, `asm_het_loss`, `asm_concordance_low`) fail the
-sample and are what `--pass-list` gates on; `asm_karyotype_mismatch` (sheet
-versus the assembly) and `asm_karyotype_unknown` (too little non-PAR chrX
-assembled: the sample joins no sex stratum of the pangenome frequencies)
-warn. Thresholds come from
-`summary_thresholds` in `config.json` or `--threshold KEY=VALUE`; unknown
-keys are refused. Flags are re-evaluated whenever a page is written, so a
-changed threshold needs no rebuild.
+QC flags are advisory checks by the driver, evaluated every time a page
+is written: three severities (`fail`, `warn`, `info`), per-sample flags
+from the sample's own results and cohort flags that need the other
+members. Chapter 13 lists every flag with its threshold and what to do.
 
 Each sample's numbers are also written as `<sample>.summary.json`, a digest
 the cohort page reads instead of the sample's files, so a cohort of a
@@ -607,29 +474,30 @@ appended.
 | `export_manifest.json` | | ugc-wgw version, the cohort's freeze, the mode, the digest schema and thresholds, the strata used, the run ids read per member and per cohort stage, the domains written or skipped, every file with its rows, bytes and sha256 |
 
 Frequencies are computed over the members with a call: `n_called` is the
-group's called members in the stratum, `n_members` its members with a row
-at all. `stratum_kind` is `ALL` (every member), `sex` (`XX`/`XY` by the
-rule `cohort_freq` uses: the resolved sex of the member's run, else the
-sheet, else coverage) or `ancestry`: the superpopulation somalier's
-`cohort_qc` projected the member onto (a description of structure, not an
-origin; the file header says so). `--strata none|sex|ancestry|all` (default
-`all`) selects; without a `cohort_qc` run the ancestry stratum is left out
-with a note, not an error. The cohort page's "Methylation (cohort_methyl)" section shows the stage's
-labels and their member counts, the events per member, the genes with the
-most members carrying an event, the recurrent regions, the imprinting
-screen and the comparisons; each sample page lists its own imprinting
-regions under Methylation. Digest schema 5 (0.16): every per-sample digest
-rebuilds once. The "Tandem repeats (cohort_tr)" section (0.18) shows the
-disease-locus screen's pathogenic and intermediate rows and any call in
-doubt, each with the member's own dropout class at the locus (the other
-classes are counted, and summarised per locus), the per-locus table, the expansion outliers per member
-with `tr_outlier_count_high`, and the loci with the most listed members;
-with `summary --cohort` a member's page shows its own rows and strongest
-outliers under Tandem repeats. That block is joined when the page is made:
-the per-sample digest and its schema do not change, so nothing rebuilds. The cohort page's "Targeted callers" section
-draws from the same computation, so page and files agree. `--domains D[,D…]`
-selects domains, `--out DIR` another directory (refused when it holds
-files but no manifest, unless `--force`), `--force` also rebuilds the
+group's called members in the stratum, `n_members` its members with a row at
+all. `stratum_kind` is `ALL` (every member), `sex` (`XX`/`XY` by the rule
+`cohort_freq` uses: the resolved sex of the member's run, else the sheet,
+else coverage) or `ancestry`: the superpopulation somalier's `cohort_qc`
+projected the member onto (a description of structure, not an origin; the
+file header says so). `--strata none|sex|ancestry|all` (default `all`)
+selects; without a `cohort_qc` run the ancestry stratum is left out with a
+note, not an error. The cohort page's "Methylation (cohort_methyl)" section
+shows the stage's labels and their member counts, the events per member, the
+genes with the most members carrying an event, the recurrent regions, the
+imprinting screen and the comparisons; each sample page lists its own
+imprinting regions under Methylation. Digest schema 5 (0.16): every
+per-sample digest rebuilds once. The "Tandem repeats (cohort_tr)" section
+(0.18) shows the disease-locus screen's pathogenic and intermediate rows and
+any call in doubt, each with the member's own dropout class at the locus
+(the other classes are counted, and summarised per locus), the per-locus
+table, the expansion outliers per member with `tr_outlier_count_high`, and
+the loci with the most listed members; with `summary --cohort` a member's
+page shows its own rows and strongest outliers under Tandem repeats. That
+block is joined when the page is made: the per-sample digest and its schema
+do not change, so nothing rebuilds. The cohort page's "Targeted callers"
+section draws from the same computation, so page and files agree. `--domains
+D[,D…]` selects domains, `--out DIR` another directory (refused when it
+holds files but no manifest, unless `--force`), `--force` also rebuilds the
 digests and removes stale tables of the cohort the export does not write.
 
 ## The driver's logs

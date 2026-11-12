@@ -1360,6 +1360,111 @@ class MethylationTest(unittest.TestCase):
         self.assertEqual((none["n"], len(none["rows"])), (2, 0))
 
 
+class CellCompositionTest(unittest.TestCase):
+    """cohort_methyl's deconvolution as a result: the cohort's composition per cell type, each member's distance from
+    it, the flag for a member that is something else, both pages, the export; nothing in the per-sample digest."""
+
+    BLOOD = {"granulocyte": 0.52, "T-cell": 0.27, "monocyte": 0.12, "prostate_epithelial": 0.05, "smooth_muscle": 0.04}
+
+    def parsed(self, members: dict[str, dict[str, float]]) -> dict[str, object]:
+        cells = ["adipocyte", "smooth_muscle", "T-cell", "NK-cell", "monocyte", "granulocyte", "B-cell", "prostate_epithelial", "head_neck_epithelial"]
+        return {"cell_types": cells, "members": {sid: {"fractions": {c: f.get(c, 0.0) for c in cells}, "residual_error": 7.5, "raw_fraction_sum": 0.94,
+                                                         "top_cell_type": max(f, key=lambda c: f[c]), "atlas_md5": "6e30"} for sid, f in members.items()}}
+
+    def test_composition_distance_and_flag(self):
+        from ugc_wgw import summary_cohort as sc
+        members = {}
+        for i in range(20):   # ordinary blood: the neutrophil to lymphocyte balance moves by up to eight points
+            d = (i % 9 - 4) * 0.02
+            members[f"M{i:02d}"] = {**self.BLOOD, "granulocyte": 0.52 + d, "T-cell": 0.27 - d}
+        members["LCL"] = {"B-cell": 0.95, "T-cell": 0.05}                                   # a cell line
+        members["SALIVA"] = {"head_neck_epithelial": 0.55, "granulocyte": 0.30, "T-cell": 0.10, "monocyte": 0.05}
+        members["GONE"] = dict(self.BLOOD)                                                  # not a present member: ignored
+        present = {k: {} for k in members if k != "GONE"}
+        thr = dict(summary.DEFAULT_THRESHOLDS)
+        dec = sc._cell_composition(self.parsed(members), present, thr)
+        self.assertEqual((dec["available"], dec["n_members"], dec["cell_types"][:3]), (True, 22, ["granulocyte", "T-cell", "monocyte"]))
+        self.assertEqual(sorted(dec["flags"]), ["LCL", "SALIVA"])
+        self.assertGreater(dec["members"]["LCL"]["distance"], 0.9)        # nearly nothing shared with blood
+        self.assertGreater(dec["members"]["SALIVA"]["distance"], 0.4)
+        self.assertLess(max(m["distance"] for sid, m in dec["members"].items() if sid.startswith("M")), 0.10)
+        self.assertEqual(dec["distance"]["limit"], 0.25)                 # the floor: this cohort's own spread is far below it
+        msg = dec["flags"]["LCL"][0]["message"]
+        self.assertIn("B-cell 95% against 0%", msg)
+        self.assertIn("granulocyte 0% against 50%", msg)
+        self.assertEqual(dec["members"]["M00"]["groups"]["blood"], round(0.52 - 0.08 + 0.27 + 0.08 + 0.12, 4))
+        self.assertEqual(dec["members"]["SALIVA"]["groups"], {"epithelial": 0.55, "blood": 0.45})
+        self.assertEqual((dec["group_of"]["granulocyte"], dec["group_of"]["smooth_muscle"], dec["stats"]["granulocyte"]["median"]), ("blood", "mesenchymal", 0.5))
+        # fewer than four members: described, nobody flagged; a cohort that is all cell lines flags nobody either
+        few = sc._cell_composition(self.parsed({"A": self.BLOOD, "B": {"B-cell": 1.0}}), {"A": {}, "B": {}}, thr)
+        self.assertEqual((few["flags"], few["distance"]["limit"]), ({}, None))
+        lines = sc._cell_composition(self.parsed({f"L{i}": {"B-cell": 0.95, "T-cell": 0.05} for i in range(6)}), {f"L{i}": {} for i in range(6)}, thr)
+        self.assertEqual(lines["flags"], {})
+        self.assertEqual(sc._cell_composition(None, present, thr), {"available": False})
+        self.assertEqual(sc._cell_composition({"cell_types": [], "members": {}}, present, thr), {"available": False})
+
+    def test_ribbon(self):
+        """The composition ribbon: a column per member, means of adjacent members beyond the limit, flagged members
+        individually at the right, the same size at any cohort size."""
+        cats = ["granulocyte", "T-cell", "other"]
+        cols = [(f"M{i:03d}", {"granulocyte": 0.5, "T-cell": 0.3, "other": 0.2}) for i in range(10)]
+        svg = sv.ribbon(cols + [("ODD", {"granulocyte": 0.0, "T-cell": 0.1, "other": 0.9})], cats, marked={"ODD"})
+        self.assertEqual(svg.count("<g><title>"), 11)
+        self.assertIn("<title>ODD: T-cell 10%, other 90%</title>", svg)
+        self.assertEqual(svg.count('class="bad"'), 1)
+        self.assertIn("<title>M000: granulocyte 50%, T-cell 30%, other 20%</title>", svg)
+        big = sv.ribbon([(f"M{i:04d}", {"granulocyte": 0.4 + (i % 10) / 100, "T-cell": 0.3, "other": 0.2}) for i in range(1000)] + cols[:0]
+                        + [("ODD", {"granulocyte": 0.0, "T-cell": 0.1, "other": 0.9})], cats, marked={"ODD"})
+        self.assertEqual(big.count("<g><title>"), 201)                 # 200 columns of five members, and the flagged one
+        self.assertIn("M0000 … M0004 (5 members, mean)", big)
+        self.assertLess(len(big), 120_000)
+        self.assertIn("No data", sv.ribbon([], cats))
+        for chart in (svg, big):
+            c = _Checker()
+            c.feed(chart)
+            self.assertEqual((c.errors, c.stack), ([], []))
+            self.assertNotIn("nan", chart)
+
+    def test_end_to_end_pages_flag_and_export(self):
+        tmp = Path(tempfile.mkdtemp())
+        cfg = make_project(tmp)
+        proj = str(cfg.project_dir)
+        ids = [f"S{i}" for i in range(1, 7)]
+        tsv = write_tsv(tmp, [{"sample_id": s, "sex": "MALE", "hifi_reads": f"{s}.bam"} for s in ids])
+        self.assertEqual(run_cli(["--project", proj, "samples", "add", str(tsv)])[0], 0)
+        self.assertEqual(run_cli(["--project", proj, "cohort", "freeze", "C1", "--samples", str(write_ids(tmp, ids))])[0], 0)
+        code, _, err = run_cli(["--project", proj, "submit", "--mode", "standalone", "--cohort", "C1"], env={"UGC_WGW_FAKE_CELL_OUTLIER": "S5"})
+        self.assertEqual(code, 0, err)
+        code, _, err = run_cli(["--project", proj, "summary", "--cohort", "C1"])
+        self.assertEqual(code, 0, err)
+        out_dir = cfg.results_dir / "reports" / "summary"
+        cd = json.loads((out_dir / "C1.summary.json").read_text())
+        dec = cd["methylation"]["deconvolution"]
+        self.assertEqual((dec["n_members"], sorted(dec["flags"]), cd["methylation"]["counts"]["cell_composition_outlier"]), (6, ["S5"], 1))
+        rows = {r["id"]: r for r in cd["members"]}
+        self.assertIn("cell_composition_outlier", rows["S5"]["flags"])
+        self.assertNotIn("cell_composition_outlier", rows["S1"]["flags"])
+        self.assertNotIn("deconvolution", cd["callsets"]["cohort_methyl"])   # the block holds it, once
+        page = (out_dir / "C1.summary.html").read_text()
+        for text in ("Cell-type composition (methbat deconvolve)", "An estimate for research, not a blood count", "Members far from the cohort", "granulocyte",
+                     "cell_composition_outlier"):
+            self.assertIn(text, page)
+        s5 = (out_dir / "S5.summary.html").read_text()
+        self.assertIn("Cell-type composition (methbat deconvolve, cohort C1)", s5)
+        self.assertIn("This member is flagged <code>cell_composition_outlier</code>", s5)
+        s1 = (out_dir / "S1.summary.html").read_text()
+        self.assertIn("(cohort median 52%)", s1)
+        self.assertNotIn("is flagged <code>cell_composition_outlier", s1)
+        digest = json.loads((out_dir / "S1.summary.json").read_text())
+        self.assertNotIn("deconvolution", json.dumps(digest["methylation"]))  # joined when the page is made
+        self.assertEqual(digest["schema"], summary.DIGEST_SCHEMA)
+        # the export carries the stage's table
+        code, _, err = run_cli(["--project", proj, "export", "--cohort", "C1", "--domains", "methyl", "--out", str(tmp / "exp")])
+        self.assertEqual(code, 0, err)
+        table = (tmp / "exp" / "C1.methyl.deconvolution.tsv").read_text().splitlines()
+        self.assertEqual((len(table), table[0].split("\t")[0], table[5].split("\t")[5]), (7, "sample_id", "B-cell"))
+
+
 class ToolsOnThePagesTest(unittest.TestCase):
     """The aligner and small-variant caller a member was made with: named on its page from the run's tools block,
     grouped on the cohort page, `mixed_tools` when the members differ; runs from before the block read as pbmm2 and
@@ -1571,7 +1676,7 @@ class MethylationEndToEnd(unittest.TestCase):
         self.assertEqual(cd["callsets"]["cohort_methyl"]["events"]["n"], 4)       # the fixture: every member but the first has one event
         self.assertEqual(cd["callsets"]["cohort_methyl"]["regions"]["top"][0]["gene_symbol"], "GENEA;GENEB")
         self.assertEqual({r["id"]: r["methyl_events"] for r in cd["members"]}, {"S1": 0, "S2": 1, "S3": 1, "S4": 1, "S5": 1})
-        self.assertEqual(cd["methylation"]["counts"], {"methyl_outlier": 0})   # 0,1,1,1,1: median 1, MAD 0 -> nobody flagged
+        self.assertEqual(cd["methylation"]["counts"], {"methyl_outlier": 0, "cell_composition_outlier": 0})   # 0,1,1,1,1: median 1, MAD 0 -> nobody flagged
         self.assertIn("methyl_events", cd["distributions"])
         page = (self.out_dir / "C1.summary.html").read_text()
         self.assertIn("Methylation (cohort_methyl)", page)
@@ -1585,7 +1690,7 @@ class MethylationEndToEnd(unittest.TestCase):
         code, out, err = run_cli(["--project", self.proj, "export", "--cohort", "C1", "--out", str(out_dir), "--domains", "methyl"])
         self.assertEqual(code, 0, err)
         names = sorted(p.name for p in out_dir.glob("C1.methyl.*"))
-        self.assertEqual(names, ["C1.methyl.background.tsv", "C1.methyl.compare.XX_vs_XY.tsv", "C1.methyl.events.tsv", "C1.methyl.imprinting.tsv", "C1.methyl.regions.tsv",
+        self.assertEqual(names, ["C1.methyl.background.tsv", "C1.methyl.compare.XX_vs_XY.tsv", "C1.methyl.deconvolution.tsv", "C1.methyl.events.tsv", "C1.methyl.imprinting.tsv", "C1.methyl.regions.tsv",
                                  "C1.methyl.samples.tsv", "C1.methyl.summary.tsv"])
 
     def test_anomalous_report_flags_the_sample(self):

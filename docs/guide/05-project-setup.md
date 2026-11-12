@@ -181,7 +181,7 @@ BAM and VCF as it read the old ones. What to know before choosing them:
 
 - The default stays pbmm2 and DeepVariant. The evidence for the pblab tools
   is PacBio's own HG002 figures and this pipeline's comparison on chr20 of
-  the GIAB trio (chapter 12); production genomes compared on the cluster
+  the GIAB trio (chapters 12 and 15); production genomes compared on the cluster
   are what would make them the default.
 - A sample is recomputed from the changed step on: with pbweave from the
   alignment (everything), with pbdv alone from the small-variant call
@@ -197,16 +197,19 @@ BAM and VCF as it read the old ones. What to know before choosing them:
 
 ```mermaid
 flowchart TD
-  sample[/"sample or cohort record, state.sqlite"/] --> b["stage builder"]
-  cfg[/"config.json: ref maps, registry, backend"/] --> b
-  prior[/"outputs.json of the earlier stages"/] --> b
+  sample[/"sample or cohort record, state.sqlite"/]:::data --> b["stage builder"]
+  cfg[/"config.json: ref maps, registry, backend"/]:::data --> b
+  prior[/"outputs.json of the earlier stages"/]:::data --> b
   b --> merge["merge: overrides replace builder values"]
-  ov[/"stage_inputs of config.json"/] --> merge
+  ov[/"stage_inputs of config.json"/]:::data --> merge
   merge --> drop["drop null values, keep empty strings"]
   drop --> ns["prefix every key with ugc_wgw_stage."]
-  ns --> chk{"every key declared, every required input present?"}
+  ns --> chk{"every key declared, every required input present?"}:::decision
   chk -->|"no"| err["error, nothing submitted"]
-  chk -->|"yes"| file[/"attempt-N/inputs.json"/]
+  chk -->|"yes"| file[/"attempt-N/inputs.json"/]:::result
+  classDef data fill:#e9edf1,stroke:#8a8f95,color:#22272e
+  classDef result fill:#d5ead4,stroke:#3f7d3c,color:#17361a
+  classDef decision fill:#e3dcf5,stroke:#6b56b0,color:#241a4d
 ```
 
 `ugc-wgw inputs <subject> --stage <stage> [--mode M] [--cohort ID]` prints the
@@ -296,12 +299,20 @@ second per file:
 | First 1000 records and the bytes they occupied | an estimate of the read count and bases (exact when a `.pbi` index sits next to the BAM) | recorded per file; a warning below `file_reads_min` |
 | Per sample | HiFi bases over all its files, as a coverage of GRCh38 (3.1 Gb) | a warning below `sample_gbases_min` |
 
-The two floors come from `config.json` `input_thresholds` (also a profile
-key): `file_reads_min` (default 1000 reads; a Revio BAM holds millions) and
-`sample_gbases_min` (default 30 Gb, about 10x). They warn, they never refuse:
-a low-coverage sample stays registered and the analyst decides. `0` disables
-a floor. What was found (bytes, reads, bases, movies) is kept with the sample
-record and shown by:
+The two floors come from `config.json` `input_thresholds`: `file_reads_min`
+(default 1000 reads; a Revio BAM holds millions) and `sample_gbases_min`
+(default 30 Gb, about 10x). Set them in `config.json`,
+
+```json
+"input_thresholds": {"file_reads_min": 100000, "sample_gbases_min": 45}
+```
+
+or in a site profile under the same key, so every project made with the
+profile checks its inputs alike (applied at `init` since 0.20.0; earlier
+versions accepted the key in a profile and left the defaults in place). They
+warn, they never refuse: a low-coverage sample stays registered and the
+analyst decides. `0` disables a floor. What was found (bytes, reads, bases,
+movies) is kept with the sample record and shown by:
 
 ```bash
 ugc-wgw samples check                 # read every registered file again; exit 1 on a problem
@@ -377,16 +388,17 @@ binning and sample mode from the pedigree at input-generation time:
 
 ```mermaid
 flowchart TD
-  a{"assembly_use_parents in config.json?"}
+  a{"assembly_use_parents in config.json?"}:::decision
   a -->|"false"| s["sample mode"]
-  a -->|"true"| b{"father_id and mother_id both set?"}
+  a -->|"true"| b{"father_id and mother_id both set?"}:::decision
   b -->|"neither"| s
   b -->|"only one"| w1["sample mode, warning: only one parent given"]
-  b -->|"both"| c{"child, father, mother all different?"}
+  b -->|"both"| c{"child, father, mother all different?"}:::decision
   c -->|"no"| w2["sample mode, warning: pedigree is not a trio"]
-  c -->|"yes"| d{"both parents registered with hifi_reads?"}
+  c -->|"yes"| d{"both parents registered with hifi_reads?"}:::decision
   d -->|"no"| w3["sample mode, warning: parent is not a registered sample with reads"]
   d -->|"yes"| t["trio mode: parents' reads and IDs passed, yak tables built, hap1 = father, hap2 = mother"]
+  classDef decision fill:#e3dcf5,stroke:#6b56b0,color:#241a4d
 ```
 
 The parents need no assembly run of their own, only registration with reads.

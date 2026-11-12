@@ -12,4 +12,5 @@ methyl_regions/*.methyl.*.regions.tsv
 methyl_events/*.methyl.*.events.tsv
 methyl_imprinting/*.methyl.*.imprinting.tsv
 methyl_samples/*.methyl.*.samples.tsv
+methyl_deconvolution/*.methyl.*.deconvolution.tsv
 ugc_wgw_manifest/*.cohort_methyl.ugc_wgw_manifest.json

@@ -131,7 +131,11 @@ class SummaryTest(unittest.TestCase):
             for chrom, start, end, _ in REGIONS:
                 cmp_rows.append("\t".join([chrom, start, end, "XX", "XY", "InsufficientData", "", "0.0", "0", "0", "", "0.0", "1", "1"]))
             (tmp / "cmp.tsv").write_text("\n".join(cmp_rows) + "\n")
-            (tmp / "S1.deconv.json").write_text(json.dumps({"metrics": {"normalized_fraction": {"B-cell": 0.6, "T-cell": 0.4}}}))
+            # MethBat's estimate as the cluster returned it: the atlas's cell types in its order, raw and normalised
+            (tmp / "S1.deconv.json").write_text(json.dumps({
+                "version": "1.1.0-fbf4686", "atlas_md5sum": "6e30a2eafd8da7410d4e7766c7c71d94",
+                "metrics": {"normalized_fraction": {"adipocyte": 0.0, "T-cell": 0.4, "B-cell": 0.6}, "nnls_raw_fraction": {"adipocyte": 0.0, "T-cell": 0.36, "B-cell": 0.54},
+                            "nnls_residual_error": 7.5728, "residual": [0.1, -0.2]}}))
             w = lambda name, items: ((tmp / name).write_text("".join(x + "\n" for x in items)), str(tmp / name))[1]
             args = ["C1.methyl.GRCh38", w("ids", ids), w("labels", labels),
                     w("events", [str(tmp / f"{s}.GRCh38.methbat.events.tsv") for s in ids]),
@@ -173,6 +177,11 @@ class SummaryTest(unittest.TestCase):
             self.assertEqual(summary[("compare", "XX:XY", "InsufficientData")], "3")
             self.assertIn(("notes", "compare", "XX:XY"), summary)
             self.assertEqual(summary[("deconvolution", "top_cell_type", "S1")], "B-cell")
+            self.assertEqual((summary[("deconvolution", "n_members", "")], summary[("deconvolution", "n_cell_types", "")]), ("1", "3"))
+            dec = read_tsv(tmp / "C1.methyl.GRCh38.deconvolution.tsv")
+            self.assertEqual(dec, [{"sample_id": "S1", "atlas_md5": "6e30a2eafd8da7410d4e7766c7c71d94", "methbat_version": "1.1.0-fbf4686",
+                                    "residual_error": "7.5728", "raw_fraction_sum": "0.9000", "top_cell_type": "B-cell", "top_fraction": "0.6000",
+                                    "adipocyte": "0.0000", "T-cell": "0.4000", "B-cell": "0.6000"}])
             self.assertEqual(summary[("members", "n_hypo", "S2")], "1")
             self.assertEqual(summary[("imprinting", "Anomalous", "S1")], "1")
 

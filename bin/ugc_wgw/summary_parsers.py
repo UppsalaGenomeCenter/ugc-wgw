@@ -1337,6 +1337,21 @@ def parse_tr_outliers_top(lines: Iterable[str], per_member: int = 10) -> dict[st
     return out
 
 
+def parse_methyl_deconvolution(lines: Iterable[str]) -> dict[str, object]:
+    """cohort_methyl's deconvolution table: per member the normalised fraction of every cell type of the atlas, the
+    fit (residual_error, raw_fraction_sum) and the atlas's md5. Empty when the stage did not deconvolve."""
+    cols, rows = table(lines)
+    fixed = ("sample_id", "atlas_md5", "methbat_version", "residual_error", "raw_fraction_sum", "top_cell_type", "top_fraction")
+    cell_types = [c for c in cols if c not in fixed]
+    members: dict[str, dict[str, object]] = {}
+    for r in rows:
+        members[r.get("sample_id", "")] = {
+            "fractions": {c: float(_num(r.get(c, "")) or 0.0) for c in cell_types},
+            "residual_error": _num(r.get("residual_error", "")), "raw_fraction_sum": _num(r.get("raw_fraction_sum", "")),
+            "top_cell_type": r.get("top_cell_type", ""), "atlas_md5": r.get("atlas_md5", "")}
+    return {"cell_types": cell_types, "members": members}
+
+
 def parse_methyl_samples(lines: Iterable[str]) -> list[dict[str, object]]:
     """cohort_methyl's samples table: one row per member, the counts as numbers."""
     cols, rows = table(lines)

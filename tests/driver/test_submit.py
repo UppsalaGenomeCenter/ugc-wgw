@@ -192,6 +192,48 @@ class SubmitTest(unittest.TestCase):
         code, out, _ = run_cli(["--project", self.proj, "status", "--json"])
         self.assertEqual([r for r in json.loads(out) if r["subject"] == "S2"][0]["singleton"], "success(2)")
 
+    def test_a_project_moved_to_a_new_version_is_told_about_any_version(self):
+        """Prerequisites that exist only at an earlier version: the blocked message says so and names the option; with
+        --any-version the stage runs (with or without --rerun: there is no run of it at this version yet)."""
+        from .helpers import seed_success
+        db = self.db()
+        try:
+            for sid in ("S1", "S2", "S3"):
+                seed_success(self.cfg, db, "singleton", "sample", sid, {"sample_id": sid}, version="0.1.0")
+            for stage in ("cohort_merge", "cohort_freq"):
+                seed_success(self.cfg, db, stage, "cohort", "C1", {"cohort_id": "C1", "sample_ids": ["S1", "S2", "S3"]}, version="0.1.0")
+        finally:
+            db.close()
+        base = ["--project", self.proj, "submit", "--mode", "standalone", "--cohort", "C1", "--stage", "cohort_tr"]
+        for extra in ([], ["--rerun"]):
+            code, _, err = run_cli(base + extra)
+            self.assertIn("waiting for singleton of S1, singleton of S2, singleton of S3; all of these have a successful run at another "
+                          "ugc-wgw version: add --any-version to accept them", err)
+            self.assertIn("launched 0", err)
+        code, _, err = run_cli(base + ["--rerun", "--any-version"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("launched 1", err)                      # the first run at this version, once (it was started twice)
+        db = self.db()
+        try:
+            run = db.latest_run("cohort", "C1", "cohort_tr", VERSION)
+            self.assertEqual((run.status, run.attempt, run.meta.get("rerun_of")), ("success", 1, None))
+        finally:
+            db.close()
+        code, _, err = run_cli(base + ["--rerun", "--any-version"])   # and now a real rerun: attempt 2, once
+        self.assertIn("launched 1", err)
+        db = self.db()
+        try:
+            run = db.latest_run("cohort", "C1", "cohort_tr", VERSION)
+            self.assertEqual((run.attempt, run.meta.get("rerun_of")), (2, 1))
+        finally:
+            db.close()
+        # a prerequisite that never ran anywhere gets no such hint
+        code, _, err = run_cli(["--project", self.proj, "submit", "--mode", "standalone", "--cohort", "C1", "--stage", "cohort_methyl"])
+        self.assertIn("waiting for singleton of S1", err)
+        code, _, err = run_cli(["--project", self.proj, "submit", "--mode", "assembly", "--cohort", "C1", "--stage", "cohort_pangenome"])
+        self.assertIn("waiting for", err)
+        self.assertNotIn("--any-version", err)
+
     def test_rerun_leaves_failed_and_missing_alone(self):
         """--rerun changes nothing for a subject whose latest run failed (retry's business) or that never ran."""
         base = ["--project", self.proj, "submit", "--mode", "standalone", "--cohort", "C1"]

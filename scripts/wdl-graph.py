@@ -62,6 +62,7 @@ class Node:
     key: Key
     kind: str  # task | workflow | hub
     label: str
+    ours: bool = False  # a task of this repository (ugc_wgw_*), whatever the call is named
 
 
 @dataclass
@@ -280,7 +281,7 @@ def build(scope: Scope, body: Iterable[Tree.WorkflowNode], depth: int, graph: Gr
                 out.append(sec)
             else:
                 kind = "workflow" if isinstance(callee, Tree.Workflow) else "task"
-                n = Node((scope.n, nid), kind, node.name)
+                n = Node((scope.n, nid), kind, node.name, ours=kind == "task" and str(getattr(callee, "name", "")).startswith("ugc_wgw_"))
                 scope.keymap[nid] = n.key
                 if kind == "workflow" and callee is not None:
                     graph.linked.append((node.name, relpath(callee.pos.abspath)))
@@ -384,8 +385,14 @@ def number(root: List[object]) -> Dict[Key, str]:
     return ids
 
 
+# the task nodes' colours: this repository's tasks and upstream's (light fills with dark text: legible on a light and
+# on a dark page). One-letter class names keep the diagrams inside MAX_CHARS.
+CLASS_DEFS = {"o": "classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330", "u": "classDef u fill:#e9edf1,stroke:#8a8f95,color:#22272e"}
+
+
 def render(root: List[object], edges: Set[Tuple[Key, Key, str]], ids: Dict[Key, str]) -> str:
     lines = ["flowchart TD"]
+    used: Set[str] = set()
 
     def walk(items: List[object], indent: str) -> None:
         for it in items:
@@ -401,7 +408,9 @@ def render(root: List[object], edges: Set[Tuple[Key, Key, str]], ids: Dict[Key, 
                 elif it.kind == "hub":
                     lines.append(f'{indent}{ids[it.key]}(["{label}"])')
                 else:
-                    lines.append(f'{indent}{ids[it.key]}["{label}"]')
+                    cls = "o" if it.ours else "u"
+                    used.add(cls)
+                    lines.append(f'{indent}{ids[it.key]}["{label}"]:::{cls}')
 
     walk(root, "  ")
 
@@ -411,6 +420,7 @@ def render(root: List[object], edges: Set[Tuple[Key, Key, str]], ids: Dict[Key, 
     for src, dst, style in sorted(edges, key=lambda e: (order(ids[e[0]]), order(ids[e[1]]), e[2])):
         arrow = "-.->" if style == "ctl" else "-->"
         lines.append(f"  {ids[src]} {arrow} {ids[dst]}")
+    lines.extend(f"  {CLASS_DEFS[c]}" for c in sorted(used))
     return "\n".join(lines) + "\n"
 
 
@@ -459,7 +469,9 @@ def markdown(depth: Optional[int] = None, hide: frozenset = HIDE, max_chars: int
         "Legend:",
         "",
         "- `[\"name\"]` is a task call. The name is the call name, which is also the",
-        "  `call-<name>` directory under the run's miniwdl work directory.",
+        "  `call-<name>` directory under the run's miniwdl work directory. Teal: a task",
+        "  of this repository (`ugc_wgw_*`, whatever the call is named); grey: one of",
+        "  upstream's.",
         "- `[[\"name\"]]` is a call of a workflow that is not expanded in this diagram.",
         "- `([\"a, b\"])` is a declaration that joins several call outputs, for example",
         "  `select_first` over an optional merge and a single input.",

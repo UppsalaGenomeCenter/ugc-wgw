@@ -335,6 +335,7 @@ def make_outputs(stage: str, inputs: dict[str, object], run_dir: pathlib.Path,
         files["member_reports"] = [f"{m}.{REF}.methbat.report.tsv" for m in members]
         for name in ("methyl_summary", "methyl_regions", "methyl_events", "methyl_imprinting", "methyl_samples"):
             files[name] = f"{sid}.methyl.{REF}.{name[7:]}.tsv"
+        files["methyl_deconvolution"] = f"{sid}.methyl.{REF}.deconvolution.tsv"   # header only with run_deconvolve false
         if v.get("run_joint_segment"):
             files["joint_segments"] = f"{sid}.methyl.{REF}.joint.meth_regions.bed"
     elif stage == "cohort_tr":

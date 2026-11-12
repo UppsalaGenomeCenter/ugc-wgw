@@ -33,6 +33,7 @@ COPY_DOMAINS: dict[str, tuple[str, tuple[tuple[str, str], ...]]] = {
                          ("tr_samples", "samples"), ("tr_summary", "summary"))),   # the first three are bgzipped: they keep .gz
     "methyl": ("cohort_methyl", (("cohort_background", "background"), ("methyl_summary", "summary"), ("methyl_regions", "regions"),
                                  ("methyl_imprinting", "imprinting"), ("methyl_samples", "samples"), ("methyl_events", "events"),
+                                 ("methyl_deconvolution", "deconvolution"),
                                  ("comparisons", "compare"))),   # an array output: one file per pair, `<prefix>.compare.<baseline>_vs_<compare>.tsv`
 }
 ANCESTRY_SOURCE = ("cohort_qc", "qc_ancestry")   # somalier's ancestry TSV: `#sample_id`, `predicted_ancestry`, probabilities, PCs

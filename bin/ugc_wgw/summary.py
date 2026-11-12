@@ -57,6 +57,9 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "related_hub_min": 10,                # a member related (undeclared) to this many members or more fails `related_hub`: contamination, not kinship; its partners are not flagged on its account
     "het_ratio_mad_max": 3.0,             # het/(het+hom-alt) beyond median ± this many MADs across the cohort warns `het_outlier`
     "tr_outlier_count_mad_max": 3.0,      # a member's expansion outliers at ordinary loci (cohort_tr) beyond median + this many scaled MADs across the cohort warns `tr_outlier_count_high`
+    "cell_composition_mad_max": 4.0,      # a member's distance from the cohort's median cell-type composition (cohort_methyl's deconvolution)
+                                          # beyond median + this many scaled MADs warns `cell_composition_outlier` ...
+    "cell_composition_distance_min": 0.25,  # ... and at least this far (total variation distance, 0 to 1): ordinary blood differs by 0.1 to 0.2
     "methyl_events_mad_max": 3.0,         # a member's methylation events (cohort_methyl) beyond median + this many MADs across the cohort warns `methyl_outlier`
     "sex_unknown_fails": 1,               # 1: a sample no source could sex fails `sex_not_inferred`; 0: it warns
 }
@@ -897,6 +900,24 @@ def _tools_html(tools: dict[str, str]) -> str:
             f"{_esc(TOOL_NAMES.get(caller, caller))}{_esc(device)}.{_esc(note)}</p>")
 
 
+def _cell_row_html(row: dict[str, object], cohort_id: str | None) -> str:
+    """A member's cell-type composition on its page: its fractions of 1% and more beside the cohort's medians, joined
+    from the cohort digest when the page is made (cohort_methyl's deconvolution; nothing in the member's own digest)."""
+    fractions: dict[str, float] = row.get("fractions") or {}  # type: ignore[assignment]
+    medians: dict[str, float] = row.get("medians") or {}  # type: ignore[assignment]
+    items = [(c, 100 * float(v), f"(cohort median {100 * float(medians.get(c, 0.0)):.0f}%)") for c, v in sorted(fractions.items(), key=lambda kv: -kv[1])
+             if float(v) >= 0.01]
+    if not items:
+        return ""
+    groups = ", ".join(f"{g} {100 * float(v):.0f}%" for g, v in list((row.get("groups") or {}).items())[:3])  # type: ignore[union-attr]
+    flag = " This member is flagged <code>cell_composition_outlier</code>." if row.get("flagged") else ""
+    return ("<h3>Cell-type composition (methbat deconvolve" + (f", cohort {_esc(cohort_id)}" if cohort_id else "") + ")</h3>"
+            + sv.bars_h(items, width=420, label_w=170, vmax=100.0, digits=0, unit="%")
+            + f"<p class='small muted'>An estimate for research, not a blood count: the member's 5mC pileup as a mixture of the atlas's cell types. Lineages: "
+              f"{_esc(groups)}; distance from the cohort's median composition {_esc(sv.fmt(row.get('distance'), 2))} (0 = the median, 1 = nothing shared)."
+              f"{flag} Fractions of a few percent in unrelated tissues are the method's noise.</p>")
+
+
 def member_nav(rows: list[dict[str, object]]) -> str:
     """The side list of a cohort page: every member present, in the cohort's order, each with a dot for its QC status
     (fail, warn) and its flags as the tooltip, under a box that narrows the list as one types an id, a status or a
@@ -1283,7 +1304,7 @@ def _tr_cohort_html(tr_row: dict[str, object], cohort_id: str | None) -> str:
 def render_sample(d: dict[str, object], tools: list[dict[str, object]], *, project_name: str, project_url: str,
                   cohort_links: list[tuple[str, str]] | None = None, identity_row: dict[str, object] | None = None,
                   identity_cohort: str | None = None, tr_row: dict[str, object] | None = None,
-                  tools_row: dict[str, str] | None = None) -> str:
+                  tools_row: dict[str, str] | None = None, cell_row: dict[str, object] | None = None) -> str:
     """The sample's page. `identity_row` is the sample's row of the cohort's cohort_qc tables (with the identity flags
     the cohort page computed for it) when the page is made with --cohort and that cohort has a cohort_qc run; `tr_row`
     the sample's part of the cohort's cohort_tr tables (counts, the screen rows worth a look, its strongest outliers):
@@ -1443,7 +1464,8 @@ def render_sample(d: dict[str, object], tools: list[dict[str, object]], *, proje
                 ("allele-specific", sv.fmt(mbt.get("asm"))), ("profile regions", sv.fmt(prof.get("n_regions")))])
         + '<div class="grid"><div><h3>Region categories (MethBat profile)</h3>' + sv.bars_h([(k, sv.finite(v), "") for k, v in sorted(prof.get("labels", {}).items())], width=250, label_w=170)  # type: ignore[union-attr]
         + "</div><div><h3>Combined methylation per region (%)</h3>" + sv.hist([(str(l), sv.finite(v)) for l, v in prof.get("hist", [])], width=420, y_label="regions")  # type: ignore[union-attr]
-        + "</div></div>" + _imprinting_html(me.get("imprinting", {}) or {}))  # type: ignore[arg-type]
+        + "</div></div>" + _imprinting_html(me.get("imprinting", {}) or {})  # type: ignore[arg-type]
+        + (_cell_row_html(cell_row, identity_cohort) if cell_row else ""))
 
     # targeted callers
     para: dict[str, object] = tg.get("paraphase", {})  # type: ignore[assignment]
@@ -1653,6 +1675,7 @@ def run(cfg: Config, db: DB, code: CodeInfo, *, sample_ids: list[str] | None, co
     cdigest: dict[str, object] | None = None
     identity_rows: dict[str, dict[str, object]] = {}
     tr_rows: dict[str, dict[str, object]] = {}
+    cell_rows: dict[str, dict[str, object]] = {}
     if cohort:
         from .summary_cohort import build_cohort_digest  # noqa: PLC0415 - keeps the cohort page optional
         cruns = resolve_cohort_runs(db, cohort.cohort_id, mode, version)
@@ -1661,6 +1684,11 @@ def run(cfg: Config, db: DB, code: CodeInfo, *, sample_ids: list[str] | None, co
                                       member_tools={sid: member_tools(db, digests[sid])["label"] for sid in cohort.members if sid in digests})
         ident: dict[str, object] = cdigest.get("identity", {}) or {}  # type: ignore[assignment]
         identity_rows = ident.get("members", {}) or {}  # type: ignore[assignment]
+        dec: dict[str, object] = (cdigest.get("methylation", {}) or {}).get("deconvolution", {}) or {}  # type: ignore[union-attr, assignment]
+        if dec.get("available"):
+            medians = {c: s.get("median", 0.0) for c, s in (dec.get("stats") or {}).items()}  # type: ignore[union-attr]
+            for msid, row in (dec.get("members") or {}).items():  # type: ignore[union-attr]
+                cell_rows[msid] = {**row, "medians": medians, "flagged": msid in (dec.get("flags") or {})}
         trd: dict[str, object] = cdigest.get("tandem_repeats", {}) or {}  # type: ignore[assignment]
         if trd.get("available"):
             for msid, counts in (trd.get("members") or {}).items():  # type: ignore[union-attr]
@@ -1677,7 +1705,7 @@ def run(cfg: Config, db: DB, code: CodeInfo, *, sample_ids: list[str] | None, co
         links = cohort_links or [(c, f"{c}.summary.html") for c in db.sample_cohorts(sid) if (out_dir / f"{c}.summary.html").exists()]
         hpath.write_text(render_sample(digest, tools, project_name=project_name, project_url=cfg.project_url or DEFAULT_PROJECT_URL,
                                        cohort_links=links, identity_row=identity_rows.get(sid), identity_cohort=cohort.cohort_id if cohort else None,
-                                       tr_row=tr_rows.get(sid), tools_row=member_tools(db, digest)))
+                                       tr_row=tr_rows.get(sid), tools_row=member_tools(db, digest), cell_row=cell_rows.get(sid)))
         written.append(hpath)
         diag(f"{sid}: digest {'rebuilt' if sid in to_build else 'reused'}, wrote {hpath.name}")
         if (i + 1) % 50 == 0:

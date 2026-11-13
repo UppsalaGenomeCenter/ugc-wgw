@@ -133,6 +133,39 @@ than extrapolating from chr20, and measures how both tasks grow with the
 haplotype count. Give both tasks a day of wall time (the rows of the worked
 policy): the catch-all two hours would kill the split.
 
+Since 0.22.0 the mapping has left the split task: `ugc_wgw_cactus_map` maps
+one member's two haplotypes, one after the other, on 8 cores, and the
+split only partitions the gathered alignments. The figures above for one
+mapping still hold (65 to 80 GB and 23 minutes per whole haplotype); they
+now belong to a job per member on a standard node, as many at once as the
+cluster gives, and a member mapped for one cohort is not mapped again for
+another. Measured on the dev machine with chr20-only haplotypes against
+the whole reference: 31 minutes and 55 GB per haplotype (the reference
+graph's index dominates), 4 minutes for the reference-only graph, 17
+minutes and 3.3 GB for the split of eight haplotypes; its output equalled
+the one-task run's.
+
+The smoke run of the stage as shipped (four members, chr20):
+
+| task | jobs | wall time | note |
+|---|---|---|---|
+| `ugc_wgw_cactus_refgraph` | 1 | 4 min | once per reference |
+| `ugc_wgw_cactus_map` | 4 | 39 min each | two haplotypes one after the other, 8 cores |
+| `ugc_wgw_cactus_split` | 1 | 17 min | byte-identical tables, FASTAs and alignments to the one-task run |
+| `ugc_wgw_cactus_chrom` chr20 | 1 | 39 min | 564,391 nodes (the one-task run: 564,404) |
+| `ugc_wgw_pangenome_growth` chr20 | 1 | 20 s | |
+
+A second cohort of two of the four members then took the reference graph
+and both members' mappings from the call cache in two seconds and ran
+only the split and the chromosome task: what a ladder of nested cohorts
+relies on.
+
+The growth table of that chr20 graph, as the cohort page reads it: one
+member carries 0.71 Mb that is not on the reference's path, two 0.86 Mb,
+three 0.94 Mb, all four 1.01 Mb; 61.4 Mb is in all four. (The four are a
+trio and a copy of the child, so the curve flattens faster than a
+cohort's will.)
+
 The per-sample tasks on five 20x genomes (2026-10-26, the `cpu` profile):
 
 | task | cores | request | peak RSS | wall time |

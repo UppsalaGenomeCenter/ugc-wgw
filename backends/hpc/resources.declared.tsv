@@ -43,7 +43,9 @@ ugc_wgw_bcftools_merge	4	-	-	-	-	cohort_merge	workflows/ugc_wgw/cohort/sv_merge_
 ugc_wgw_bcftools_slice	2	4G	-	-	-	cohort_call,cohort_merge	workflows/ugc_wgw/cohort/gvcf_slice.wdl:9	cpu from input default; memory from input default; command uses threads
 ugc_wgw_bcftools_split	16	-	-	-	-	cohort_call	workflows/ugc_wgw/cohort/split_by_sample.wdl:9	cpu from workflow input default; cpu input: split_threads; memory: "~{mem_gb} GiB" where mem_gb = split_mem = select_first([split_mem_gb, 8 + ceil(n_samples * 0.005 * split_threads)]); memory scales with N; command uses threads
 ugc_wgw_cactus_chrom	16	-	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/cactus_chrom.wdl:7	cpu from workflow input default; cpu input: chrom_cpu; memory: "~{mem_gb} GiB" where mem_gb = chrom_mem = if chrom == "chrOther" then chrom_mem_gb_floor else ugc_wgw_pangenome_names.chrom_mem_gb[chrom]; command uses threads; command uses mem
-ugc_wgw_cactus_split	32	128G	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/cactus_split.wdl:7	cpu from workflow input default; cpu input: split_cpu; memory from workflow input default; memory input: split_mem_gb; command uses threads; command uses mem
+ugc_wgw_cactus_map	8	-	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/cactus_map.wdl:81	cpu from workflow input default; cpu input: split_map_cores; memory: "~{mem} GiB" where hap_fastas = [hap1_fastas[i], hap2_fastas[i]]; mem = select_first([mem_gb, ceil(size(hap_fastas, "GB") * 15 + 60)]); mem_gb = map_mem_gb; command uses threads; command uses mem
+ugc_wgw_cactus_refgraph	8	16G	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/cactus_map.wdl:7	cpu from input default; memory from input default; command uses threads; command uses mem
+ugc_wgw_cactus_split	16	64G	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/cactus_split.wdl:7	cpu from workflow input default; cpu input: split_cpu; memory from workflow input default; memory input: split_mem_gb; command uses threads; command uses mem
 ugc_wgw_chrom_coverage	2	8G	-	-	-	assembly_call	workflows/ugc_wgw/assembly/chrom_coverage.wdl:7	cpu from input default; memory from input default
 ugc_wgw_dipcall	16	48G	-	-	-	assembly_call	workflows/ugc_wgw/assembly/dipcall.wdl:7	cpu from workflow input default; cpu input: dipcall_threads; memory from workflow input default; memory input: dipcall_mem_gb
 ugc_wgw_fail	1	1G	-	-	-	assembly	workflows/ugc_wgw/fail.wdl:7	
@@ -69,6 +71,7 @@ ugc_wgw_mito_collapse	1	1G	-	-	-	singleton,upstream,cohort_merge	workflows/ugc_w
 ugc_wgw_mito_haplogroups_gather	1	1G	-	-	-	cohort_merge	workflows/ugc_wgw/mito/merge.wdl:110	
 ugc_wgw_mito_merge	2	4G	-	-	-	cohort_merge	workflows/ugc_wgw/mito/merge.wdl:9	cpu from input default; memory from input default; command uses threads
 ugc_wgw_pangenome_freq_summary	1	4G	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/vcf_post.wdl:169	
+ugc_wgw_pangenome_growth	4	-	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/growth.wdl:7	cpu from input default; memory: "~{mem} GiB" where gfa = ugc_wgw_cactus_chrom.gfa; mem = select_first([mem_gb, ceil(size(gfa, "GB") * 10 + 8)]); command uses threads
 ugc_wgw_pangenome_member_stats	1	4G	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/member_stats.wdl:7	
 ugc_wgw_pangenome_member_stats_gather	1	2G	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/member_stats.wdl:70	
 ugc_wgw_pangenome_names	1	2G	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/names.wdl:7	

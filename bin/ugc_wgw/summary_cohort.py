@@ -210,6 +210,108 @@ def _provenance(man: dict[str, object]) -> dict[str, object]:
             "containers": sorted({str(c.get("image")) for c in man.get("containers", []) if isinstance(c, dict)})}
 
 
+def growth_from_hist(hist: dict[int, float], n: int) -> tuple[list[float], list[float]]:
+    """From `hist[c]` = the amount carried by exactly c of n members: for k = 1..n, the expected amount carried by at
+    least one of k members drawn at random (the growth curve) and by all k of them (the core). An amount with c
+    carriers is missed by a draw of k with probability C(n-c, k) / C(n, k) and is in all of them with C(c, k) / C(n, k)."""
+    lg = [math.lgamma(i + 1) for i in range(n + 1)]
+
+    def log_choose(a: int, b: int) -> float:
+        return lg[a] - lg[b] - lg[a - b]
+
+    levels = [(min(c, n), v) for c, v in hist.items() if c > 0 and v]
+    union, core = [], []
+    for k in range(1, n + 1):
+        u = co = 0.0
+        denom = log_choose(n, k)
+        for c, v in levels:
+            u += v if k > n - c else v * (1.0 - math.exp(log_choose(n - c, k) - denom))
+            if c >= k:
+                co += v * math.exp(log_choose(c, k) - denom)
+        union.append(u)
+        core.append(co)
+    return union, core
+
+
+GROWTH_CHECKPOINTS = (1, 2, 5, 10, 20, 50, 100, 200, 400, 800)
+
+
+def _growth_html(growth: dict[str, object]) -> str:
+    """The cohort page's growth block: the sequence the reference lacks against the number of members (expected for
+    members at random, and in the cohort's own order), everything the members carry with its core, and the same at a
+    few sizes as a table with what one more member adds there."""
+    n = int(growth.get("members") or 0)
+    nonref: list[float] = growth.get("nonref_bp") or []  # type: ignore[assignment]
+    ordered: list[float] = growth.get("ordered_nonref_bp") or []  # type: ignore[assignment]
+    allbp: list[float] = growth.get("all_bp") or []  # type: ignore[assignment]
+    core: list[float] = growth.get("core_bp") or []  # type: ignore[assignment]
+    nodes: list[float] = growth.get("nonref_node") or []  # type: ignore[assignment]
+    series = [("members at random (expected)", "ln2", [(i + 1, v) for i, v in enumerate(nonref)])]
+    if ordered and len(ordered) == len(nonref):
+        series.append(("in the cohort's order", "ln3", [(i + 1, v) for i, v in enumerate(ordered)]))
+    body = ("<h3>Growth: what each further member adds</h3>"
+            + sv.lines(series, x_label="members in the graph", y_label="sequence the reference lacks", y_format=sv.fmt_bp))
+    if allbp and core:
+        body += sv.lines([("carried by at least one", "ln2", [(i + 1, v) for i, v in enumerate(allbp)]),
+                          ("carried by all (core)", "ln1", [(i + 1, v) for i, v in enumerate(core)])],
+                         x_label="members in the graph", y_label="sequence the members carry", y_format=sv.fmt_bp)
+    marks = [k for k in GROWTH_CHECKPOINTS if k < n] + [n]
+    rows = []
+    for k in marks:
+        gain = (nonref[k - 1] - nonref[k - 2]) if k >= 2 else nonref[0]
+        rows.append([k, sv.fmt_bp(nonref[k - 1]), sv.fmt_bp(gain), f"{nonref[k - 1] / nonref[-1] * 100:.1f}%" if nonref[-1] else "–",
+                     sv.fmt(nodes[k - 1]) if len(nodes) >= k else "–", sv.fmt_bp(core[k - 1]) if len(core) >= k else "–"])
+    body += _table(["members", "non-reference sequence", "added by the last one", "share of the cohort's", "non-reference nodes", "core"], rows, cls="")
+    body += ("<p class='small muted'>From panacus's coverage histograms of the chromosome graphs, the members' paths grouped per sample and the "
+             "reference's path left out: the expected amount for that many members drawn at random from the cohort. Non-reference means "
+             "not on the reference's path; the core is what every one of them carries. A curve that still climbs at the right edge "
+             "says the next member brings new sequence; satellite arrays and other poorly aligned regions keep it from ever going flat.</p>")
+    return body
+
+
+def pangenome_growth(tables: list[dict[str, object]], members: list[str]) -> dict[str, object]:
+    """The chromosomes' growth tables as genome-wide curves over the cohort's members: the histograms add up because
+    every chromosome is counted against the whole cohort (a member without sequence in one carries nothing there).
+    `nonref_bp` and `all_bp` are expected values for k members drawn at random, `core_bp` what all k share,
+    `ordered_nonref_bp` the cumulative amount in the cohort's own order (the ranking's, when frozen from one)."""
+    n = max([int(t.get("cohort") or 0) for t in tables] + [0]) or len(members)
+    if n <= 0 or not tables:
+        return {}
+    summed: dict[tuple[str, str], dict[int, float]] = {}
+    for t in tables:
+        for key, h in (t.get("hist") or {}).items():  # type: ignore[union-attr]
+            acc = summed.setdefault(key, {})
+            for c, v in h.items():
+                acc[c] = acc.get(c, 0.0) + v
+    out: dict[str, object] = {"members": n, "chromosomes": len(tables)}
+    for name, key in (("nonref_bp", ("nonref", "bp")), ("nonref_node", ("nonref", "node")), ("all_bp", ("all", "bp"))):
+        if key in summed:
+            union, core = growth_from_hist(summed[key], n)
+            out[name] = [round(v) for v in union]
+            if name == "all_bp":
+                out["core_bp"] = [round(v) for v in core]
+    order = [m for m in members] or []
+    pos = {m: i for i, m in enumerate(order)}
+    for name, which in (("ordered_nonref_bp", "nonref"), ("ordered_all_bp", "all")):
+        total = [0.0] * len(order)
+        seen = False
+        for t in tables:
+            rows = [(pos[m], v) for m, v in (t.get("ordered") or {}).get(which, []) if m in pos]  # type: ignore[union-attr]
+            if not rows:
+                continue
+            seen = True
+            rows.sort()
+            cur, j = 0.0, 0
+            for i in range(len(order)):       # a chromosome without this member keeps its last value
+                while j < len(rows) and rows[j][0] <= i:
+                    cur = rows[j][1]
+                    j += 1
+                total[i] += cur
+        if seen:
+            out[name] = [round(v) for v in total]
+    return out
+
+
 def _pangenome_entry(outs: Outputs, thr: dict[str, float] | None = None) -> dict[str, object]:
     """cohort_pangenome's small outputs: the chromosomes built with their graph sizes, the split's contig binning per
     genome, the frequency summary, the members table, truvari's figures, and the sizes of the VCFs."""
@@ -303,6 +405,12 @@ def _pangenome_entry(outs: Outputs, thr: dict[str, float] | None = None) -> dict
                     degree[k] = degree.get(k, 0) + v
         if degree:
             entry["degree"] = degree
+    paths = outs.opt("chrom_growth")      # 0.22.0: panacus histograms and the ordered growth per chromosome
+    if isinstance(paths, list):
+        tables = [sp.parse_growth(sp.read_lines(Path(q))) for q in paths if isinstance(q, str) and Path(q).exists()]
+        growth = pangenome_growth(tables, list((entry.get("name_map") or {}).keys()))  # type: ignore[union-attr]
+        if growth:
+            entry["growth"] = growth
     return entry
 
 
@@ -381,27 +489,8 @@ def identity_flags(pairs: list[dict[str, object]], members_tbl: list[dict[str, o
     dup_min, ped_min, ped_max, rel_max = (thr["duplicate_relatedness_min"], thr["pedigree_relatedness_min"],
                                           thr["pedigree_relatedness_max"], thr["related_relatedness_max"])
     hub_min = int(thr.get("related_hub_min", 10))
-    # a member related to many others is the anomaly, not its partners: contamination inflates the shared heterozygous
-    # sites and so somalier's relatedness to everyone (the 864 cohort, 2026-11-09: one sample "related" to 858 of 863).
-    # The hubs are taken out one by one, the most connected first, until nobody reaches related_hub_min; their pairs do
-    # not count against anyone
-    undeclared: list[tuple[str, str, float]] = []
-    for p in pairs:
-        a, b, r = str(p.get("sample_a") or ""), str(p.get("sample_b") or ""), p.get("relatedness")
-        expected = p.get("expected")
-        if isinstance(r, (int, float)) and rel_max <= r < dup_min and not (isinstance(expected, (int, float)) and expected > 0):
-            undeclared.append((a, b, float(r)))
-    hubs: dict[str, int] = {}
-    while undeclared:
-        degree: dict[str, int] = {}
-        for a, b, _r in undeclared:
-            degree[a] = degree.get(a, 0) + 1
-            degree[b] = degree.get(b, 0) + 1
-        sid, n = max(degree.items(), key=lambda kv: (kv[1], kv[0]))
-        if n < hub_min:
-            break
-        hubs[sid] = n
-        undeclared = [t for t in undeclared if sid not in t[:2]]
+    # a member related to many others is the anomaly, not its partners (summary_parsers.related_hubs)
+    hubs = sp.related_hubs(pairs, lo=rel_max, hi=dup_min, hub_min=hub_min)
     for sid, n in hubs.items():
         flag(sid, "related_hub", "fail", f"related at or above {rel_max:g} to {n} members with no pedigree link in the sheet (at least "
              f"{hub_min}): a contaminated or mixed sample looks related to everyone; its partners are not flagged on its account", n, hub_min)
@@ -1496,6 +1585,9 @@ def render_cohort(d: dict[str, object], tools: list[dict[str, object]], *, proje
                                         for c, g in per_chrom.items()], cls="")
                               + "<p class='small muted'>From the join's path statistics (every haplotype's path fragments) and its reference gaps: the reference intervals no "
                                 "haplotype covers in the graph (centromeres, telomeres, unassembled regions).</p>")
+            growth: dict[str, object] = cp.get("growth") or {}  # type: ignore[assignment]
+            if growth.get("nonref_bp"):
+                pbody += _growth_html(growth)
             degree: dict[str, object] = cp.get("degree") or {}  # type: ignore[assignment]
             lv: dict[str, object] = levels.get("records_by_level") or {}  # type: ignore[union-attr, assignment]
             vg_type: dict[str, object] = levels.get("records_by_vg_type") or {}  # type: ignore[union-attr, assignment]

@@ -5,6 +5,57 @@ offline bundle. An entry opens with the upstream tag it is built on and a
 short summary, with anything an existing project has to do; the rest is
 under Details.
 
+## 0.22.0
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin (0.6.0), the
+images and the reference entries unchanged.
+
+`cohort_pangenome` maps each member in a job of its own and measures how
+the graph grows. A graph cohort nested in a larger one no longer maps its
+members twice, so graphs of several sizes can be built from one cohort,
+and no large-memory node is needed for the mapping. Only this stage
+changed; a project that set `split_cpu`, `split_map_cores` or
+`split_mem_gb` for the old split task should remove them.
+
+`ugc-wgw cohort rank` is fixed for cohorts with a contaminated sample: a
+ranking made with 0.21.0 should be made again.
+
+<details>
+<summary>Details</summary>
+
+- **One mapping job per member.** `ugc_wgw_cactus_refgraph` builds the
+  reference-only graph once per reference; `ugc_wgw_cactus_map` maps one
+  member's two haplotypes to it (8 cores, 60 GB plus 15 times the member's
+  gzipped FASTAs; about 85 GB for a whole genome); `ugc_wgw_cactus_split`
+  gathers the alignments and bins the contigs by chromosome. The result
+  is the same as when one task mapped every haplotype: contig table,
+  split log, per-chromosome FASTAs and alignments were compared file by
+  file. A member's mapping is kept in the call cache for every cohort it
+  is in. `split_map_cores` (default 8) is now the mapping job's cores,
+  `map_mem_gb` is new, and `split_cpu` and `split_mem_gb` default to 16
+  and 64.
+- **Growth curves.** `ugc_wgw_pangenome_growth` runs panacus (in the
+  Cactus image) on every chromosome's graph: how many base pairs and nodes
+  exactly c members carry, for all their sequence and for what the
+  reference lacks, and the cumulative amount in the cohort's order
+  (`chrom_growth`). The cohort page draws the expected growth for members
+  drawn at random, the core, and the cohort's own order, with a table of
+  what one more member adds at a few sizes.
+- **`cohort rank` leaves contaminated samples out.** A contaminated or
+  mixed sample has a raised relatedness to everyone of its population and
+  the most structural-variant alleles, so the ranking took it first and
+  held most of the cohort back as its relatives. A member related (0.1 or
+  more, `--related-min`) to ten members or more without a pedigree link
+  is now not ranked and holds nobody back, as the cohort page's
+  `related_hub` flag already said; `--threshold related_hub_min=N` moves
+  the count.
+- **A ladder of nested graph cohorts** is described on the
+  `cohort_pangenome` page of the guide: cohorts frozen as prefixes of
+  `ugc-wgw cohort rank`'s ranking, built on one chromosome first.
+
+</details>
+
 ## 0.21.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

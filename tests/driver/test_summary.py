@@ -386,6 +386,30 @@ class ParserTest(unittest.TestCase):
         gb = sp.parse_genome_bp((GENOME_BP_HEADER + "GRCh38#0\t1\t64444167\nA#1\t3\t60000000\nA#2\t2\t62000000\n").splitlines())
         self.assertEqual(gb, {"ref_bp": 64444167, "haplotypes": 2, "bp_min": 60000000, "bp_max": 62000000, "bp_avg": 61000000, "bp_total": 122000000})
         dg = sp.parse_degree_stats(DEGREE.splitlines() + ["9\t5\t0\t0\t0", "12\t1\t0\t0\t0"])
+        # the growth table and the curves from it: an XX member without a path on chrY carries nothing there
+        import itertools
+        from ugc_wgw import summary_cohort as sc
+        head = "table\tchromosome\tset\tcount\tkey\tvalue"
+        a = sp.parse_growth([head, "info\tchr1\tall\tmembers\tcohort\t3", "info\tchr1\tall\tmembers\tpresent\t3",
+                             "hist\tchr1\tnonref\tbp\t0\t999", "hist\tchr1\tnonref\tbp\t1\t30", "hist\tchr1\tnonref\tbp\t3\t100",
+                             "ordered\tchr1\tnonref\tbp\tA\t110", "ordered\tchr1\tnonref\tbp\tB\t120", "ordered\tchr1\tnonref\tbp\tC\t130"])
+        y = sp.parse_growth([head, "info\tchrY\tall\tmembers\tcohort\t3", "info\tchrY\tall\tmembers\tpresent\t2",
+                             "hist\tchrY\tnonref\tbp\t1\t8", "hist\tchrY\tnonref\tbp\t2\t50", "hist\tchrY\tnonref\tbp\t3\t0",
+                             "ordered\tchrY\tnonref\tbp\tA\t54", "ordered\tchrY\tnonref\tbp\tC\t58"])
+        self.assertEqual((a["cohort"], a["present"], y["present"]), (3, 3, 2))
+        self.assertEqual(a["hist"][("nonref", "bp")], {0: 999.0, 1: 30.0, 3: 100.0})
+        self.assertEqual(y["ordered"]["nonref"], [("A", 54.0), ("C", 58.0)])
+        g = sc.pangenome_growth([a, y], ["A", "B", "C"])
+        # chr1: 100 in all three, 10 in each alone; chrY: 50 in A and C, 4 in each of them alone; B has nothing there
+        amounts = [({0, 1, 2}, 100), ({0}, 10), ({1}, 10), ({2}, 10), ({0, 2}, 50), ({0}, 4), ({2}, 4)]
+        for k in (1, 2, 3):
+            subs = list(itertools.combinations(range(3), k))
+            self.assertEqual(g["nonref_bp"][k - 1], round(sum(sum(v for s, v in amounts if s & set(x)) for x in subs) / len(subs)), k)
+        self.assertEqual(g["ordered_nonref_bp"], [110 + 54, 120 + 54, 130 + 58])     # chrY keeps A's value while B is added
+        self.assertEqual(g["nonref_bp"][-1], g["ordered_nonref_bp"][-1])
+        self.assertEqual(sc.pangenome_growth([], ["A"]), {})
+        u, c = sc.growth_from_hist({1: 4.0, 2: 6.0}, 2)
+        self.assertEqual(([round(x, 9) for x in u], [round(x, 9) for x in c]), ([2.0 + 6.0, 10.0], [8.0, 6.0]))
         self.assertEqual((dg["1"], dg["4"], dg["8+"]), (736985, 2878, 6))
         rg = sp.parse_refgaps([l.encode() for l in REFGAPS.format(chrom="chr20").splitlines(True)])
         self.assertEqual(rg, {"chr20": {"n": 2, "bp": 60000 + 28557053 - 26386225}})
@@ -1286,13 +1310,21 @@ class SummaryEndToEnd(unittest.TestCase):
         self.assertEqual(c20["genome_bp_min"], 61_000_000 - 2 * 50_000)   # member 0, haplotype 2 of the fixture
         self.assertEqual(c20["refgaps"], {"n": 2, "bp": 60000 + 28557053 - 26386225})
         self.assertEqual(cp["degree"]["1"], 736985 * 3)
+        # 0.22.0: the growth curves from the three chromosomes' panacus tables (two members; the fixture's 1 Mb shared and 100 kb each)
+        g = cp["growth"]
+        self.assertEqual((g["members"], g["chromosomes"]), (2, 3))
+        self.assertEqual(g["nonref_bp"], [3 * 1_100_000, 3 * 1_200_000])            # one member: the shared megabase and its own 100 kb
+        self.assertEqual(g["ordered_nonref_bp"], [3 * 1_100_000, 3 * 1_200_000])
+        self.assertEqual(g["core_bp"], [3 * 60_500_000, 3 * 60_000_000])
+        self.assertEqual(g["nonref_node"], [3 * 1100, 3 * 1200])
         self.assertEqual(cd["distributions"]["asm_pav_sv_pass"]["values"]["S1"], 1162)
         text = self.check_html(self.tmp / "asm" / "C1.summary.html")
         for needle in ('id="sec-pangenome"', "Pangenome graph (cohort_pangenome)", "Per chromosome", "Contigs binned by the split",
                        "truvari bench", "Allele frequencies of the vcfwave VCF", "cohort_freq has not run", "not haplotypes",
                        "graph / reference", "Shortest haplotype as a fraction", "genotype concordance", "assigned bp h1 / h2",
                        "2 assemblies (one row per member", "PAV SNVs / indels", "karyotype from the assembly", "assembly: Flagger non-Hap %",
-                       "Graph structure", "Node degree", "Haplotype sequence in each chromosome", "genotypes in the graph VCF", "call rate in the graph VCF"):
+                       "Graph structure", "Node degree", "Haplotype sequence in each chromosome", "genotypes in the graph VCF", "call rate in the graph VCF",
+                       "Growth: what each further member adds", "sequence the reference lacks", "carried by all (core)", "added by the last one"):
             self.assertIn(needle, text, needle)
         # a tight Flagger limit puts both members above the threshold in the distributions (direction max)
         code, out, err = run_cli(["--project", self.proj, "summary", "--mode", "assembly", "--cohort", "C1", "--out-dir", str(self.tmp / "asm"),

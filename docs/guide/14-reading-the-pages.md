@@ -112,9 +112,13 @@ For `cohort_pangenome`: the chromosomes built with their nodes, edges and
 length, the contigs the split assigned to a chromosome or left ambiguous
 per haplotype, the allele frequencies of the vcfwave VCF, truvari's
 recall, precision, F1 and genotype concordance against the read-based SV
-merge, the graph's structure (haplotype sequence and reference gaps per
-chromosome, the node degree histogram, records by nesting level, vcfwave
-type and allele length) and the members' genotypes in the graph VCF (call
+merge, the graph's growth (the sequence the reference lacks against the
+number of members, as an expectation for members at random and in the
+cohort's own order; everything the members carry with its core; a table
+of what one more member adds at a few sizes), the graph's structure
+(haplotype sequence and reference gaps per chromosome, the node degree
+histogram, records by nesting level, vcfwave type and allele length) and
+the members' genotypes in the graph VCF (call
 rate, singletons, het and hom-alt counts; members below
 `pg_member_call_rate_min`, 0.90, are listed as a signal for the next
 cohort freeze, not as a sample flag).

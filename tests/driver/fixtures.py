@@ -802,6 +802,19 @@ def fixture_bytes(name: str, sid: str, stage: str, inferred_sex: str = "", index
         text = GENOME_BP_HEADER + f"GRCh38#0\t1\t{60_000_000 + index * 1_000_000}\n" + "".join(f"{m}#{h}\t{3 + i}\t{61_000_000 + i * 100_000 - h * 50_000}\n" for i, m in enumerate(ms) for h in (1, 2))
     elif name == "chrom_degree_stats":
         text = DEGREE
+    elif name == "chrom_growth":
+        # per chromosome: 1 Mb of non-reference sequence in every member, 100 kb in each member alone; 60 Mb in all, 500 kb in each alone;
+        # the ordered growth adds a member's own 100 kb (500 kb) at its turn
+        ms = members or []
+        chrom = PANGENOME_CHROMS[index] if index < len(PANGENOME_CHROMS) else f"chr{index}"
+        n = len(ms)
+        rows = [("info", "all", "members", "cohort", n), ("info", "all", "members", "present", n)]
+        for which, shared, own in (("all", 60_000_000, 500_000), ("nonref", 1_000_000, 100_000)):
+            for count, div in (("bp", 1), ("node", 1000)):
+                rows += [("hist", which, count, 0, 0), ("hist", which, count, 1, own * n // div)]
+                rows += [("hist", which, count, c, 0) for c in range(2, n)] + ([("hist", which, count, n, shared // div)] if n > 1 else [])
+            rows += [("ordered", which, "bp", m, shared + own * (i + 1)) for i, m in enumerate(ms)]
+        text = "table\tchromosome\tset\tcount\tkey\tvalue\n" + "".join(f"{t}\t{chrom}\t{s}\t{c}\t{k}\t{v}\n" for t, s, c, k, v in rows)
     elif name == "chrom_refgaps":
         chrom = PANGENOME_CHROMS[index] if index < len(PANGENOME_CHROMS) else f"chr{index}"
         text = REFGAPS.format(chrom=chrom)

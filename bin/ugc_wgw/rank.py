@@ -345,6 +345,19 @@ def run(cfg: Config, db: DB, code: CodeInfo, *, cohort_id: str, mode: str, versi
     else:
         diag(f"cohort {cohort_id}: no cohort_qc run in {mode} mode; relatives are not held back and no ancestry is shown")
 
+    # a member "related" to many others is a contaminated or mixed sample, not a relative of them all: it is left out
+    # and its pairs hold nobody back (the cohort page's related_hub rule, here at the ranking's own relatedness floor)
+    hub_min = int(thresholds.get("related_hub_min", 10))
+    hubs = sp.related_hubs(pairs, lo=related_min, hi=math.inf, hub_min=hub_min, among={m.sample_id for m in members if m.eligible})
+    for sid, k in sorted(hubs.items(), key=lambda kv: -kv[1]):
+        by_id[sid].eligible = False
+        by_id[sid].reason = (f"QC fail: related_hub (relatedness {related_min:g} or more to {k} members, at least {hub_min}: a contaminated "
+                             "or mixed sample looks related to everyone)")
+        diag(f"cohort {cohort_id}: {sid} left out, related at {related_min:g} or more to {k} members (contamination, not kinship)")
+    if len(hubs) > max(5, len(members) // 20):
+        diag(f"cohort {cohort_id}: {len(hubs)} members left out as hubs; if they are real families, declare the pedigree in the sheet "
+             "or raise the floor (--related-min) or the count (--threshold related_hub_min=N)")
+
     rankable = [m.sample_id for m in members if m.eligible]
     if not rankable:
         why: dict[str, int] = {}
@@ -498,7 +511,9 @@ def render(cohort_id: str, mode: str, matrix: Matrix, rk: Ranking, members: list
              f"{_esc(mode)} cohort_merge SV VCF ({', '.join(f'{v} {k}' for k, v in sorted(matrix.by_type.items()))}). At every step the member "
              f"with the most not-yet-covered alleles of {pct} carrier frequency or more is taken, ties by all alleles. A member related to "
              f"an earlier pick (relatedness {related_min:g} or more in cohort_qc) is held back to the end, so the first members are "
-             "unrelated. Frequencies are carrier frequencies among the ranked members.</p>")
+             "unrelated. A member related that way to many members is a contaminated or mixed sample: it is excluded "
+             "(<code>related_hub</code> in the table's last column) and holds nobody back. Frequencies are carrier frequencies among "
+             "the ranked members.</p>")
     held_rows = [[r["first"], r["members_outside"], *[f"{float(r[c]) * 100:.1f}%" for c in ("common_median", "common_p05", "common_min",  # type: ignore[arg-type]
                                                                                           "all_median", "all_p05", "all_min")]] for r in heldout]
     held_html = (_table(["first members", "members outside", "common alleles already there: median", "5th percentile", "lowest",

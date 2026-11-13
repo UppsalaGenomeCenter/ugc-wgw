@@ -1062,6 +1062,27 @@ def parse_genome_bp(lines: Iterable[str]) -> dict[str, object]:
             "bp_avg": round(sum(vals) / len(vals)) if vals else None, "bp_total": sum(vals)}
 
 
+def parse_growth(lines: Iterable[str]) -> dict[str, object]:
+    """One chromosome's growth table (ugc_wgw_pangenome_growth): `cohort` and `present` (members of the cohort, and
+    of them with a path here), `hist[(set, count)][coverage] = amount carried by exactly that many members`, and
+    `ordered[set] = [(sample_id, cumulative bp)]` in the cohort's order."""
+    _cols, rows = table(lines)
+    out: dict[str, object] = {"cohort": None, "present": None, "hist": {}, "ordered": {}}
+    hist: dict[tuple[str, str], dict[int, float]] = out["hist"]  # type: ignore[assignment]
+    ordered: dict[str, list[tuple[str, float]]] = out["ordered"]  # type: ignore[assignment]
+    for r in rows:
+        kind, key, value = r.get("table"), r.get("key", ""), _float(r.get("value"))
+        if value is None:
+            continue
+        if kind == "info" and key in ("cohort", "present"):
+            out[key] = int(value)
+        elif kind == "hist" and key.isdigit():
+            hist.setdefault((r.get("set", ""), r.get("count", "")), {})[int(key)] = value
+        elif kind == "ordered":
+            ordered.setdefault(r.get("set", ""), []).append((key, value))
+    return out
+
+
 def parse_degree_stats(lines: Iterable[str]) -> dict[str, int]:
     """vg stats -D: {degree: node sides} (the Degree and Sides columns), degrees of 8 and above summed as `8+`."""
     _cols, rows = table(lines)
@@ -1137,6 +1158,35 @@ def parse_somalier_pairs(lines: Iterable[str]) -> list[dict[str, object]]:
         out.append({"sample_a": r.get("sample_a", ""), "sample_b": r.get("sample_b", ""), "relatedness": _float(r.get("relatedness")),
                     "ibs0": _int(r.get("ibs0")), "ibs2": _int(r.get("ibs2")), "expected": exp})
     return out
+
+
+def related_hubs(pairs: Iterable[dict[str, object]], *, lo: float, hi: float, hub_min: int,
+                 among: set[str] | None = None) -> dict[str, int]:
+    """Members "related" to hub_min members or more, with how many: a contaminated or mixed sample shares
+    heterozygous sites with everybody, so somalier's relatedness to the whole population rises (the 864 cohort,
+    2026-11-09: one sample at 0.1 to 0.35 with 858 of 863). Counted over the pairs with lo <= relatedness < hi that
+    the sheet's pedigree does not explain, both members in `among` when given. The hubs are taken out one by one,
+    the most connected first, until nobody reaches hub_min: a hub's pairs count against nobody else."""
+    undeclared: list[tuple[str, str]] = []
+    for p in pairs:
+        a, b, r = str(p.get("sample_a") or ""), str(p.get("sample_b") or ""), p.get("relatedness")
+        expected = p.get("expected")
+        if among is not None and (a not in among or b not in among):
+            continue
+        if isinstance(r, (int, float)) and lo <= r < hi and not (isinstance(expected, (int, float)) and expected > 0):
+            undeclared.append((a, b))
+    hubs: dict[str, int] = {}
+    while undeclared:
+        degree: dict[str, int] = {}
+        for a, b in undeclared:
+            degree[a] = degree.get(a, 0) + 1
+            degree[b] = degree.get(b, 0) + 1
+        sid, n = max(degree.items(), key=lambda kv: (kv[1], kv[0]))
+        if n < hub_min:
+            break
+        hubs[sid] = n
+        undeclared = [t for t in undeclared if sid not in t]
+    return hubs
 
 
 def parse_ancestry(lines: Iterable[str]) -> list[dict[str, object]]:

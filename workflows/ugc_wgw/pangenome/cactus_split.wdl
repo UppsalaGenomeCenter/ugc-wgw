@@ -1,12 +1,12 @@
 version 1.0
-# ugc-pacbio-wgw — Minigraph-Cactus steps 1-3 genome-wide: the reference-only graph, every haplotype mapped to it, contigs split by chromosome
-# origin: none (cactus v3.3.0's own commands, doc/pangenome.md "--mgSplit"; verified on the dev machine 2026-10-20)
+# ugc-pacbio-wgw — Minigraph-Cactus step 3 genome-wide: the members' alignments to the reference-only graph gathered, contigs split by chromosome
+# origin: none (cactus v3.3.0's own commands, doc/pangenome.md "--mgSplit"; verified on the dev machine 2026-10-20; the mapping moved to cactus_map.wdl on 2026-11-13)
 # see docs/DESIGN.md §5, §13; docs/ENTRYPOINTS.md §8.2
 import "../../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/structs.wdl"
 
 task ugc_wgw_cactus_split {
   meta {
-    description: "cactus-minigraph --refOnly, cactus-graphmap --mgSplit --outputFasta (on a copy of the seqfile, which it edits) and cactus-graphmap-split --mgSplit --refContigsFile --otherContig, single-machine inside the full image with --maxCores/--maxMemory at the allocation; Toil's work directory, job stores, temporaries and coordination (lock) directory on the node-local scratch the backend names through TMPDIR, else in the task directory. Every chromosome directory and its seqfile go into one tar; the chromfile, the split log, contig_sizes.tsv and the per-member assigned/ambiguous contig counts come out beside them. Ambiguous contigs (the config's coverage fractions by length, best/second ratio, MAPQ) are left out of every graph."
+    description: "cactus-graphmap-split --mgSplit --refContigsFile --otherContig on the alignments the per-member mapping tasks made (ugc_wgw_cactus_map): the members' PAFs are concatenated in the seqfile's order, the reference's own alignment to the graph (one copy in every member's PAF) kept once, and the seqfile is written as one cactus-graphmap over every haplotype would have left it (the star tree over the reference, the haplotypes and _MINIGRAPH_, and the graph's node sequences). The result equals the one-task route's: contig assignments, per-chromosome FASTAs and PAF (checked on the dev machine). Single-machine inside the full image; Toil's work directory, job store, temporaries and coordination (lock) directory on the node-local scratch the backend names through TMPDIR, else in the task directory. Every chromosome directory and its seqfile go into one tar; the chromfile, the split log, contig_sizes.tsv and the per-member assigned/ambiguous contig counts come out beside them. Ambiguous contigs (the config's coverage fractions by length, best/second ratio, MAPQ) are left out of every graph."
     outputs: {
       chrom_tars: {
         description: "<chromosome>.tar per reference contig with data (and the other contig): split/<chr>/ and split/seqfiles/<chr>.seqfile"
@@ -24,7 +24,7 @@ task ugc_wgw_cactus_split {
         description: "minigraph.split.log"
       },
       cactus_logs: {
-        description: "The three steps' Toil logs (step1.minigraph, step2.graphmap, step3.split), tarred: the per-haplotype mapping times are in step2"
+        description: "The Toil logs, tarred: step1.minigraph (the reference graph), every member's graphmap log, step3.split"
       },
       contig_sizes: {
         description: "contig_sizes.tsv: bases per genome and chromosome"
@@ -51,6 +51,18 @@ task ugc_wgw_cactus_split {
     hap_fastas: {
       description: "The haplotype FASTAs, hap1 then hap2 of each member, cohort order"
     }
+    ref_graph: {
+      description: "The reference-only graph (ugc_wgw_cactus_refgraph)"
+    }
+    graph_fasta: {
+      description: "The graph's node sequences (any member's ugc_wgw_cactus_map.graph_fasta)"
+    }
+    pafs: {
+      description: "Every member's alignments (ugc_wgw_cactus_map.paf), cohort order"
+    }
+    step_logs: {
+      description: "The reference graph's and the members' Toil logs, for the log tar"
+    }
     ref_contigs: {
       description: "The reference contigs to split by, one per line (the map's asm_graph_chromosomes)"
     }
@@ -61,10 +73,7 @@ task ugc_wgw_cactus_split {
       description: "The reference genome's name in the graph"
     }
     cpu: {
-      description: "Cores (--maxCores, --mgCores)"
-    }
-    map_cores: {
-      description: "Cores per minigraph mapping (--mapCores; default: all of cpu, one haplotype at a time). Toil runs cpu / map_cores mappings at once when mem_gb holds them: each needs about 72 times the gzipped haplotype's size plus the reference graph, 65-80 GB for a human haplotype, and minigraph uses only a few cores of a haplotype's mapping (15-22 % CPU efficiency measured), so 16 of 48 with 360 GB is three at once"
+      description: "Cores (--maxCores)"
     }
     mem_gb: {
       description: "Memory (GB, --maxMemory)"
@@ -85,16 +94,18 @@ task ugc_wgw_cactus_split {
     Array[File] hap_fastas
     File ref_contigs
     String other_contig = "chrOther"
+    File ref_graph
+    File graph_fasta
+    Array[File] pafs
+    Array[File] step_logs
     String reference = "GRCh38"
-    Int cpu = 32
-    Int? map_cores
-    Int mem_gb = 128
+    Int cpu = 16
+    Int mem_gb = 64
     Int? disk_gb
     RuntimeAttributes runtime_attributes
   }
 
   String out_prefix = "~{cohort_id}.pangenome.~{ref_name}"
-  Int map_cores_used = select_first([map_cores, cpu])
   Int disk_size = select_first([disk_gb, ceil(size(hap_fastas, "GB") * 3 + size(ref_fasta, "GB") * 2 + 50)])
 
   command <<<
@@ -114,9 +125,19 @@ task ugc_wgw_cactus_split {
     cat seqfile.txt >&2
     common=(--reference ~{reference} --maxCores ~{cpu} --maxMemory ~{mem_gb}G --workDir "$toil/work")
 
-    cactus-minigraph "$toil/js1" seqfile.txt ref.sv.gfa.gz --refOnly --mgCores ~{cpu} "${common[@]}" --logFile step1.minigraph.log
-    cp seqfile.txt seqfile.gm.txt
-    cactus-graphmap "$toil/js2" seqfile.gm.txt ref.sv.gfa.gz all.paf --mgSplit --outputFasta ref.sv.gfa.fa.gz --mapCores ~{map_cores_used} "${common[@]}" --logFile step2.graphmap.log
+    # the seqfile as one cactus-graphmap over every haplotype leaves it: the star tree and the graph's own sequences
+    ln -s "~{ref_graph}" ref.sv.gfa.gz
+    ln -s "~{graph_fasta}" ref.sv.gfa.fa.gz
+    tree="(~{reference}:1.0,$(sed 's/$/:1.0/' '~{write_lines(genome_names)}' | paste -sd, -),_MINIGRAPH_:1.0);"
+    { cat seqfile.txt; echo "$tree"; printf '_MINIGRAPH_\tfile://%s/ref.sv.gfa.fa.gz\n' "$PWD"; } > seqfile.gm.txt
+    # every member's alignments in the seqfile's order; each PAF also holds the reference's own alignment to the
+    # graph, which one run over all haplotypes writes once
+    n=0
+    while read -r paf; do
+      n=$((n + 1))
+      if [ "$n" -eq 1 ]; then cat "$paf"; else awk -F'\t' -v p="id=~{reference}|" 'index($1, p) != 1' "$paf"; fi
+    done < '~{write_lines(pafs)}' > all.paf
+    echo "gathered $n PAFs, $(wc -l < all.paf) alignments" >&2
     cactus-graphmap-split "$toil/js3" seqfile.gm.txt ref.sv.gfa.gz all.paf --outDir split --mgSplit \
       --refContigsFile "~{ref_contigs}" --otherContig ~{other_contig} "${common[@]}" --logFile step3.split.log
 
@@ -135,7 +156,10 @@ task ugc_wgw_cactus_split {
         for (g in seen) print g "\t" (as[g]+0) "\t" (asbp[g]+0) "\t" (am[g]+0) "\t" (ambp[g]+0) }' \
       split/minigraph.split.log | { read -r h; echo "$h"; sort; } > "~{out_prefix}.ambiguous_contigs.tsv"
     cp split/minigraph.split.log "~{out_prefix}.split.log"
-    tar -czf "~{out_prefix}.split.cactus-logs.tar.gz" step1.minigraph.log step2.graphmap.log step3.split.log
+    mkdir -p logs
+    while read -r l; do cp "$l" logs/; done < '~{write_lines(step_logs)}'
+    cp step3.split.log logs/
+    tar -czf "~{out_prefix}.split.cactus-logs.tar.gz" -C logs .
     cp split/contig_sizes.tsv "~{out_prefix}.contig_sizes.tsv"
     cat "~{out_prefix}.ambiguous_contigs.tsv" >&2
     rm -rf "$toil"

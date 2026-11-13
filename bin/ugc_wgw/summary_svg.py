@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import html
 import math
+from typing import Callable
 
 SERIES = ["m1", "m2", "m3", "m4", "m5", "m6"]
 
@@ -431,20 +432,23 @@ def strip(groups: list[dict[str, object]], *, width: int = 560, label_w: int = 1
 
 
 def lines(series: list[tuple[str, str, list[tuple[float, float]]]], *, width: int = 620, height: int = 240, x_label: str = "",
-          y_label: str = "", percent: bool = False) -> str:
+          y_label: str = "", percent: bool = False, y_format: Callable[[object], str] | None = None) -> str:
     """Line chart of one or more series over a shared numeric x: (label, line class, [(x, y)]). With `percent`
-    the y values are shares of 1 and the axis runs from 0 to 100 %. The legend is drawn above the plot."""
+    the y values are shares of 1 and the axis runs from 0 to 100 %; `y_format` writes the other tick labels (fmt_bp
+    for base pairs). The legend is drawn above the plot; the left margin follows the longest tick label."""
     pts = [(finite(x), finite(y)) for _, _, s in series for x, y in s]
     if not pts:
         return "<p class='muted'>No data.</p>"
-    left, bottom, top, right = 46, 34, (40 if y_label else 22), 12   # the y label, then the legend, then the plot
-    plot_w, plot_h = width - left - right, height - top - bottom
     lo_x, hi_x = min(x for x, _ in pts), max(x for x, _ in pts)
     if hi_x <= lo_x:
         hi_x = lo_x + 1.0
     hi_y = 1.0 if percent else max(y for _, y in pts) or 1.0
     y_ticks = [0.0, 0.25, 0.5, 0.75, 1.0] if percent else nice_ticks(0, hi_y, 4)
     hi_y = max(hi_y, y_ticks[-1])
+    y_text = [(f"{t * 100:.0f}%" if percent else (y_format(t) if y_format else fmt(t))) for t in y_ticks]
+    left = max(46, 10 + 6 * max(len(s) for s in y_text))
+    bottom, top, right = 34, (40 if y_label else 22), 12             # the y label, then the legend, then the plot
+    plot_w, plot_h = width - left - right, height - top - bottom
 
     def sx(v: float) -> float:
         return left + (v - lo_x) / (hi_x - lo_x) * plot_w
@@ -453,9 +457,9 @@ def lines(series: list[tuple[str, str, list[tuple[float, float]]]], *, width: in
         return top + plot_h - v / hi_y * plot_h
 
     parts = []
-    for t in y_ticks:
+    for t, label_text in zip(y_ticks, y_text):
         parts.append(f'<line x1="{left}" y1="{sy(t):.1f}" x2="{left + plot_w}" y2="{sy(t):.1f}"/>'
-                     f'<text x="{left - 4}" y="{sy(t) + 3:.1f}" text-anchor="end">{esc(f"{t * 100:.0f}%" if percent else fmt(t))}</text>')
+                     f'<text x="{left - 4}" y="{sy(t) + 3:.1f}" text-anchor="end">{esc(label_text)}</text>')
     whole = all(float(x).is_integer() for x, _ in pts)   # counts on the x axis: no tick between two of them
     seen: set[str] = set()
     for t in nice_ticks(lo_x, hi_x, 6):

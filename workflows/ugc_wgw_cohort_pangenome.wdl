@@ -6,7 +6,9 @@ import "../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/backend_
 import "ugc_wgw/cohort/concat.wdl" as Concat
 import "ugc_wgw/cohort/freq.wdl" as Freq
 import "ugc_wgw/pangenome/cactus_chrom.wdl" as Chrom
+import "ugc_wgw/pangenome/cactus_map.wdl" as CactusMap
 import "ugc_wgw/pangenome/cactus_split.wdl" as Split
+import "ugc_wgw/pangenome/growth.wdl" as Growth
 import "ugc_wgw/pangenome/member_stats.wdl" as MemberStats
 import "ugc_wgw/pangenome/names.wdl" as Names
 import "ugc_wgw/pangenome/truvari.wdl" as Truvari
@@ -52,6 +54,9 @@ workflow ugc_wgw_cohort_pangenome {
       },
       chrom_degree_stats: {
         description: "vg stats -D of each chromosome's GBZ: the node degree histogram"
+      },
+      chrom_growth: {
+        description: "Per chromosome <cohort_id>.pangenome.<ref>.<chromosome>.growth.tsv (panacus): how much of the graph, in base pairs and nodes, exactly c members carry, for everything they carry and for the sequence the reference lacks, and the cumulative amount in the cohort's order; the summary turns the histograms into growth curves"
       },
       chrom_logs: {
         description: "The Cactus logs per chromosome, tarred"
@@ -142,13 +147,16 @@ workflow ugc_wgw_cohort_pangenome {
       description: "Its index"
     }
     split_cpu: {
-      description: "Cores of the genome-wide split step (every haplotype mapped)"
+      description: "Cores of the split task (cactus-graphmap-split over the gathered alignments; the mapping has its own tasks)"
     }
     split_map_cores: {
-      description: "Cores per minigraph mapping in the split (default: split_cpu, one haplotype at a time); split_cpu / split_map_cores haplotypes map at once when split_mem_gb holds them (65-80 GB each)"
+      description: "Cores of each member's mapping task (ugc_wgw_cactus_map: the member's two haplotypes against the reference-only graph, one after the other). Default 8: minigraph uses few cores of one mapping"
+    }
+    map_mem_gb: {
+      description: "Memory (GB) of each member's mapping task; default 60 plus 15 times the member's two gzipped FASTAs (55 GB measured for a chr20-only haplotype, 65-80 GB for a whole one)"
     }
     split_mem_gb: {
-      description: "Memory (GB) of the split step"
+      description: "Memory (GB) of the split task"
     }
     split_disk_gb: {
       description: "Disk (GB) of the split step; default from the input sizes"
@@ -213,9 +221,10 @@ workflow ugc_wgw_cohort_pangenome {
     Boolean build_other_contigs = false
     File? sv_vcf
     File? sv_vcf_index
-    Int split_cpu = 32
-    Int? split_map_cores
-    Int split_mem_gb = 128
+    Int split_cpu = 16
+    Int split_map_cores = 8
+    Int? map_mem_gb
+    Int split_mem_gb = 64
     Int? split_disk_gb
     Int chrom_cpu = 16
     Int chrom_map_cores = 4
@@ -269,6 +278,25 @@ workflow ugc_wgw_cohort_pangenome {
   # hap1, hap2 of each member in cohort order, matching the genome names <safe>.1, <safe>.2
   Array[File] hap_fastas = flatten(transpose([hap1_fastas, hap2_fastas]))
 
+  # steps 1 and 2 in shards: the reference-only graph once per reference, then one task per member, so that the call
+  # cache maps a member once for every cohort it is in (the nested cohorts of a ladder)
+  call CactusMap.ugc_wgw_cactus_refgraph { input:
+    ref_fasta = ref_map["asm_fasta"],  # !FileCoercion
+    runtime_attributes = default_runtime_attributes
+  }
+  scatter (i in range(length(sample_ids))) {
+    call CactusMap.ugc_wgw_cactus_map { input:
+      member = sub(ugc_wgw_pangenome_names.genome_names[2 * i], "\\.1$", ""),
+      genome_names = [ugc_wgw_pangenome_names.genome_names[2 * i], ugc_wgw_pangenome_names.genome_names[2 * i + 1]],
+      hap_fastas = [hap1_fastas[i], hap2_fastas[i]],
+      ref_fasta = ref_map["asm_fasta"],  # !FileCoercion
+      ref_graph = ugc_wgw_cactus_refgraph.graph,
+      cpu = split_map_cores,
+      mem_gb = map_mem_gb,
+      runtime_attributes = default_runtime_attributes
+    }
+  }
+
   call Split.ugc_wgw_cactus_split { input:
     cohort_id = cohort_id,
     ref_name = ref_name,
@@ -276,8 +304,11 @@ workflow ugc_wgw_cohort_pangenome {
     genome_names = ugc_wgw_pangenome_names.genome_names,
     hap_fastas = hap_fastas,
     ref_contigs = ref_map["asm_graph_chromosomes"],  # !FileCoercion
+    ref_graph = ugc_wgw_cactus_refgraph.graph,
+    graph_fasta = ugc_wgw_cactus_map.graph_fasta[0],
+    pafs = ugc_wgw_cactus_map.paf,
+    step_logs = flatten([[ugc_wgw_cactus_refgraph.log], ugc_wgw_cactus_map.log]),
     cpu = split_cpu,
-    map_cores = split_map_cores,
     mem_gb = split_mem_gb,
     disk_gb = split_disk_gb,
     runtime_attributes = default_runtime_attributes
@@ -295,6 +326,14 @@ workflow ugc_wgw_cohort_pangenome {
       cpu = chrom_cpu,
       map_cores = chrom_map_cores,
       mem_gb = chrom_mem,
+      runtime_attributes = default_runtime_attributes
+    }
+    call Growth.ugc_wgw_pangenome_growth { input:
+      cohort_id = cohort_id,
+      ref_name = ref_name,
+      chromosome = chrom,
+      gfa = ugc_wgw_cactus_chrom.gfa,
+      name_map = ugc_wgw_pangenome_names.name_map,
       runtime_attributes = default_runtime_attributes
     }
   }
@@ -423,6 +462,7 @@ workflow ugc_wgw_cohort_pangenome {
     Array[File] chrom_refgaps = ugc_wgw_cactus_chrom.refgaps
     Array[File] chrom_genome_bp = ugc_wgw_cactus_chrom.genome_bp
     Array[File] chrom_degree_stats = ugc_wgw_cactus_chrom.degree_stats
+    Array[File] chrom_growth = ugc_wgw_pangenome_growth.growth
     Array[File] chrom_logs = ugc_wgw_cactus_chrom.logs
     Array[File] member_stats_shards = member_stats_shard.stats
     File member_stats = ugc_wgw_pangenome_member_stats_gather.members

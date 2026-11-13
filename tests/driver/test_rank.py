@@ -1,4 +1,5 @@
 import itertools
+import re
 import tempfile
 import unittest
 from array import array
@@ -158,6 +159,11 @@ class LinesChartTest(unittest.TestCase):
         self.assertEqual(svg.count("<polyline"), 2)
         self.assertIn("100%", svg)
         self.assertEqual(sv.lines([], percent=True), "<p class='muted'>No data.</p>")
+        # tick labels as long as "1,500,000" widen the left margin; a formatter shortens them
+        big = sv.lines([("a", "ln2", [(1, 700000.0), (2, 1400000.0)])])
+        self.assertIn("1,500,000", big)
+        self.assertGreaterEqual(float(re.search(r'<line x1="(\d+)"', big).group(1)), 60)
+        self.assertIn("1.5 Mb", sv.lines([("a", "ln2", [(1, 700000.0), (2, 1400000.0)])], y_format=sv.fmt_bp))
         long = sv.lines([("a", "ln2", [(i, i / 2000) for i in range(1, 2001)])], percent=True)
         self.assertLess(long.count(","), 800)                             # thinned to a few hundred points
 
@@ -281,6 +287,56 @@ class RankEndToEnd(unittest.TestCase):
         code, _, err = run_cli(["--project", self.proj, "cohort", "rank", "C1", "--emit", "2", "--out-dir", str(self.tmp / "empty")])
         self.assertNotEqual(code, 0)
         self.assertIn("no saved ranking", err)
+
+
+class RelatedHubTest(unittest.TestCase):
+    """A contaminated sample looks related to everybody (the 864 cohort's first ranking, 2026-11-13: one member taken
+    first and 858 held back as its relatives). It is left out, and its pairs hold nobody back."""
+
+    def test_hubs_are_found_most_connected_first_and_real_pairs_are_left_alone(self):
+        from ugc_wgw import summary_parsers as sp
+        ids = [f"M{i:02d}" for i in range(1, 16)]
+        pairs = [{"sample_a": "M01", "sample_b": m, "relatedness": 0.2, "expected": None} for m in ids[1:13]]   # 12 partners
+        pairs += [{"sample_a": "M02", "sample_b": m, "relatedness": 0.15, "expected": None} for m in ids[2:12]]  # 10 more
+        pairs += [{"sample_a": "M13", "sample_b": "M14", "relatedness": 0.5, "expected": None},                 # a real pair
+                  {"sample_a": "M14", "sample_b": "M15", "relatedness": 0.05, "expected": None}]                 # below the floor
+        self.assertEqual(sp.related_hubs(pairs, lo=0.1, hi=float("inf"), hub_min=10), {"M01": 12, "M02": 10})
+        # at the cohort page's floor only the first one is a hub; without M01 nobody is
+        self.assertEqual(sp.related_hubs(pairs, lo=0.2, hi=0.9, hub_min=10), {"M01": 12})
+        self.assertEqual(sp.related_hubs(pairs, lo=0.1, hi=float("inf"), hub_min=10, among=set(ids[2:])), {})
+        # a family the sheet declares is not a hub
+        declared = [dict(p, expected=0.5) for p in pairs]
+        self.assertEqual(sp.related_hubs(declared, lo=0.1, hi=float("inf"), hub_min=10), {})
+
+    def test_a_hub_is_excluded_from_the_ranking_and_holds_nobody_back(self):
+        tmp = Path(tempfile.mkdtemp())
+        cfg = make_project(tmp)
+        proj = str(cfg.project_dir)
+        tsv = write_tsv(tmp, [{"sample_id": f"S{i}", "sex": "MALE", "hifi_reads": f"s{i}.bam"} for i in range(1, 5)])
+        self.assertEqual(run_cli(["--project", proj, "samples", "add", str(tsv)])[0], 0)
+        self.assertEqual(run_cli(["--project", proj, "cohort", "freeze", "C1", "--samples", str(write_ids(tmp, ["S1", "S2", "S3", "S4"]))])[0], 0)
+        code, _, err = run_cli(["--project", proj, "submit", "--mode", "standalone", "--cohort", "C1"],
+                               env={"UGC_WGW_FAKE_RELATEDNESS": "S1:S2=0.21,S1:S3=0.2,S1:S4=0.22"})
+        self.assertEqual(code, 0, err)
+        out = cfg.results_dir / "reports" / "rank"
+        # with the default count (10) a cohort of four has no hub: S1 is taken and the other three wait as its relatives
+        code, _, err = run_cli(["--project", proj, "cohort", "rank", "C1"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("1 unrelated, 3 held back as relatives; 0 excluded", err)
+        # counted as a hub, S1 is out and nobody is held back
+        code, _, err = run_cli(["--project", proj, "cohort", "rank", "C1", "--threshold", "related_hub_min=3"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("S1 left out, related at 0.1 or more to 3 members", err)
+        self.assertIn("ranked 3 of 4 members (0 placed first, 3 unrelated, 0 held back as relatives; 1 excluded)", err)
+        rows = rank.read_rank(out / "C1.rank.tsv")
+        self.assertEqual([(r["sample_id"], r["tier"]) for r in rows], [("S2", "unrelated"), ("S3", "unrelated"), ("S4", "unrelated"), ("S1", "excluded")])
+        self.assertIn("related_hub", rows[-1]["reason"])
+        page = (out / "C1.rank.html").read_text()
+        self.assertIn("related_hub", page)
+        self.assertIn("Not ranked", page)
+        code, out_text, err = run_cli(["--project", proj, "cohort", "rank", "C1", "--emit", "3"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(Path(out_text.strip()).read_text(), "S2\nS3\nS4\n")
 
 
 if __name__ == "__main__":

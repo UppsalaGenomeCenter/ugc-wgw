@@ -95,7 +95,7 @@ instead.
 | `--first FILE` | none | Members placed at the top, in the file's order. |
 | `--min-depth X`, `--min-read-n50 BP` | none | Members below are not ranked. |
 | `--common-min F` | `0.01` | Carrier frequency from which an SV counts as common and decides the order. |
-| `--related-min R` | `0.1` | Relatedness from which a member waits behind an earlier pick. |
+| `--related-min R` | `0.1` | Relatedness from which a member waits behind an earlier pick. A member related that way to `related_hub_min` (10) members or more is left out as contaminated and holds nobody back. |
 | `--jobs N`, `--threshold KEY=VALUE` | `1`, none | As for `summary`: missing digests are built, QC thresholds overridden. |
 | `--emit K` | none | Do not rank: write the first K members of the saved ranking; `0` writes all of it. |
 | `--pass-list FILE` | none | With `--emit`: only members named in the file. |

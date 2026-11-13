@@ -21,5 +21,6 @@ chrom_path_stats/*/*.pangenome.*.chr*.path-stats.tsv.gz
 chrom_refgaps/*/*.pangenome.*.chr*.refgaps.bed.gz
 chrom_genome_bp/*/*.pangenome.*.chr*.genome-bp.tsv
 chrom_degree_stats/*/*.pangenome.*.chr*.degree.tsv
+chrom_growth/*/*.pangenome.*.chr*.growth.tsv
 member_stats_shards/*/*.pangenome.*.wave.chr*.stats.txt
 member_stats/*.pangenome.*.members.tsv

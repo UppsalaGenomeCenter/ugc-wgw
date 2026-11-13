@@ -29,7 +29,6 @@ Reading the tables:
 | `deepvariant_call_variants_cpu` | 64 | 28G | singleton, upstream | cpu from workflow input default; memory from input default |
 | `ugc_wgw_hifiasm_assemble` | 48 | 288G | assembly | cpu from workflow input default; cpu input: hifiasm_threads; memory from workflow input default; memory input: hifiasm_mem_gb; command uses threads |
 | `run_parabricks_deepvariant` | 48 | 192G | singleton, upstream | cpu from input default; memory from input default; command uses threads; gpu |
-| `ugc_wgw_cactus_split` | 32 | 128G | cohort_pangenome | cpu from workflow input default; cpu input: split_cpu; memory from workflow input default; memory input: split_mem_gb; command uses threads; command uses mem |
 | `pbmm2_align_wgs` | 32 | 64G | singleton, upstream | cpu from input default; memory from input default; command uses threads |
 | `ugc_wgw_flagger_align` | 32 | 64G | assembly | cpu from workflow input default; cpu input: flagger_align_threads; memory from workflow input default; memory input: flagger_align_mem_gb; command uses threads |
 | `ugc_wgw_pbdv_call_cpu` | 32 | 64G | singleton, upstream | cpu from input default; memory from input default; command uses threads |
@@ -39,6 +38,7 @@ Reading the tables:
 | `ugc_wgw_yak_count` | 24 | - | assembly | cpu from workflow input default; cpu input: yak_threads; memory: "~{mem_gb} GiB" where mem_gb = yak_mem_gb_used = select_first([yak_mem_gb, if low_depth then 70 else 50]); command uses threads |
 | `sawfish_discover` | 16 | 128G | singleton, upstream | cpu from input default; memory from input default; command uses threads |
 | `hiphase` | 16 | 96G | singleton, downstream | cpu from input default; memory from input default; command uses threads |
+| `ugc_wgw_cactus_split` | 16 | 64G | cohort_pangenome | cpu from workflow input default; cpu input: split_cpu; memory from workflow input default; memory input: split_mem_gb; command uses threads; command uses mem |
 | `ugc_wgw_pbdv_call_gpu` | 16 | 64G | singleton, upstream | cpu from input default; memory from input default; command uses threads; gpu |
 | `ugc_wgw_dipcall` | 16 | 48G | assembly_call | cpu from workflow input default; cpu input: dipcall_threads; memory from workflow input default; memory input: dipcall_mem_gb |
 | `index_input_bam` | 16 | 32G | singleton, upstream | cpu from input default; memory from input default; command uses threads |
@@ -290,7 +290,7 @@ Reading the tables:
 
 ## ugc_wgw_cohort_pangenome
 
-12 tasks, in first-call order.
+15 tasks, in first-call order.
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
@@ -298,8 +298,11 @@ Reading the tables:
 | `ugc_wgw_bcftools_concat` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/cohort/concat.wdl:9` |
 | `ugc_wgw_bcftools_freq` | 2 | 4G | cpu from workflow input default; cpu input: freq_threads; memory from workflow input default; memory input: freq_mem_gb; command uses threads | `workflows/ugc_wgw/cohort/freq.wdl:9` |
 | `ugc_wgw_pangenome_names` | 1 | 2G | - | `workflows/ugc_wgw/pangenome/names.wdl:7` |
-| `ugc_wgw_cactus_split` | 32 | 128G | cpu from workflow input default; cpu input: split_cpu; memory from workflow input default; memory input: split_mem_gb; command uses threads; command uses mem | `workflows/ugc_wgw/pangenome/cactus_split.wdl:7` |
+| `ugc_wgw_cactus_refgraph` | 8 | 16G | cpu from input default; memory from input default; command uses threads; command uses mem | `workflows/ugc_wgw/pangenome/cactus_map.wdl:7` |
+| `ugc_wgw_cactus_map` | 8 | - | cpu from workflow input default; cpu input: split_map_cores; memory: "~{mem} GiB" where hap_fastas = [hap1_fastas[i], hap2_fastas[i]]; mem = select_first([mem_gb, ceil(size(hap_fastas, "GB") * 15 + 60)]); mem_gb = map_mem_gb; command uses threads; command uses mem | `workflows/ugc_wgw/pangenome/cactus_map.wdl:81` |
+| `ugc_wgw_cactus_split` | 16 | 64G | cpu from workflow input default; cpu input: split_cpu; memory from workflow input default; memory input: split_mem_gb; command uses threads; command uses mem | `workflows/ugc_wgw/pangenome/cactus_split.wdl:7` |
 | `ugc_wgw_cactus_chrom` | 16 | - | cpu from workflow input default; cpu input: chrom_cpu; memory: "~{mem_gb} GiB" where mem_gb = chrom_mem = if chrom == "chrOther" then chrom_mem_gb_floor else ugc_wgw_pangenome_names.chrom_mem_gb[chrom]; command uses threads; command uses mem | `workflows/ugc_wgw/pangenome/cactus_chrom.wdl:7` |
+| `ugc_wgw_pangenome_growth` | 4 | - | cpu from input default; memory: "~{mem} GiB" where gfa = ugc_wgw_cactus_chrom.gfa; mem = select_first([mem_gb, ceil(size(gfa, "GB") * 10 + 8)]); command uses threads | `workflows/ugc_wgw/pangenome/growth.wdl:7` |
 | `ugc_wgw_pangenome_vcf_post` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/pangenome/vcf_post.wdl:7` |
 | `ugc_wgw_pangenome_member_stats` | 1 | 4G | - | `workflows/ugc_wgw/pangenome/member_stats.wdl:7` |
 | `ugc_wgw_pangenome_member_stats_gather` | 1 | 2G | - | `workflows/ugc_wgw/pangenome/member_stats.wdl:70` |

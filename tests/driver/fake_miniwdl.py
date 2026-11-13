@@ -284,6 +284,7 @@ def make_outputs(stage: str, inputs: dict[str, object], run_dir: pathlib.Path,
         files["chrom_refgaps"] = [f"{pre}.{c}.refgaps.bed.gz" for c in chroms]
         files["chrom_genome_bp"] = [f"{pre}.{c}.genome-bp.tsv" for c in chroms]
         files["chrom_degree_stats"] = [f"{pre}.{c}.degree.tsv" for c in chroms]
+        files["chrom_growth"] = [f"{pre}.{c}.growth.tsv" for c in chroms]
         files["member_stats_shards"] = [f"{pre}.wave.{c}.stats.txt" for c in chroms]
         files["member_stats"] = f"{pre}.members.tsv"
         files["name_map"] = f"{sid}.pangenome.name_map.tsv"

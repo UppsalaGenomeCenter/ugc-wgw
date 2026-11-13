@@ -357,7 +357,13 @@ step, the member that carries the most SV alleles no earlier member carries,
 counting first the alleles of 1% carrier frequency or more (`--common-min`),
 then all of them. A member related to an earlier pick (`cohort_qc`
 relatedness of 0.1 or more, `--related-min`) is held back and ranked after
-everyone else, so the first members are unrelated. Members with a read-based
+everyone else, so the first members are unrelated. A member related that
+way to ten members or more with no pedigree link in the sheet is not a
+relative of them all: a contaminated or mixed sample shares heterozygous
+sites with everybody, and somalier's relatedness rises with it. Such a
+member is not ranked (`related_hub` in the table, the rule of the cohort
+page's Identity section; `--threshold related_hub_min=N` moves the count)
+and holds nobody back. Members with a read-based
 QC `fail`, without a run, or below `--min-depth` or `--min-read-n50` are not
 ranked; the table says why. The assembly's `asm_*` flags do not count here:
 the ranking is made before the assemblies exist and must not change when

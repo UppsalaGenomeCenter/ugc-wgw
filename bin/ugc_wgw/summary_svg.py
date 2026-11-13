@@ -430,6 +430,56 @@ def strip(groups: list[dict[str, object]], *, width: int = 560, label_w: int = 1
     return _svg(label_w + width, len(groups) * row_h + 4, "".join(parts))
 
 
+def lines(series: list[tuple[str, str, list[tuple[float, float]]]], *, width: int = 620, height: int = 240, x_label: str = "",
+          y_label: str = "", percent: bool = False) -> str:
+    """Line chart of one or more series over a shared numeric x: (label, line class, [(x, y)]). With `percent`
+    the y values are shares of 1 and the axis runs from 0 to 100 %. The legend is drawn above the plot."""
+    pts = [(finite(x), finite(y)) for _, _, s in series for x, y in s]
+    if not pts:
+        return "<p class='muted'>No data.</p>"
+    left, bottom, top, right = 46, 34, (40 if y_label else 22), 12   # the y label, then the legend, then the plot
+    plot_w, plot_h = width - left - right, height - top - bottom
+    lo_x, hi_x = min(x for x, _ in pts), max(x for x, _ in pts)
+    if hi_x <= lo_x:
+        hi_x = lo_x + 1.0
+    hi_y = 1.0 if percent else max(y for _, y in pts) or 1.0
+    y_ticks = [0.0, 0.25, 0.5, 0.75, 1.0] if percent else nice_ticks(0, hi_y, 4)
+    hi_y = max(hi_y, y_ticks[-1])
+
+    def sx(v: float) -> float:
+        return left + (v - lo_x) / (hi_x - lo_x) * plot_w
+
+    def sy(v: float) -> float:
+        return top + plot_h - v / hi_y * plot_h
+
+    parts = []
+    for t in y_ticks:
+        parts.append(f'<line x1="{left}" y1="{sy(t):.1f}" x2="{left + plot_w}" y2="{sy(t):.1f}"/>'
+                     f'<text x="{left - 4}" y="{sy(t) + 3:.1f}" text-anchor="end">{esc(f"{t * 100:.0f}%" if percent else fmt(t))}</text>')
+    whole = all(float(x).is_integer() for x, _ in pts)   # counts on the x axis: no tick between two of them
+    seen: set[str] = set()
+    for t in nice_ticks(lo_x, hi_x, 6):
+        if lo_x <= t <= hi_x and not (whole and not float(t).is_integer()) and fmt(t) not in seen:
+            seen.add(fmt(t))
+            parts.append(f'<text x="{sx(t):.1f}" y="{top + plot_h + 12}" text-anchor="middle">{esc(fmt(t))}</text>')
+    x = float(left)
+    for label, cls, s in series:
+        if not s:
+            continue
+        step = max(1, len(s) // 600)   # at most about 600 points per line; the last one always
+        keep = s[::step] + ([s[-1]] if (len(s) - 1) % step else [])
+        parts.append(f'<polyline class="{cls}" points="{" ".join(f"{sx(finite(a)):.1f},{sy(finite(b)):.1f}" for a, b in keep)}">'
+                     f'<title>{esc(label)}</title></polyline>')
+        parts.append(f'<line class="{cls}" x1="{x:.0f}" y1="{top - 10}" x2="{x + 18:.0f}" y2="{top - 10}"/>'
+                     f'<text x="{x + 22:.0f}" y="{top - 7}">{esc(label)}</text>')
+        x += 22 + 6.2 * len(label) + 16
+    if x_label:
+        parts.append(f'<text x="{left + plot_w / 2:.1f}" y="{height - 6}" text-anchor="middle">{esc(x_label)}</text>')
+    if y_label:
+        parts.append(f'<text x="{left}" y="10" font-size="9">{esc(y_label)}</text>')
+    return _svg(width, height, "".join(parts))
+
+
 def legend(items: list[tuple[str, str]]) -> str:
     """A small inline legend: (label, class)."""
     if not items:

@@ -25,7 +25,8 @@ flowchart TD
   hp --> cpg["MethBat pileup: CpG and hmCpG beds"] --> mb["MethBat profile"]
   hp --> sp["StarPhase, if run_starphase in the map"]
   hp --> cs["consolidate stats: stats_file, msg_file"]
-  classDef data fill:#e9edf1,stroke:#8a8f95,color:#22272e
+  classDef default fill:none,stroke:#8a8f95
+  classDef data fill:#5d6875,stroke:#5d6875,color:#ffffff
 ```
 
 | Driver fills | You may override |

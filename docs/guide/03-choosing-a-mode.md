@@ -13,7 +13,8 @@ flowchart TD
   q2 -->|"no, still growing"| both["mode standalone now, joint later on the final cohort"]
   sa --> q3{"Trio to phase by pedigree?"}:::decision
   q3 -->|"yes"| fam["run upstream family.wdl by hand, then cohort_merge"]
-  classDef decision fill:#e3dcf5,stroke:#6b56b0,color:#241a4d
+  classDef default fill:none,stroke:#8a8f95
+  classDef decision fill:none,stroke:#8a8f95
 ```
 
 Text version: assembly is its own mode and can run beside either of the other

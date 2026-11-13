@@ -35,7 +35,8 @@ flowchart LR
   v2 --> pol
   cfgA --> r1
   cfgB --> r2
-  classDef box fill:none,stroke:#8a8f95
+  classDef default fill:none,stroke:#8a8f95
+  classDef box fill:#1f7a70,fill-opacity:0.10,stroke:#1f7a70,stroke-opacity:0.45
   class prefix,proj,proj2,res box
 ```
 

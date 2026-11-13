@@ -207,9 +207,10 @@ flowchart TD
   ns --> chk{"every key declared, every required input present?"}:::decision
   chk -->|"no"| err["error, nothing submitted"]
   chk -->|"yes"| file[/"attempt-N/inputs.json"/]:::result
-  classDef data fill:#e9edf1,stroke:#8a8f95,color:#22272e
-  classDef result fill:#d5ead4,stroke:#3f7d3c,color:#17361a
-  classDef decision fill:#e3dcf5,stroke:#6b56b0,color:#241a4d
+  classDef default fill:none,stroke:#8a8f95
+  classDef data fill:#5d6875,stroke:#5d6875,color:#ffffff
+  classDef result fill:#2f7d4a,stroke:#2f7d4a,color:#ffffff
+  classDef decision fill:none,stroke:#8a8f95
 ```
 
 `ugc-wgw inputs <subject> --stage <stage> [--mode M] [--cohort ID]` prints the
@@ -398,7 +399,8 @@ flowchart TD
   c -->|"yes"| d{"both parents registered with hifi_reads?"}:::decision
   d -->|"no"| w3["sample mode, warning: parent is not a registered sample with reads"]
   d -->|"yes"| t["trio mode: parents' reads and IDs passed, yak tables built, hap1 = father, hap2 = mother"]
-  classDef decision fill:#e3dcf5,stroke:#6b56b0,color:#241a4d
+  classDef default fill:none,stroke:#8a8f95
+  classDef decision fill:none,stroke:#8a8f95
 ```
 
 The parents need no assembly run of their own, only registration with reads.

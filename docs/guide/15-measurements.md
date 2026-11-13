@@ -185,6 +185,39 @@ row matches the task's name, not the chromosome, so it moves every
 chromosome's job to that partition, whole nodes each; a smaller cohort
 graph stays on standard nodes with the formula.
 
+## The reads on their own assembly: minimap2 and pbweave
+
+The `assembly` stage aligns a sample's reads back to its own two
+haplotypes with minimap2 (an hour and a half per 20x genome on 32
+cores). pbweave was tried in its place before 0.21.0, on one smoke
+member's chr20 reads against its 137 Mb diploid assembly:
+
+| | minimap2 2.31 | pbweave (pblab 20261021) |
+|---|---|---|
+| Alignment | 5 min 48 s | 10 s (index 1 s) |
+| BAM, primary and supplementary | 1.32 GB | 1.42 GB |
+| Reads within 1 kb of the other's position | 95.1% | |
+| Reads with mapping quality 0, on hap1 / hap2 | 8,922 / 8,704 | 17,361 / 204 |
+| HMM-Flagger: Hap / Err / Dup / Col | 98.63 / 0.01 / 1.21 / 0.15% | 96.54 / 0.94 / 2.46 / 0.06% |
+
+Where the two haplotypes are identical a read fits both equally.
+minimap2 picks one at random, so each keeps half the coverage; pbweave
+picks the first sequence of the reference, always. Flagger then sees one
+haplotype without reads and the other with too many, and a methylation
+pileup would give one haplotype every read of such a stretch. That is
+why this step has no aligner setting. (pbweave also writes none of the
+`MD`, `cs` and `de` tags secphase needs.) Against GRCh38, where there is
+one copy of everything, the same aligner agrees with pbmm2 (the section
+on the pblab tools above).
+
+The same test fixed three other things of the stage. The reads' `MM` and
+`ML` tags reach the alignment through `samtools fastq -T` and
+`minimap2 -y` with every placement unchanged. minimap2's secondary
+alignments, one per read on the other haplotype, doubled the file and
+made a pileup count each read twice; they are not written. And the
+pileup's mapping-quality floor is 0: with 1, 4.4% of the CpGs of the
+assembly had no row.
+
 ## Evaluation profiles
 
 An evaluation profile runs the production entrypoints with one tool

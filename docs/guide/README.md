@@ -54,22 +54,28 @@ terminal's text version, in print and on a dark page alike:
 ```mermaid
 flowchart LR
   d[/"data or reference"/]:::data --> s(["per-sample stage"]):::sample --> c{{"cohort stage"}}:::cohort --> o{{"optional cohort stage"}}:::optional --> r[/"result"/]:::result
-  q{"decision"}:::decision --> t["step or task"]
-  classDef sample fill:#cfe4f5,stroke:#2f6f8f,color:#12303f
-  classDef cohort fill:#f6dfb8,stroke:#b9770e,color:#3d2a05
-  classDef optional fill:#f6dfb8,stroke:#b9770e,color:#3d2a05,stroke-dasharray:5 3
-  classDef data fill:#e9edf1,stroke:#8a8f95,color:#22272e
-  classDef result fill:#d5ead4,stroke:#3f7d3c,color:#17361a
-  classDef decision fill:#e3dcf5,stroke:#6b56b0,color:#241a4d
+  subgraph g["a group of steps"]
+    q{"decision"}:::decision --> t["step or task"]
+  end
+  classDef default fill:none,stroke:#8a8f95
+  classDef sample fill:#2c6aa0,stroke:#2c6aa0,color:#ffffff
+  classDef cohort fill:#1f7a70,stroke:#1f7a70,color:#ffffff
+  classDef optional fill:none,stroke:#1f9a8c,stroke-width:2px,stroke-dasharray:5 3
+  classDef data fill:#5d6875,stroke:#5d6875,color:#ffffff
+  classDef result fill:#2f7d4a,stroke:#2f7d4a,color:#ffffff
+  classDef decision fill:none,stroke:#8a8f95
+  classDef box fill:#1f7a70,fill-opacity:0.10,stroke:#1f7a70,stroke-opacity:0.45
+  class g box
 ```
 
-Text version: slanted box = data or a reference file (grey; green when it
-is a result nothing else reads); rounded box = a per-sample stage (blue);
-hexagon = a cohort stage (amber; dashed border = optional, the stages
-after it never wait for it); diamond = a decision (violet); plain box = a
-step or task. A frame around several nodes groups them (a scatter, a
-mode, a machine): a grey border and no fill. In the generated call graphs
-a task of this pipeline is teal and one of upstream's grey.
+Text version: slanted box = data or a reference file (slate; green when
+it is a result nothing else reads); rounded box = a per-sample stage
+(blue); hexagon = a cohort stage (teal; a dashed outline = optional, the
+stages after it never wait for it); diamond = a decision and plain box =
+a step or task (outlines). A frame around several nodes groups them (a
+scatter, a mode, a machine): a faint teal wash, deeper where one frame
+sits inside another. In the generated call graphs a task of this pipeline
+is blue and one of upstream's slate.
 
 ## Conventions
 

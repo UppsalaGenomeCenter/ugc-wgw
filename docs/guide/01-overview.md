@@ -50,10 +50,11 @@ flowchart LR
     direction LR
     c1(["assembly"]):::sample --> c2(["assembly_call"]):::sample --> c3{{"cohort_pangenome"}}:::cohort
   end
-  classDef sample fill:#cfe4f5,stroke:#2f6f8f,color:#12303f
-  classDef cohort fill:#f6dfb8,stroke:#b9770e,color:#3d2a05
-  classDef optional fill:#f6dfb8,stroke:#b9770e,color:#3d2a05,stroke-dasharray:5 3
-  classDef box fill:none,stroke:#8a8f95
+  classDef default fill:none,stroke:#8a8f95
+  classDef sample fill:#2c6aa0,stroke:#2c6aa0,color:#ffffff
+  classDef cohort fill:#1f7a70,stroke:#1f7a70,color:#ffffff
+  classDef optional fill:none,stroke:#1f9a8c,stroke-width:2px,stroke-dasharray:5 3
+  classDef box fill:#1f7a70,fill-opacity:0.10,stroke:#1f7a70,stroke-opacity:0.45
   class standalone,joint,assembly box
 ```
 

@@ -146,7 +146,10 @@ joined when the page is made, so they appear on pages written by `summary
 
 Every file the assembly stages write: the haplotypes' contiguity (length,
 contigs, NG50, LG50 and auNG against a 3.1 Gb genome, hifiasm's
-low-quality regions, the NGx curve); Flagger's composition of the diploid
+low-quality regions, the NGx curve), then one line each for the primary
+contigs (HiFi-only samples: their length, number and NG50) and for the
+reads on the assembly (whether the alignment is kept, and the CpG sites
+of the 5mC pileup in assembly coordinates); Flagger's composition of the diploid
 assembly (Err, Dup, Hap, Col, Unk as a stacked bar, with the bases and the
 flagged blocks), also per haplotype, with GC, N bases, telomeric contig
 ends and the contigs with the most non-Hap bases; for trio-binned samples

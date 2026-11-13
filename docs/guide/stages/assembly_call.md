@@ -36,9 +36,10 @@ flowchart TD
   fd --> out[/"dipcall_vcf, pav_vcf, chrom_coverage, inferred_karyotype, reliable_bed, concordance, call_spectra"/]:::result
   fp --> out
   sp --> out
-  classDef data fill:#e9edf1,stroke:#8a8f95,color:#22272e
-  classDef result fill:#d5ead4,stroke:#3f7d3c,color:#17361a
-  classDef box fill:none,stroke:#8a8f95
+  classDef default fill:none,stroke:#8a8f95
+  classDef data fill:#5d6875,stroke:#5d6875,color:#ffffff
+  classDef result fill:#2f7d4a,stroke:#2f7d4a,color:#ffffff
+  classDef box fill:#1f7a70,fill-opacity:0.10,stroke:#1f7a70,stroke-opacity:0.45
   class hap box
 ```
 

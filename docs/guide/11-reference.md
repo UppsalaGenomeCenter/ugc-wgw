@@ -80,6 +80,28 @@ flags besides `--samples`. Warns (and freezes anyway) when a `cohort_qc`
 run of the project reported two of the IDs as the same individual
 (relatedness at or above `duplicate_relatedness_min`).
 
+### `ugc-wgw cohort rank <cohort_id>`
+
+Orders the cohort's members by the structural variants each adds to the
+ones before it and writes the ranking, the saturation curves and a page
+(chapter 06). With `--emit` it writes a member list from a saved ranking
+instead.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--mode standalone\|joint` | `standalone` | Whose `cohort_merge` (the SV VCF) and `cohort_qc` (related pairs, ancestry) runs to read. |
+| `--any-version` | off | Runs of every version. |
+| `--out-dir DIR` | `<results>/reports/rank` | Where the files go. |
+| `--first FILE` | none | Members placed at the top, in the file's order. |
+| `--min-depth X`, `--min-read-n50 BP` | none | Members below are not ranked. |
+| `--common-min F` | `0.01` | Carrier frequency from which an SV counts as common and decides the order. |
+| `--related-min R` | `0.1` | Relatedness from which a member waits behind an earlier pick. |
+| `--jobs N`, `--threshold KEY=VALUE` | `1`, none | As for `summary`: missing digests are built, QC thresholds overridden. |
+| `--emit K` | none | Do not rank: write the first K members of the saved ranking; `0` writes all of it. |
+| `--pass-list FILE` | none | With `--emit`: only members named in the file. |
+| `--from FILE`, `--out FILE` | `<out-dir>/<cohort_id>.rank.tsv`, `<out-dir>/<cohort_id>.top<K>.txt` | With `--emit`: the ranking read and the list written. |
+| `--include-related` | off | With `--emit K`: do not skip the held-back relatives. |
+
 ### `ugc-wgw submit` and `ugc-wgw retry`
 
 | Flag | Default | Meaning |

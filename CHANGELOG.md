@@ -5,6 +5,53 @@ offline bundle. An entry opens with the upstream tag it is built on and a
 short summary, with anything an existing project has to do; the rest is
 under Details.
 
+## 0.21.0
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin (0.6.0), the
+images and the reference entries unchanged.
+
+The `assembly` stage keeps more of what it computes, and a new command
+chooses the members of a pangenome graph. The stage's two expensive tasks
+change, so **a sample assembled with an earlier version is assembled
+again at 0.21.0**; this is the one such change, made before the stage is
+run on whole cohorts. The read-based stages are untouched.
+
+<details>
+<summary>Details</summary>
+
+- **`assembly` keeps the primary contigs.** hifiasm writes them beside
+  the two haplotypes in the same run; they are now outputs
+  (`primary_fasta`, `primary_stats`): one more contiguous assembly per
+  person that switches between the haplotypes. HiFi-only samples; hifiasm
+  writes none when it trio-bins.
+- **The reads on the sample's own assembly, kept, with methylation.** The
+  stage aligns the reads back to the two haplotypes for HMM-Flagger. They
+  are now taken from the read BAMs as FASTQ with their `MM`/`ML` tags, so
+  the alignment has base qualities and 5mC; it is an output by default
+  (`read_alignment_bam`, about the size of the read BAMs;
+  `keep_read_alignment = false` turns that off), without minimap2's
+  secondary alignments. The placements, and Flagger's result, are the
+  same as before. `methbat pileup` writes `asm_cpg_pileup_bed` from it:
+  5mC per CpG in assembly coordinates, including sequence the reference
+  lacks.
+- **`ugc-wgw cohort rank <cohort_id>`.** Orders a cohort's members for a
+  pangenome graph by the structural variants each adds to the ones before
+  it, from the read-based SV merge the cohort already has: common alleles
+  first, relatives of an earlier pick held back, chosen members (trio
+  children, a control) placed first on request. It writes the ranking,
+  saturation curves (the ranking against members drawn at random, per
+  frequency class), how much of a member outside the first 20 to 400 is
+  already covered, and a page. `--emit K --pass-list FILE` writes the
+  first K that passed assembly QC, so graph cohorts of different sizes
+  are nested.
+- **Measured and not adopted:** pbweave for the alignment to the own
+  assembly. It is 35 times faster there, but where the two haplotypes are
+  identical it sends every read to the first one, which distorts both
+  Flagger and a methylation pileup (guide chapter 15).
+
+</details>
+
 ## 0.20.1
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

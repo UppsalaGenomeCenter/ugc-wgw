@@ -4,6 +4,7 @@ version 1.0
 # origin: none
 # see docs/DESIGN.md §5, §13; docs/ENTRYPOINTS.md §8
 
+import "../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/methbat.wdl" as Methbat
 import "../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/samtools.wdl" as Samtools
 import "../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/backend_configuration/backend_configuration.wdl" as BackendConfiguration
 import "ugc_wgw/assembly/flagger.wdl" as Flagger
@@ -16,7 +17,7 @@ import "ugc_wgw/provenance.wdl" as Provenance
 
 workflow ugc_wgw_assembly {
   meta {
-    description: "ugc-pacbio-wgw stage assembly: samtools fasta, hifiasm (trio-binned with parental yak tables when father_hifi_reads and mother_hifi_reads are given; --telo-m CCCTAA by default), gfatools gfa2fa and calN50 per haplotype. The assembler sits behind an output contract (assembler_used, hap_fastas, haplotype_labels, assembler_version); only hifiasm is implemented and any other value fails at the start. QC on the contract: HMM-Flagger (the reads aligned back to hap1+hap2, correct_bam, bam2cov, hmm_flagger) flags Err/Dup/Hap/Col regions; trio-binned samples get yak trioeval per haplotype. Calling against the reference is the assembly_call stage."
+    description: "ugc-pacbio-wgw stage assembly: samtools fasta, hifiasm (trio-binned with parental yak tables when father_hifi_reads and mother_hifi_reads are given; --telo-m CCCTAA by default), gfatools gfa2fa and calN50 per haplotype, and for the primary contigs a HiFi-only run also writes. The assembler sits behind an output contract (assembler_used, hap_fastas, haplotype_labels, assembler_version); only hifiasm is implemented and any other value fails at the start. The reads are aligned back to hap1+hap2 with their base qualities and 5mC tags; that alignment is kept, methbat pileup turns it into 5mC per CpG in assembly coordinates, and HMM-Flagger (correct_bam, bam2cov, hmm_flagger) reads it to flag Err/Dup/Hap/Col regions; trio-binned samples get yak trioeval per haplotype. Calling against the reference is the assembly_call stage."
     outputs: {
       assembler_used: {
         description: "The assembler that ran (hifiasm)"
@@ -33,8 +34,14 @@ workflow ugc_wgw_assembly {
       assembly_stats: {
         description: "calN50 statistics per haplotype"
       },
+      primary_fasta: {
+        description: "hifiasm's primary contigs, bgzipped FASTA: one longer assembly that switches between the haplotypes. HiFi-only samples; a trio-binned run has none"
+      },
+      primary_stats: {
+        description: "calN50 statistics of the primary contigs"
+      },
       assembly_noseq_gfas: {
-        description: "Sequence-less GFAs (haplotype contigs and unitig graphs)"
+        description: "Sequence-less GFAs (haplotype contigs, primary contigs and unitig graphs)"
       },
       assembly_lowQ_beds: {
         description: "Low-quality regions of the contigs and unitig graphs"
@@ -52,10 +59,22 @@ workflow ugc_wgw_assembly {
         description: "yak trioeval per haplotype (switch and Hamming error), trio-binned samples only"
       },
       read_alignment_bam: {
-        description: "The reads aligned to the diploid assembly, only with keep_read_alignment"
+        description: "The reads aligned to the sample's own diploid assembly (hap1 then hap2 concatenated), with base qualities and MM/ML; unless keep_read_alignment is false"
       },
       read_alignment_bam_index: {
-        description: "Its index, only with keep_read_alignment"
+        description: "Its index"
+      },
+      asm_cpg_pileup_bed: {
+        description: "<sample_id>.asm.reads.5mC.bed.gz: methbat pileup of that alignment, one row per CpG of the assembly with coverage, in assembly coordinates (each haplotype's contigs carry that haplotype's reads; where the haplotypes are identical the reads are shared at random). Absent when the reads carry no 5mC calls"
+      },
+      asm_cpg_pileup_bed_index: {
+        description: "Its tabix index"
+      },
+      asm_cpg_pileup_summary: {
+        description: "methbat pileup's summary JSON"
+      },
+      asm_cpg_sites: {
+        description: "CpG sites in the pileup"
       },
       trio: {
         description: "Whether the assembly was trio-binned"
@@ -128,7 +147,10 @@ workflow ugc_wgw_assembly {
       description: "A parent counts as low depth when its uncompressed FASTA is smaller than this many GB (60 GB is about 10x)"
     }
     keep_read_alignment: {
-      description: "Export the reads-to-assembly BAM Flagger worked on (tens of GB per sample; off by default)"
+      description: "Keep the reads-to-assembly BAM as an output (about the size of the read BAMs; default true: it carries the reads' qualities and 5mC calls against the sample's own assembly and takes more than an hour and a half to make again)"
+    }
+    asm_pileup_min_mapq: {
+      description: "Mapping-quality floor of the pileup on the assembly. Default 0: a read in a stretch where the two haplotypes are identical has mapping quality 0 and lands on either at random, and a floor of 1 leaves those stretches without methylation (4% of the CpGs on chr20)"
     }
     flagger_align_threads: {
       description: "minimap2 threads for the reads-to-assembly alignment"
@@ -198,7 +220,8 @@ workflow ugc_wgw_assembly {
     String? yak_params
     String? hifiasm_trio_params
     Int trio_low_depth_gb = 90
-    Boolean keep_read_alignment = false
+    Boolean keep_read_alignment = true
+    Int asm_pileup_min_mapq = 0
     Int flagger_align_threads = 32
     Int flagger_align_mem_gb = 64
     Int flagger_threads = 16
@@ -321,10 +344,23 @@ workflow ugc_wgw_assembly {
   }
   Array[String] labels = if is_trio then ["pat", "mat"] else ["hap1", "hap2"]
 
-  # HMM-Flagger: the sample's reads back on its own diploid assembly
+  # the primary contigs of a HiFi-only run (hifiasm writes none when trio-binning)
+  Array[File] primary_gfas = select_first([ugc_wgw_hifiasm_assemble.assembly_primary_gfas])
+  scatter (gfa in primary_gfas) {
+    call Gfatools.ugc_wgw_gfatools_gfa2fa as primary_gfa2fa { input:
+      gfa = gfa,
+      runtime_attributes = default_runtime_attributes
+    }
+  }
+  if (length(primary_gfas) > 0) {
+    File primary_fa = primary_gfa2fa.zipped_fasta[0]
+    File primary_fa_stats = primary_gfa2fa.stats[0]
+  }
+
+  # the sample's reads back on its own diploid assembly: HMM-Flagger's input, the kept alignment, the pileup's input
   call Flagger.ugc_wgw_flagger_align { input:
     sample_id = sample_id,
-    reads_fastas = samtools_fasta_child.fasta,
+    reads_bams = hifi_reads,
     hap_fastas = ugc_wgw_gfatools_gfa2fa.zipped_fasta,
     threads = flagger_align_threads,
     mem_gb = flagger_align_mem_gb,
@@ -349,6 +385,14 @@ workflow ugc_wgw_assembly {
   if (keep_read_alignment) {
     File kept_bam = ugc_wgw_flagger_align.bam
     File kept_bam_index = ugc_wgw_flagger_align.bam_index
+  }
+  # 5mC in assembly coordinates; upstream's task under its own name, on a BAM without haplotype tags (one row type, Total)
+  call Methbat.methbat_pileup as asm_methbat_pileup { input:
+    haplotagged_bam = ugc_wgw_flagger_align.bam,
+    haplotagged_bam_index = ugc_wgw_flagger_align.bam_index,
+    min_mapq = asm_pileup_min_mapq,
+    out_prefix = "~{sample_id}.asm.reads",
+    runtime_attributes = default_runtime_attributes
   }
   call ContigQC.ugc_wgw_assembly_contig_qc { input:
     sample_id = sample_id,
@@ -395,6 +439,8 @@ workflow ugc_wgw_assembly {
     Array[String] haplotype_labels = labels
     Array[File] hap_fastas = ugc_wgw_gfatools_gfa2fa.zipped_fasta
     Array[File] assembly_stats = ugc_wgw_gfatools_gfa2fa.stats
+    File? primary_fasta = primary_fa
+    File? primary_stats = primary_fa_stats
     Array[File] assembly_noseq_gfas = select_first([ugc_wgw_hifiasm_assemble.assembly_noseq_gfas])
     Array[File] assembly_lowQ_beds = select_first([ugc_wgw_hifiasm_assemble.assembly_lowQ_beds])
     File flagger_bed = ugc_wgw_flagger_hmm.prediction_bed
@@ -403,6 +449,10 @@ workflow ugc_wgw_assembly {
     Array[File]? trio_eval = ugc_wgw_yak_trioeval.trioeval
     File? read_alignment_bam = kept_bam
     File? read_alignment_bam_index = kept_bam_index
+    File? asm_cpg_pileup_bed = asm_methbat_pileup.cpg_pileup_bed
+    File? asm_cpg_pileup_bed_index = asm_methbat_pileup.cpg_pileup_bed_index
+    File? asm_cpg_pileup_summary = asm_methbat_pileup.summary
+    String asm_cpg_sites = asm_methbat_pileup.stat_combined_cpg_count
     Boolean trio = is_trio
     String? hap1_parent = father
     String? hap2_parent = mother

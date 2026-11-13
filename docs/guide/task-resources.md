@@ -254,10 +254,11 @@ Reading the tables:
 
 ## ugc_wgw_assembly
 
-11 tasks, in first-call order.
+12 tasks, in first-call order.
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
+| `methbat_pileup` | 8 | 16G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/methbat.wdl:5` |
 | `ugc_wgw_manifest_write` | 1 | 1G | - | `workflows/ugc_wgw/provenance.wdl:9` |
 | `samtools_fasta` | 16 | 16G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/samtools.wdl:86` |
 | `ugc_wgw_yak_count` | 24 | - | cpu from workflow input default; cpu input: yak_threads; memory: "~{mem_gb} GiB" where mem_gb = yak_mem_gb_used = select_first([yak_mem_gb, if low_depth then 70 else 50]); command uses threads | `workflows/ugc_wgw/assembly/yak.wdl:9` |
@@ -265,8 +266,8 @@ Reading the tables:
 | `ugc_wgw_hifiasm_assemble` | 48 | 288G | cpu from workflow input default; cpu input: hifiasm_threads; memory from workflow input default; memory input: hifiasm_mem_gb; command uses threads | `workflows/ugc_wgw/assembly/hifiasm.wdl:9` |
 | `ugc_wgw_gfatools_gfa2fa` | 2 | 4G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/assembly/gfatools.wdl:9` |
 | `ugc_wgw_flagger_align` | 32 | 64G | cpu from workflow input default; cpu input: flagger_align_threads; memory from workflow input default; memory input: flagger_align_mem_gb; command uses threads | `workflows/ugc_wgw/assembly/flagger.wdl:7` |
-| `ugc_wgw_flagger_correct_bam` | 8 | 16G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/assembly/flagger.wdl:110` |
-| `ugc_wgw_flagger_hmm` | 16 | 32G | cpu from workflow input default; cpu input: flagger_threads; memory from workflow input default; memory input: flagger_mem_gb; command uses threads | `workflows/ugc_wgw/assembly/flagger.wdl:202` |
+| `ugc_wgw_flagger_correct_bam` | 8 | 16G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/assembly/flagger.wdl:116` |
+| `ugc_wgw_flagger_hmm` | 16 | 32G | cpu from workflow input default; cpu input: flagger_threads; memory from workflow input default; memory input: flagger_mem_gb; command uses threads | `workflows/ugc_wgw/assembly/flagger.wdl:208` |
 | `ugc_wgw_assembly_contig_qc` | 2 | 8G | cpu from input default; memory from input default | `workflows/ugc_wgw/assembly/contig_qc.wdl:7` |
 | `ugc_wgw_yak_trioeval` | 8 | 48G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/assembly/yak.wdl:82` |
 

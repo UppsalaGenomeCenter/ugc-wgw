@@ -385,11 +385,15 @@ def number(root: List[object]) -> Dict[Key, str]:
     return ids
 
 
-# the task nodes' colours: this repository's tasks and upstream's (light fills with dark text: legible on a light and
-# on a dark page). One-letter class names keep the diagrams inside MAX_CHARS.
-CLASS_DEFS = {"o": "classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330", "u": "classDef u fill:#e9edf1,stroke:#8a8f95,color:#22272e"}
-# the section boxes: a grey border and no fill, instead of Mermaid's default pale yellow
-BOX_DEF = "classDef b fill:none,stroke:#8a8f95"
+# The palette of the guide's diagrams (docs/guide/README.md has the legend). Task nodes: this repository's tasks
+# blue, upstream's slate, saturated fills with white text, the same on a light and a dark page. One-letter class
+# names keep the diagrams inside MAX_CHARS.
+CLASS_DEFS = {"o": "classDef o fill:#2c6aa0,stroke:#2c6aa0,color:#fff", "u": "classDef u fill:#5d6875,stroke:#5d6875,color:#fff"}
+# every other node (workflow calls, hubs): an outline whose text follows the page, instead of Mermaid's own fill.
+# It goes first: a later class wins over `default` on a node that carries both.
+DEFAULT_DEF = "classDef default fill:none,stroke:#8a8f95"
+# the section boxes: a translucent teal wash (one definition for both themes; a nested box comes out deeper)
+BOX_DEF = "classDef b fill:#1f7a70,fill-opacity:0.10,stroke:#1f7a70,stroke-opacity:0.45"
 
 
 def render(root: List[object], edges: Set[Tuple[Key, Key, str]], ids: Dict[Key, str]) -> str:
@@ -424,6 +428,7 @@ def render(root: List[object], edges: Set[Tuple[Key, Key, str]], ids: Dict[Key, 
     for src, dst, style in sorted(edges, key=lambda e: (order(ids[e[0]]), order(ids[e[1]]), e[2])):
         arrow = "-.->" if style == "ctl" else "-->"
         lines.append(f"  {ids[src]} {arrow} {ids[dst]}")
+    lines.append(f"  {DEFAULT_DEF}")
     lines.extend(f"  {CLASS_DEFS[c]}" for c in sorted(used))
     if boxes:
         lines += [f"  {BOX_DEF}", f"  class {','.join(boxes)} b"]
@@ -475,15 +480,15 @@ def markdown(depth: Optional[int] = None, hide: frozenset = HIDE, max_chars: int
         "Legend:",
         "",
         "- `[\"name\"]` is a task call. The name is the call name, which is also the",
-        "  `call-<name>` directory under the run's miniwdl work directory. Teal: a task",
-        "  of this repository (`ugc_wgw_*`, whatever the call is named); grey: one of",
+        "  `call-<name>` directory under the run's miniwdl work directory. Blue: a task",
+        "  of this repository (`ugc_wgw_*`, whatever the call is named); slate: one of",
         "  upstream's.",
         "- `[[\"name\"]]` is a call of a workflow that is not expanded in this diagram.",
         "- `([\"a, b\"])` is a declaration that joins several call outputs, for example",
         "  `select_first` over an optional merge and a single input.",
         "- Boxes are scatter sections (`scatter x in expr`), conditional sections",
         "  (`if expr`) and inlined workflows (`call name (file.wdl)`); they have a",
-        "  border and no fill.",
+        "  faint teal wash, deeper where one box sits inside another.",
         "- A solid arrow means an output of the source feeds an input of the target.",
         "  A dashed arrow means the source feeds the expression that controls a box.",
         "- Workflow inputs and outputs, plain declarations and the",

@@ -1028,6 +1028,18 @@ class SummaryEndToEnd(unittest.TestCase):
         self.assertNotIn("assembly_call", d2["runs"])
         self.assertEqual(d2["assembly"]["flagger"]["hap_pct"], 95.99)
         self.assertIsNone(d2["assembly"]["reliable"])
+        # 0.21.0: hifiasm's primary contigs (HiFi-only runs), the kept alignment and the pileup on the own assembly
+        self.assertNotIn("primary", d1["assembly"])                                  # trio-binned: hifiasm writes none
+        self.assertEqual(d2["assembly"]["primary"]["stats"]["n_sequences"], 300)
+        self.assertEqual(d2["assembly"]["primary"]["stats"]["n50"], 75_000_000)
+        for d in (d1, d2):
+            self.assertEqual(d["assembly"]["read_alignment"], {"bam_kept": True, "cpg_pileup": True, "cpg_sites": 55_000_000})
+            self.assertTrue(all(h["lowq"] is not None for h in d["assembly"]["haplotypes"]), d["assembly"]["haplotypes"])
+        s2 = self.check_html(out / "S2.summary.html")
+        self.assertIn("Primary contigs (one assembly that switches between the haplotypes", s2)
+        self.assertIn("in 300 contigs, NG50", s2)
+        self.assertIn("the alignment is kept; 5mC pileup in assembly coordinates with 55,000,000 CpG sites", s2)
+        self.assertNotIn("Primary contigs", s1)
         self.assertEqual([f["code"] for f in d2["qc"]["flags"] if f["code"].startswith("asm_") and f["severity"] == "fail"], [])   # the shared setup's read-based warnings do not count
         self.assertEqual((out / "pass.txt").read_text().split(), ["S1", "S2"])
         # a schema-1 digest on disk is rebuilt, not reused

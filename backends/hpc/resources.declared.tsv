@@ -17,7 +17,7 @@ hiphase	16	96G	-	-	-	singleton,downstream	vendor/hifi-human-wgs-wdl/workflows/wd
 index_input_bam	16	32G	-	-	-	singleton,upstream	vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:154	cpu from input default; memory from input default; command uses threads
 kivvi_d4z4	2	8G	-	-	-	singleton,upstream	vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/kivvi.wdl:119	cpu from input default; memory from input default
 kivvi_kiv2	2	8G	-	-	-	singleton,upstream	vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/kivvi.wdl:5	cpu from input default; memory from input default
-methbat_pileup	8	16G	-	-	-	singleton,downstream	vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/methbat.wdl:5	cpu from input default; memory from input default; command uses threads
+methbat_pileup	8	16G	-	-	-	singleton,downstream,assembly	vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/methbat.wdl:5	cpu from input default; memory from input default; command uses threads
 methbat_profile	2	4G	-	-	-	singleton,downstream	vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/methbat.wdl:182	cpu from input default; memory from input default
 mitorsaw	4	32G	-	-	-	singleton,upstream	vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/mitorsaw.wdl:5	cpu from input default; memory from input default
 mosdepth	4	8G	-	-	-	singleton,upstream,intake	vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/mosdepth.wdl:5	cpu from input default; memory from input default; command uses threads
@@ -48,8 +48,8 @@ ugc_wgw_chrom_coverage	2	8G	-	-	-	assembly_call	workflows/ugc_wgw/assembly/chrom
 ugc_wgw_dipcall	16	48G	-	-	-	assembly_call	workflows/ugc_wgw/assembly/dipcall.wdl:7	cpu from workflow input default; cpu input: dipcall_threads; memory from workflow input default; memory input: dipcall_mem_gb
 ugc_wgw_fail	1	1G	-	-	-	assembly	workflows/ugc_wgw/fail.wdl:7	
 ugc_wgw_flagger_align	32	64G	-	-	-	assembly	workflows/ugc_wgw/assembly/flagger.wdl:7	cpu from workflow input default; cpu input: flagger_align_threads; memory from workflow input default; memory input: flagger_align_mem_gb; command uses threads
-ugc_wgw_flagger_correct_bam	8	16G	-	-	-	assembly	workflows/ugc_wgw/assembly/flagger.wdl:110	cpu from input default; memory from input default; command uses threads
-ugc_wgw_flagger_hmm	16	32G	-	-	-	assembly	workflows/ugc_wgw/assembly/flagger.wdl:202	cpu from workflow input default; cpu input: flagger_threads; memory from workflow input default; memory input: flagger_mem_gb; command uses threads
+ugc_wgw_flagger_correct_bam	8	16G	-	-	-	assembly	workflows/ugc_wgw/assembly/flagger.wdl:116	cpu from input default; memory from input default; command uses threads
+ugc_wgw_flagger_hmm	16	32G	-	-	-	assembly	workflows/ugc_wgw/assembly/flagger.wdl:208	cpu from workflow input default; cpu input: flagger_threads; memory from workflow input default; memory input: flagger_mem_gb; command uses threads
 ugc_wgw_freq_summary	1	2G	-	-	-	cohort_freq	workflows/ugc_wgw/cohort/freq.wdl:179	
 ugc_wgw_gfatools_gfa2fa	2	4G	-	-	-	assembly	workflows/ugc_wgw/assembly/gfatools.wdl:9	cpu from input default; memory from input default; command uses threads
 ugc_wgw_haplogrep	1	2G	-	-	-	singleton,upstream,cohort_merge	workflows/ugc_wgw/mito/collapse.wdl:238	

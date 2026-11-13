@@ -12,7 +12,8 @@ flowchart LR
   c --> r["5 check, then submit"] --> w["6 watch, retry"]
   w --> o["7 results, report, summary"]
   o -.-> a["8 more samples later"] -.-> s
-  classDef data fill:#e9edf1,stroke:#8a8f95,color:#22272e
+  classDef default fill:none,stroke:#8a8f95
+  classDef data fill:#5d6875,stroke:#5d6875,color:#ffffff
 ```
 
 Text version: install the bundle once, create a project, register the

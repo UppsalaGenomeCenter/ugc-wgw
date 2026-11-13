@@ -6,10 +6,10 @@ import "../../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/structs.wdl"
 
 task ugc_wgw_flagger_align {
   meta {
-    description: "The sample's HiFi reads (the FASTAs samtools fasta made) aligned to its own diploid assembly, hap1 and hap2 concatenated, with minimap2 -k 19 -x map-hifi --eqx --cs -Y -L -y -I8g (Flagger's mapping options; -I8g indexes the whole diploid assembly in one batch), sorted and indexed. An intermediate of the stage unless keep_read_alignment."
+    description: "The sample's HiFi reads aligned to its own diploid assembly, hap1 and hap2 concatenated, with minimap2 -k 19 -x map-hifi --eqx --cs -Y -L -y -I8g (Flagger's mapping options; -I8g indexes the whole diploid assembly in one batch), sorted and indexed. The reads come straight from the read BAMs as FASTQ with their MM, ML, rq and np tags in the header comment (samtools fastq -T), which -y copies into the alignment: base qualities and 5mC calls stay with the reads, and minimap2 uses neither, so the placements are those of a FASTA input. Secondary alignments are not written: minimap2 emits one per read on the other haplotype, with the read's sequence and tags again; Flagger's correction keeps primary alignments only and its output is the same without them, and a pileup would count every read twice with them."
     outputs: {
       bam: {
-        description: "<sample_id>.asm.reads.bam: reads aligned to hap1+hap2"
+        description: "<sample_id>.asm.reads.bam: reads aligned to hap1+hap2, primary and supplementary alignments, with base qualities and the reads' MM/ML tags"
       },
       bam_index: {
         description: "BAM index"
@@ -24,14 +24,14 @@ task ugc_wgw_flagger_align {
     sample_id: {
       description: "Sample ID; output prefix"
     }
-    reads_fastas: {
-      description: "The sample's HiFi reads as FASTA, one per movie"
+    reads_bams: {
+      description: "The sample's HiFi read BAMs (unaligned, or aligned: samtools fastq returns every read once, in its original orientation)"
     }
     hap_fastas: {
       description: "The two haplotype FASTAs (bgzipped)"
     }
     threads: {
-      description: "Threads (minimap2 gets threads - 4, samtools sort 4)"
+      description: "Threads (minimap2 gets threads - 6, samtools sort 4, the FASTQ stream and the filter one each)"
     }
     mem_gb: {
       description: "Memory (GB): the -I8g index of a 6 Gb diploid assembly plus the sort"
@@ -46,7 +46,7 @@ task ugc_wgw_flagger_align {
 
   input {
     String sample_id
-    Array[File] reads_fastas
+    Array[File] reads_bams
     Array[File] hap_fastas
     Int threads = 32
     Int mem_gb = 64
@@ -55,8 +55,9 @@ task ugc_wgw_flagger_align {
   }
 
   String out_prefix = "~{sample_id}.asm.reads"
-  Int minimap2_threads = if threads > 4 then threads - 4 else 1
-  Int disk_size = ceil(size(reads_fastas, "GB") * 2 + size(hap_fastas, "GB") * 4 + 50)
+  Int minimap2_threads = if threads > 6 then threads - 6 else 1
+  # the BAM is about the size of the read BAMs (measured 0.9x on chr20); the sort's temporary files as much again
+  Int disk_size = ceil(size(reads_bams, "GB") * 3 + size(hap_fastas, "GB") * 4 + 50)
 
   command <<<
     set -euo pipefail
@@ -65,7 +66,11 @@ task ugc_wgw_flagger_align {
 
     cat ~{sep=" " hap_fastas} > "~{sample_id}.asm.dip.fasta.gz"
     mkdir -p TMP
-    minimap2 \
+    # every read once, in its original orientation, with its tags as the header comment for minimap2 -y
+    while read -r bam; do
+      samtools fastq -T MM,ML,rq,np "${bam}"
+    done < "~{write_lines(reads_bams)}" \
+    | minimap2 \
       -t ~{minimap2_threads} \
       -k 19 \
       -a \
@@ -77,7 +82,8 @@ task ugc_wgw_flagger_align {
       -y \
       -I8g \
       "~{sample_id}.asm.dip.fasta.gz" \
-      ~{sep=" " reads_fastas} \
+      - \
+    | samtools view -u -F 0x100 - \
     | samtools sort \
       -@ 4 \
       -T ./TMP/sort \

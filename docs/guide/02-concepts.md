@@ -153,10 +153,11 @@ flowchart LR
   jointvcf --> cf{{"cohort_freq"}}:::cohort
   cohort --> cf
   cf --> freq[/"sites-only frequency VCFs, summary"/]:::result
-  classDef sample fill:#cfe4f5,stroke:#2f6f8f,color:#12303f
-  classDef cohort fill:#f6dfb8,stroke:#b9770e,color:#3d2a05
-  classDef data fill:#e9edf1,stroke:#8a8f95,color:#22272e
-  classDef result fill:#d5ead4,stroke:#3f7d3c,color:#17361a
+  classDef default fill:none,stroke:#8a8f95
+  classDef sample fill:#2c6aa0,stroke:#2c6aa0,color:#ffffff
+  classDef cohort fill:#1f7a70,stroke:#1f7a70,color:#ffffff
+  classDef data fill:#5d6875,stroke:#5d6875,color:#ffffff
+  classDef result fill:#2f7d4a,stroke:#2f7d4a,color:#ffffff
 ```
 
 Dashed arrows are optional paths, taken only when the named switch is set.

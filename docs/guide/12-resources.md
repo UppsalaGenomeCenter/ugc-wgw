@@ -30,6 +30,7 @@ flowchart LR
   wdl --> cap --> pol --> sb
   inv["inventory: task-resources.md, resources.declared.tsv"] -.- wdl
   cmd["ugc-wgw resources: the result per task"] -.- pol
+  classDef default fill:none,stroke:#8a8f95
 ```
 
 Text version: the WDL declares a request; miniwdl rounds it down to the

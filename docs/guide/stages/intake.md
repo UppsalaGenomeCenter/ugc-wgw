@@ -25,7 +25,8 @@ flowchart TD
   v1 --> rn1["sample column renamed to the sample id"]
   v2 --> rn2["same"]
   g --> rn3["same"]
-  classDef data fill:#e9edf1,stroke:#8a8f95,color:#22272e
+  classDef default fill:none,stroke:#8a8f95
+  classDef data fill:#5d6875,stroke:#5d6875,color:#ffffff
 ```
 
 Text version: `ugc_wgw_input_checks` first (the BAM is coordinate-sorted,

@@ -69,6 +69,7 @@ flowchart LR
   m1 --> j1["SLURM jobs, up to task_concurrency 50"]
   m2 --> j2["up to 50"]
   mn --> jn["up to 50"]
+  classDef default fill:none,stroke:#8a8f95
 ```
 
 The SLURM pressure of one project is `max_inflight × task_concurrency` jobs,
@@ -294,7 +295,8 @@ flowchart TD
   p -->|"no"| b3["blocked: waiting for stage of ids"]
   p -->|"cohort stage without --cohort"| b4["blocked: stage needs --cohort"]
   p -->|"yes"| run["runnable"]
-  classDef decision fill:#e3dcf5,stroke:#6b56b0,color:#241a4d
+  classDef default fill:none,stroke:#8a8f95
+  classDef decision fill:none,stroke:#8a8f95
 ```
 
 Text version:
@@ -337,6 +339,68 @@ file of sample IDs whose assembly has no `fail` flag among the `asm_*` checks
 list). Samples left out keep their per-sample results; a later freeze under
 another ID can include them. A sample without an assembly is never in the
 list.
+
+## Choosing the members of a graph, and how many
+
+A graph does not need every member to hold the cohort's common variation,
+and a graph of everyone is not always buildable. `cohort rank` orders the
+members by what each adds, from results the read-based cohort already has,
+before a single genome is assembled:
+
+```bash
+ugc-wgw cohort rank C1 --mode joint            # reads C1's cohort_merge SV VCF and cohort_qc pairs
+```
+
+It reads the merged SV VCF (insertions, deletions, duplications and
+inversions; a member without the call is `./.` there) and takes, at every
+step, the member that carries the most SV alleles no earlier member carries,
+counting first the alleles of 1% carrier frequency or more (`--common-min`),
+then all of them. A member related to an earlier pick (`cohort_qc`
+relatedness of 0.1 or more, `--related-min`) is held back and ranked after
+everyone else, so the first members are unrelated. Members with a read-based
+QC `fail`, without a run, or below `--min-depth` or `--min-read-n50` are not
+ranked; the table says why. The assembly's `asm_*` flags do not count here:
+the ranking is made before the assemblies exist and must not change when
+they do; the pass list applies them. `--first FILE` puts named members at
+the top in the given order (trio children, whose assemblies are truly
+phased; a control sample).
+
+It writes four files to `<results>/reports/rank` (`--out-dir`):
+
+| File | Holds |
+|---|---|
+| `C1.rank.tsv` | One row per member in rank order: tier (`first`, `unrelated`, `related`, `excluded`), the relative it waits behind, alleles added, the share of the sites of each frequency class covered so far, sex, depth, read N50, ancestry label and components. |
+| `C1.rank.curves.tsv` | For n = 1 to all: the share of the sites covered by the first n members of the ranking, and the expectation for n members drawn at random, per frequency class (5% and above; common below 5%; rare with two carriers or more; one carrier). |
+| `C1.rank.heldout.tsv` | For the first 20, 50, 100, 200 and 400: of every member outside, the share of its own alleles that the first members already carry (median, 5th percentile, lowest). |
+| `C1.rank.html` | The curves, the outside-member table, the first hundred on the ancestry components, the ranking. |
+
+Read the curves for where the common classes flatten: that is the size
+beyond which another member adds rare alleles only. Read the ancestry
+plot for what a greedy cover does, which is to reach for the edges of the
+cloud. The ranking uses structural variants only; small variants follow
+the same population structure and are not read.
+
+Every graph cohort is then a prefix of the one saved ranking, so cohorts
+of different sizes are nested and a larger one reuses what a smaller one
+computed:
+
+```bash
+ugc-wgw cohort rank C1 --emit 0                               # the whole ranking as a list -> C1.all.txt
+ugc-wgw submit --mode assembly --samples-file <results>/reports/rank/C1.all.txt   # assembled in rank order
+ugc-wgw summary --mode assembly --pass-list asm-pass.txt      # assemblies without a QC fail
+ugc-wgw cohort rank C1 --emit 100 --pass-list asm-pass.txt    # the first 100 that passed -> C1.top100.txt
+ugc-wgw cohort freeze P100 --samples <results>/reports/rank/C1.top100.txt
+```
+
+`submit` starts the samples of a file in the file's order, so the members
+the first cohorts need are assembled first.
+
+`--emit K` does not rank again: it reads the saved `C1.rank.tsv` (`--from`)
+and writes the first K ranked members that are in the pass list, skipping
+the held-back relatives (`--include-related` keeps them). A member whose
+assembly failed QC is replaced by the next in rank, so the lists stay
+nested as long as the pass list only grows. `--emit 0` writes the whole
+ranking, relatives included.
 
 ## Checking identity before a freeze
 

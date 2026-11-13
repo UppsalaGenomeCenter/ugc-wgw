@@ -106,6 +106,7 @@ SOURCE_MAP: dict[str, dict[str, str]] = {  # logical name -> {stage: output name
     "mt_haplogroups": {"singleton": "mt_haplogroups", "upstream": "mt_haplogroups"},
     # the assembly track (arrays such as assembly_stats are read through Sources.paths)
     "assembler_version": {"assembly": "assembler_version"},
+    "primary_stats": {"assembly": "primary_stats"},
     "flagger_summary": {"assembly": "flagger_summary"},
     "flagger_bed": {"assembly": "flagger_bed"},
     "chrom_coverage": {"assembly_call": "chrom_coverage"},
@@ -515,7 +516,8 @@ def _assembly_digest(src: Sources, safe) -> dict[str, object]:  # type: ignore[n
            "haplotypes": [], "calls": {}, "karyotype": None, "flagger": None, "reliable": None, "concordance": None,
            "chrom_coverage": None, "regions": None, "summary": {}}
     trio_paths = _by_label(src.paths("assembly", "trio_eval"), labels)
-    lowq_paths = _by_label([q for q in src.paths("assembly", "assembly_lowQ_beds") if "utg" not in q.name], labels)
+    # the array also holds the unitig graphs' regions and, since 0.21.0, the primary contigs' (no .hapN. in the name)
+    lowq_paths = _by_label([q for q in src.paths("assembly", "assembly_lowQ_beds") if "utg" not in q.name and ".hap" in q.name], labels)
     for i, label in enumerate(labels):
         g = (safe("assembly_stats", lambda q=stats_paths[i]: sp.parse_caln50(sp.read_lines(q))) or {}) if i < len(stats_paths) else {}
         te = safe("trio_eval", lambda q=trio_paths[i]: sp.parse_trioeval(sp.read_lines(q))) if trio_paths[i] else None
@@ -525,6 +527,13 @@ def _assembly_digest(src: Sources, safe) -> dict[str, object]:  # type: ignore[n
             lowq = {"n": sum(1 for _ in sp.read_binary_lines(lowq_paths[i])), "bp": sum(bp.values())} if bp is not None else None
         asm["haplotypes"].append({"name": label, "stats": g, "trio_eval": te or None, "lowq": lowq,  # type: ignore[attr-defined]
                                   "unreliable_bp": None, "hap_bed_bp": None, "pav_callable_bp": None})
+    pstats = src.path("primary_stats")
+    if pstats:   # hifiasm's primary contigs: HiFi-only runs from 0.21.0 on
+        asm["primary"] = {"stats": safe("primary_stats", lambda: sp.parse_caln50(sp.read_lines(pstats))) or {}}
+    reads_on_asm = {"bam_kept": bool(doc.get(ns + "read_alignment_bam")), "cpg_pileup": bool(doc.get(ns + "asm_cpg_pileup_bed")),
+                    "cpg_sites": sp._int(doc.get(ns + "asm_cpg_sites"))}
+    if ns + "asm_cpg_sites" in doc:   # the stage aligns the reads with their 5mC tags from 0.21.0 on
+        asm["read_alignment"] = reads_on_asm
     fs = src.path("flagger_summary")
     if fs:
         asm["flagger"] = safe("flagger_summary", lambda: sp.parse_flagger_summary(sp.read_lines(fs))) or None
@@ -1039,6 +1048,18 @@ def _assembly_html(asm: dict[str, object]) -> str:
                  f"{sv.fmt((h.get('lowq') or {}).get('n'))} ({sv.fmt_bp((h.get('lowq') or {}).get('bp'))})" if h.get("lowq") else "–"] for h in haps]  # type: ignore[union-attr]
     body = head + _table(["haplotype", "total length", "contigs", "NG50", "LG50", "auNG", "low-quality regions (hifiasm)"], hap_rows, cls="")
     body += "<p class='small muted'>NG50, LG50 and auNG are against a 3.1 Gb genome (calN50 -L3.1g), not the assembly's own length.</p>"
+    prim: dict[str, object] = asm.get("primary") or {}  # type: ignore[assignment]
+    pst: dict[str, object] = prim.get("stats") or {}  # type: ignore[assignment]
+    if pst:
+        body += ("<p class='small'>Primary contigs (one assembly that switches between the haplotypes, kept beside the two): "
+                 f"{_esc(sv.fmt_bp(pst.get('total_length')))} in {_esc(sv.fmt(pst.get('n_sequences')))} contigs"
+                 + (f", NG50 {_esc(sv.fmt_bp(pst.get('n50')))}" if pst.get("n50") else "") + ".</p>")
+    ra: dict[str, object] = asm.get("read_alignment") or {}  # type: ignore[assignment]
+    if ra:
+        sites = ra.get("cpg_sites")
+        body += ("<p class='small'>Reads on this assembly: the alignment is " + ("kept" if ra.get("bam_kept") else "not kept")
+                 + (f"; 5mC pileup in assembly coordinates with {_esc(sv.fmt(sites))} CpG sites" if ra.get("cpg_pileup") and sites
+                    else "; no 5mC pileup (the reads carry no methylation calls)") + ".</p>")
     xs = sorted({int(row[0]) for h in haps for row in (st(h).get("nl") or []) if len(row) >= 3})  # type: ignore[union-attr]
     if len(xs) > 1:
         ng_rows = []

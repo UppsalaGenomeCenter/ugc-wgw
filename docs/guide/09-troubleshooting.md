@@ -77,7 +77,8 @@ flowchart TD
   c -->|"apptainer: unable to pull or open image"| sif["SIF missing from image_cache: check the name, repopulate"]
   c -->|"NoResult, launch_error in miniwdl.stderr"| m["config or environment problem; fix, retry"]
   c -->|"tool error"| tool["read the tool's message; data problem or upstream bug"]
-  classDef decision fill:#e3dcf5,stroke:#6b56b0,color:#241a4d
+  classDef default fill:none,stroke:#8a8f95
+  classDef decision fill:none,stroke:#8a8f95
 ```
 
 ## Cores, memory and wall time

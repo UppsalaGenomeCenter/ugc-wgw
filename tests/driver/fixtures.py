@@ -810,6 +810,8 @@ def fixture_bytes(name: str, sid: str, stage: str, inferred_sex: str = "", index
         text = "trid\tmotif\t" + "\t".join(ms) + "\n" + "".join(f"chr1_{i}_{i + 50}_CAG\tCAG\t" + "\t".join(["0,0"] * len(ms)) + "\n" for i in range(1, 6))
     elif name == "assembly_stats":
         text = GFATOOLS.format(sz=3_020_000_000 - index * 5_000_000, nn=400 + index * 20, n0=140_000_000, n50=60_000_000 - index * 3_000_000, l50=15 + index, aun=58_000_000)
+    elif name == "primary_stats":   # one assembly of both haplotypes' best contigs: longer contigs, fewer of them
+        text = GFATOOLS.format(sz=3_050_000_000, nn=300, n0=150_000_000, n50=75_000_000, l50=13, aun=70_000_000)
     elif name == "dipcall_vcf_stats":
         text = CALLER_SN.format(rec=4_500_000, snps=3_800_000, indels=700_000, ts=2_500_000, tv=1_300_000, tstv=1.92, sid=sid, hom=1_500_000, het=2_900_000, singletons=4_300_000, missing=5000)
     elif name == "pav_vcf_stats":

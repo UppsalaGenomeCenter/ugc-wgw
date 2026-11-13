@@ -186,11 +186,13 @@ comparison files (`.compare.<baseline>_vs_<compare>.tsv`, one per pair).
 | `assembler_used`, `assembler_version` | `hifiasm` and its version line (`<sample_id>.asm.hifiasm.version.txt`). |
 | `haplotype_labels` | `["hap1", "hap2"]`, or `["pat", "mat"]` when trio-binned: the order of every per-haplotype array below (file names keep hifiasm's `hap1`/`hap2`). |
 | `hap_fastas`, `assembly_stats` | Contigs per haplotype, `<sample_id>.asm.<bp\|dip>.<hap>.p_ctg.fasta.gz`, with calN50 statistics. `dip` means trio-binned, `bp` HiFi-only. |
-| `assembly_noseq_gfas`, `assembly_lowQ_beds` | Assembly graphs without sequence and low-quality regions. |
+| `primary_fasta`, `primary_stats` | hifiasm's primary contigs, `<sample_id>.asm.bp.p_ctg.fasta.gz`, with calN50 statistics: one assembly that switches between the haplotypes. HiFi-only samples; a trio-binned run has none. |
+| `assembly_noseq_gfas`, `assembly_lowQ_beds` | Assembly graphs without sequence and low-quality regions (haplotype contigs, primary contigs, unitig graphs). |
 | `flagger_bed`, `flagger_summary` | HMM-Flagger's prediction for the diploid assembly (`Err`, `Dup`, `Hap` or `Col` per interval, assembly coordinates) and its summary table; the `base_level percentage` row of `whole_genome` gives the shares. |
 | `trio_eval` | `yak trioeval` per haplotype (trio-binned samples): the `W` line is the switch error, `H` the Hamming error (count, sites, rate); the `S` lines are per contig. |
 | `contig_qc` | `<sample_id>.asm.contig_qc.tsv`: per contig its haplotype, length, GC %, N bases and N runs, telomeric bases at the 5' and 3' ends (the assembly's motif), and Flagger's Err/Dup/Hap/Col bases. |
-| `read_alignment_bam`, `read_alignment_bam_index` | The reads aligned to the diploid assembly, only with `keep_read_alignment`. |
+| `read_alignment_bam`, `read_alignment_bam_index` | `<sample_id>.asm.reads.bam`: the sample's reads aligned to its own diploid assembly (hap1 then hap2; the contig name says which), primary and supplementary alignments, with base qualities and the `MM`/`ML` 5mC tags. Kept unless `keep_read_alignment` is false. Its reference is `cat` of the two `hap_fastas`. |
+| `asm_cpg_pileup_bed`, `asm_cpg_pileup_bed_index`, `asm_cpg_pileup_summary` | `<sample_id>.asm.reads.5mC.bed.gz`: 5mC per CpG of the assembly, in assembly coordinates (methbat pileup; rows of type `Total`, columns as the reference pileup `cpg_pileup_bed`). Where the haplotypes are identical a row mixes both haplotypes' reads. Absent when the reads carry no 5mC calls. |
 | `trio`, `hap1_parent`, `hap2_parent` | Whether trio binning was used and which parent each haplotype follows. |
 
 ### `assembly_call`
@@ -283,6 +285,7 @@ flowchart LR
   eng["engine versions: miniwdl, miniwdl-slurm, apptainer"] --> rm
   bm["bundle manifest.json: SIF sha256 per image, git commit"] -.-> rm
   rm --> cur["stage/current/run_manifest.json"]
+  classDef default fill:none,stroke:#8a8f95
 ```
 
 The bundle's own `manifest.json` under `<prefix>/versions/<v>/` closes the

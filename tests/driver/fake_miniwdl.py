@@ -212,18 +212,25 @@ def make_outputs(stage: str, inputs: dict[str, object], run_dir: pathlib.Path,
         trio = bool(v.get("father_hifi_reads")) and bool(v.get("mother_hifi_reads"))
         tag = "dip" if trio else "bp"
         haps = ["hap1", "hap2"]
+        prim = [] if trio else ["p_ctg"]       # hifiasm writes primary contigs only without trio binning
         files["assembly_noseq_gfas"] = [f"{sid}.asm.{tag}.{h}.p_ctg.noseq.gfa" for h in haps] + \
-            [f"{sid}.asm.{tag}.{u}_utg.noseq.gfa" for u in ("p", "r")]
+            [f"{sid}.asm.{tag}.{p}.noseq.gfa" for p in prim] + [f"{sid}.asm.{tag}.{u}_utg.noseq.gfa" for u in ("p", "r")]
         files["assembly_lowQ_beds"] = [f"{sid}.asm.{tag}.{h}.p_ctg.lowQ.bed" for h in haps] + \
-            [f"{sid}.asm.{tag}.{u}_utg.lowQ.bed" for u in ("p", "r")]
+            [f"{sid}.asm.{tag}.{p}.lowQ.bed" for p in prim] + [f"{sid}.asm.{tag}.{u}_utg.lowQ.bed" for u in ("p", "r")]
+        if prim:
+            files["primary_fasta"] = f"{sid}.asm.bp.p_ctg.fasta.gz"
+            files["primary_stats"] = f"{sid}.asm.bp.p_ctg.fasta.stats.txt"
         files["hap_fastas"] = [f"{sid}.asm.{tag}.{h}.p_ctg.fasta.gz" for h in haps]
         files["assembly_stats"] = [f"{sid}.asm.{tag}.{h}.p_ctg.fasta.stats.txt" for h in haps]
         files["assembler_version"] = f"{sid}.asm.hifiasm.version.txt"
         files["flagger_bed"] = f"{sid}.asm.flagger.bed"
         files["flagger_summary"] = f"{sid}.asm.flagger.summary.tsv"
         files["contig_qc"] = f"{sid}.asm.contig_qc.tsv"
-        if v.get("keep_read_alignment"):
+        if v.get("keep_read_alignment", True):   # the entrypoint's default since 0.21.0
             f("read_alignment_bam", f"{sid}.asm.reads.bam")
+        f("asm_cpg_pileup_bed", f"{sid}.asm.reads.5mC.bed.gz")
+        files["asm_cpg_pileup_summary"] = f"{sid}.asm.reads.summary.json"
+        strings["asm_cpg_sites"] = "55000000"
         strings.update({"trio": trio, "haplotype_labels": ["pat", "mat"] if trio else haps, "assembler_used": str(v.get("assembler") or "hifiasm")})
         if trio:
             files["trio_eval"] = [f"{sid}.asm.{h}.trioeval.txt" for h in ("pat", "mat")]

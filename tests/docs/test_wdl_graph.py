@@ -142,9 +142,12 @@ class FixtureTest(unittest.TestCase):
         self.assertIn("classDef u fill:", text)
         self.assertNotIn("classDef o", text)                     # the fixture has no task of ours
         self.assertNotIn(":::", next(l for l in text.splitlines() if '[["sub"]]' in l))
-        # every section box carries the class without a fill (Mermaid's default is pale yellow)
+        # every section box carries the class with the wash (Mermaid's default is pale yellow), and `default`
+        # comes before the other classes, which have to win over it
         _, sections, _, _ = parse(text)
-        self.assertIn("classDef b fill:none,", text)
+        self.assertIn("classDef b fill:#1f7a70,fill-opacity:", text)
+        defs = [l.split()[1] for l in text.splitlines() if l.strip().startswith("classDef ")]
+        self.assertEqual(defs[0], "default", defs)
         boxed = next(l for l in text.splitlines() if l.strip().startswith("class "))
         self.assertEqual(sorted(boxed.split()[1].split(",")), sorted(sections.values()), text)
         real = self.mod.graph_for(self.mod.REPO / "workflows" / "ugc_wgw_cohort_tr.wdl")[0]

@@ -192,9 +192,9 @@ class ListingTest(unittest.TestCase):
         self.assertIn("hifiasm_threads", [r["input"] for r in rows])
         code, out, err = run_cli(["--project", self.proj, "stage-inputs", "--stage", "assembly"])
         self.assertEqual(code, 0, err)
-        self.assertIn("# 1 stage, 32 workflow inputs:", out)
+        self.assertIn("# 1 stage, 33 workflow inputs:", out)
         self.assertIn("--nested adds", out)
-        self.assertIn("# assembly (ugc_wgw_assembly.wdl): 32 inputs", out)
+        self.assertIn("# assembly (ugc_wgw_assembly.wdl): 33 inputs", out)
         self.assertRegex(out, r"hifiasm_threads +Int +48 +stage_inputs")
         self.assertRegex(out, r"ugc_wgw_container_registry +String +- +config.json +ugc_wgw_container_registry")
         self.assertNotIn("override", self.header(out))
@@ -278,7 +278,7 @@ class NestedTest(unittest.TestCase):
         code, out, err = run_cli(["--project", proj, "stage-inputs", "--nested", "--mode", "assembly"])
         self.assertEqual(code, 0, err)
         self.assertIn("call-qualified inputs of the tasks inside", out)
-        self.assertRegex(out, r"# assembly \(ugc_wgw_assembly.wdl\): 32 inputs, \d+ call-qualified")
+        self.assertRegex(out, r"# assembly \(ugc_wgw_assembly.wdl\): 33 inputs, \d+ call-qualified")
 
 
 if __name__ == "__main__":

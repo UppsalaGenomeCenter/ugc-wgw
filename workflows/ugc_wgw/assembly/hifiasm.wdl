@@ -8,16 +8,19 @@ import "../../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/structs.wdl"
 
 task ugc_wgw_hifiasm_assemble {
   meta {
-    description: "hifiasm assembly of HiFi reads, --telo-m when telomere_motif is set; with father_yak and mother_yak the child's reads are trio-binned (hap1 = father, hap2 = mother). HiFi-only runs write <prefix>.bp.*, trio runs <prefix>.dip.*"
+    description: "hifiasm assembly of HiFi reads, --telo-m when telomere_motif is set; with father_yak and mother_yak the child's reads are trio-binned (hap1 = father, hap2 = mother). HiFi-only runs write <prefix>.bp.* and, beside the two haplotypes, the primary contigs <prefix>.bp.p_ctg.gfa (one longer assembly that switches between the haplotypes); trio runs write <prefix>.dip.* and no primary contigs"
     outputs: {
       assembly_hap_gfas: {
         description: "Haplotype-resolved primary contig graphs, hap1 then hap2"
       },
+      assembly_primary_gfas: {
+        description: "The primary contig graph <prefix>.bp.p_ctg.gfa of a HiFi-only run, as an array of one; empty for a trio-binned run, where hifiasm writes none"
+      },
       assembly_noseq_gfas: {
-        description: "Sequence-less GFAs of the haplotype contigs and the unitig graphs"
+        description: "Sequence-less GFAs of the haplotype contigs, the primary contigs (HiFi-only runs) and the unitig graphs"
       },
       assembly_lowQ_beds: {
-        description: "Low-quality regions of the haplotype contigs and the unitig graphs"
+        description: "Low-quality regions of the haplotype contigs, the primary contigs (HiFi-only runs) and the unitig graphs"
       },
       version: {
         description: "hifiasm --version, one line (the assembler_version of the stage's output contract)"
@@ -102,12 +105,15 @@ task ugc_wgw_hifiasm_assemble {
 
   output {
     Array[File] assembly_hap_gfas = glob("~{prefix}.*.hap[12].p_ctg.gfa")
+    Array[File] assembly_primary_gfas = glob("~{prefix}.bp.p_ctg.gfa")
     Array[File] assembly_noseq_gfas = flatten([
       glob("~{prefix}.*.hap[12].p_ctg.noseq.gfa"),
+      glob("~{prefix}.bp.p_ctg.noseq.gfa"),
       glob("~{prefix}.*.[pr]_utg.noseq.gfa")
     ])
     Array[File] assembly_lowQ_beds = flatten([
       glob("~{prefix}.*.hap[12].p_ctg.lowQ.bed"),
+      glob("~{prefix}.bp.p_ctg.lowQ.bed"),
       glob("~{prefix}.*.[pr]_utg.lowQ.bed")
     ])
     File version = "~{prefix}.hifiasm.version.txt"

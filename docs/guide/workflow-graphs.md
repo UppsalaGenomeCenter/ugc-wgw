@@ -11,15 +11,15 @@ the switches and resources explained are in `08-stages.md`.
 Legend:
 
 - `["name"]` is a task call. The name is the call name, which is also the
-  `call-<name>` directory under the run's miniwdl work directory. Teal: a task
-  of this repository (`ugc_wgw_*`, whatever the call is named); grey: one of
+  `call-<name>` directory under the run's miniwdl work directory. Blue: a task
+  of this repository (`ugc_wgw_*`, whatever the call is named); slate: one of
   upstream's.
 - `[["name"]]` is a call of a workflow that is not expanded in this diagram.
 - `(["a, b"])` is a declaration that joins several call outputs, for example
   `select_first` over an optional merge and a single input.
 - Boxes are scatter sections (`scatter x in expr`), conditional sections
   (`if expr`) and inlined workflows (`call name (file.wdl)`); they have a
-  border and no fill.
+  faint teal wash, deeper where one box sits inside another.
 - A solid arrow means an output of the source feeds an input of the target.
   A dashed arrow means the source feeds the expression that controls a box.
 - Workflow inputs and outputs, plain declarations and the
@@ -27,7 +27,7 @@ Legend:
 
 ## ugc_wgw_singleton
 
-Source `workflows/ugc_wgw_singleton.wdl`, depth 1, Mermaid source 3839 characters.
+Source `workflows/ugc_wgw_singleton.wdl`, depth 1, Mermaid source 3918 characters.
 
 Inlined workflows:
 
@@ -185,15 +185,16 @@ flowchart TD
   s19 --> n39
   s19 --> n40
   s19 -.-> s22
-  classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
-  classDef u fill:#e9edf1,stroke:#8a8f95,color:#22272e
-  classDef b fill:none,stroke:#8a8f95
+  classDef default fill:none,stroke:#8a8f95
+  classDef o fill:#2c6aa0,stroke:#2c6aa0,color:#fff
+  classDef u fill:#5d6875,stroke:#5d6875,color:#fff
+  classDef b fill:#1f7a70,fill-opacity:0.10,stroke:#1f7a70,stroke-opacity:0.45
   class s1,s2,s3,s4,s5,s6,s7,s8,s9,s10,s11,s12,s13,s14,s15,s16,s17,s18,s19,s20,s21,s22 b
 ```
 
 ## ugc_wgw_upstream
 
-Source `workflows/ugc_wgw_upstream.wdl`, depth 1, Mermaid source 2986 characters.
+Source `workflows/ugc_wgw_upstream.wdl`, depth 1, Mermaid source 3065 characters.
 
 Inlined workflows:
 
@@ -313,15 +314,16 @@ flowchart TD
   s1 --> n30
   s1 -.-> s13
   s3 --> n30
-  classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
-  classDef u fill:#e9edf1,stroke:#8a8f95,color:#22272e
-  classDef b fill:none,stroke:#8a8f95
+  classDef default fill:none,stroke:#8a8f95
+  classDef o fill:#2c6aa0,stroke:#2c6aa0,color:#fff
+  classDef u fill:#5d6875,stroke:#5d6875,color:#fff
+  classDef b fill:#1f7a70,fill-opacity:0.10,stroke:#1f7a70,stroke-opacity:0.45
   class s1,s2,s3,s4,s5,s6,s7,s8,s9,s10,s11,s12,s13,s14,s15,s16,s17,s18 b
 ```
 
 ## ugc_wgw_cohort_qc
 
-Source `workflows/ugc_wgw_cohort_qc.wdl`, depth 1, Mermaid source 560 characters.
+Source `workflows/ugc_wgw_cohort_qc.wdl`, depth 1, Mermaid source 642 characters.
 
 Inlined workflows: none.
 
@@ -346,14 +348,15 @@ flowchart TD
   n2 --> n3
   n3 --> n5
   n4 --> n5
-  classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
-  classDef b fill:none,stroke:#8a8f95
+  classDef default fill:none,stroke:#8a8f95
+  classDef o fill:#2c6aa0,stroke:#2c6aa0,color:#fff
+  classDef b fill:#1f7a70,fill-opacity:0.10,stroke:#1f7a70,stroke-opacity:0.45
   class s1,s2,s3 b
 ```
 
 ## ugc_wgw_cohort_call
 
-Source `workflows/ugc_wgw_cohort_call.wdl`, depth 1, Mermaid source 788 characters.
+Source `workflows/ugc_wgw_cohort_call.wdl`, depth 1, Mermaid source 867 characters.
 
 Inlined workflows:
 
@@ -386,15 +389,16 @@ flowchart TD
   n3 --> n4
   n6 --> n7
   s1 --> n5
-  classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
-  classDef u fill:#e9edf1,stroke:#8a8f95,color:#22272e
-  classDef b fill:none,stroke:#8a8f95
+  classDef default fill:none,stroke:#8a8f95
+  classDef o fill:#2c6aa0,stroke:#2c6aa0,color:#fff
+  classDef u fill:#5d6875,stroke:#5d6875,color:#fff
+  classDef b fill:#1f7a70,fill-opacity:0.10,stroke:#1f7a70,stroke-opacity:0.45
   class s1,s2,s3,s4 b
 ```
 
 ## ugc_wgw_intake
 
-Source `workflows/ugc_wgw_intake.wdl`, depth 1, Mermaid source 524 characters.
+Source `workflows/ugc_wgw_intake.wdl`, depth 1, Mermaid source 603 characters.
 
 Inlined workflows: none.
 
@@ -416,15 +420,16 @@ flowchart TD
   n2 --> n5
   n3 --> n4
   n4 --> n5
-  classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
-  classDef u fill:#e9edf1,stroke:#8a8f95,color:#22272e
-  classDef b fill:none,stroke:#8a8f95
+  classDef default fill:none,stroke:#8a8f95
+  classDef o fill:#2c6aa0,stroke:#2c6aa0,color:#fff
+  classDef u fill:#5d6875,stroke:#5d6875,color:#fff
+  classDef b fill:#1f7a70,fill-opacity:0.10,stroke:#1f7a70,stroke-opacity:0.45
   class s1 b
 ```
 
 ## ugc_wgw_downstream
 
-Source `workflows/ugc_wgw_downstream.wdl`, depth 1, Mermaid source 1011 characters.
+Source `workflows/ugc_wgw_downstream.wdl`, depth 1, Mermaid source 1090 characters.
 
 Inlined workflows:
 
@@ -471,15 +476,16 @@ flowchart TD
   s1 --> n11
   s1 --> n12
   s1 -.-> s4
-  classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
-  classDef u fill:#e9edf1,stroke:#8a8f95,color:#22272e
-  classDef b fill:none,stroke:#8a8f95
+  classDef default fill:none,stroke:#8a8f95
+  classDef o fill:#2c6aa0,stroke:#2c6aa0,color:#fff
+  classDef u fill:#5d6875,stroke:#5d6875,color:#fff
+  classDef b fill:#1f7a70,fill-opacity:0.10,stroke:#1f7a70,stroke-opacity:0.45
   class s1,s2,s3,s4 b
 ```
 
 ## ugc_wgw_cohort_merge
 
-Source `workflows/ugc_wgw_cohort_merge.wdl`, depth 1, Mermaid source 2363 characters.
+Source `workflows/ugc_wgw_cohort_merge.wdl`, depth 1, Mermaid source 2442 characters.
 
 Inlined workflows:
 
@@ -571,15 +577,16 @@ flowchart TD
   n18 --> n20
   n18 --> n21
   n19 --> n22
-  classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
-  classDef u fill:#e9edf1,stroke:#8a8f95,color:#22272e
-  classDef b fill:none,stroke:#8a8f95
+  classDef default fill:none,stroke:#8a8f95
+  classDef o fill:#2c6aa0,stroke:#2c6aa0,color:#fff
+  classDef u fill:#5d6875,stroke:#5d6875,color:#fff
+  classDef b fill:#1f7a70,fill-opacity:0.10,stroke:#1f7a70,stroke-opacity:0.45
   class s1,s2,s3,s4,s5,s6,s7,s8,s9,s10,s11,s12,s13,s14,s15,s16 b
 ```
 
 ## ugc_wgw_cohort_freq
 
-Source `workflows/ugc_wgw_cohort_freq.wdl`, depth 1, Mermaid source 836 characters.
+Source `workflows/ugc_wgw_cohort_freq.wdl`, depth 1, Mermaid source 918 characters.
 
 Inlined workflows: none.
 
@@ -618,14 +625,15 @@ flowchart TD
   n5 --> n8
   n6 --> n8
   n7 --> n8
-  classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
-  classDef b fill:none,stroke:#8a8f95
+  classDef default fill:none,stroke:#8a8f95
+  classDef o fill:#2c6aa0,stroke:#2c6aa0,color:#fff
+  classDef b fill:#1f7a70,fill-opacity:0.10,stroke:#1f7a70,stroke-opacity:0.45
   class s1,s2,s3,s4,s5 b
 ```
 
 ## ugc_wgw_cohort_tr
 
-Source `workflows/ugc_wgw_cohort_tr.wdl`, depth 1, Mermaid source 423 characters.
+Source `workflows/ugc_wgw_cohort_tr.wdl`, depth 1, Mermaid source 505 characters.
 
 Inlined workflows: none.
 
@@ -644,14 +652,15 @@ flowchart TD
   n2 --> n3
   n2 -.-> s1
   n3 --> n4
-  classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
-  classDef b fill:none,stroke:#8a8f95
+  classDef default fill:none,stroke:#8a8f95
+  classDef o fill:#2c6aa0,stroke:#2c6aa0,color:#fff
+  classDef b fill:#1f7a70,fill-opacity:0.10,stroke:#1f7a70,stroke-opacity:0.45
   class s1 b
 ```
 
 ## ugc_wgw_cohort_methyl
 
-Source `workflows/ugc_wgw_cohort_methyl.wdl`, depth 1, Mermaid source 1044 characters.
+Source `workflows/ugc_wgw_cohort_methyl.wdl`, depth 1, Mermaid source 1126 characters.
 
 Inlined workflows: none.
 
@@ -694,14 +703,15 @@ flowchart TD
   n5 --> n9
   n6 --> n9
   n7 --> n9
-  classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
-  classDef b fill:none,stroke:#8a8f95
+  classDef default fill:none,stroke:#8a8f95
+  classDef o fill:#2c6aa0,stroke:#2c6aa0,color:#fff
+  classDef b fill:#1f7a70,fill-opacity:0.10,stroke:#1f7a70,stroke-opacity:0.45
   class s1,s2,s3,s4,s5,s6,s7,s8 b
 ```
 
 ## ugc_wgw_assembly
 
-Source `workflows/ugc_wgw_assembly.wdl`, depth 1, Mermaid source 1496 characters.
+Source `workflows/ugc_wgw_assembly.wdl`, depth 1, Mermaid source 1707 characters.
 
 Inlined workflows: none.
 
@@ -732,18 +742,21 @@ flowchart TD
   subgraph s7["scatter gfa in hap_gfas"]
     n9["ugc_wgw_gfatools_gfa2fa"]:::o
   end
-  n10["ugc_wgw_flagger_align"]:::o
-  n11["ugc_wgw_flagger_correct_bam"]:::o
-  n12["ugc_wgw_flagger_hmm"]:::o
-  n13["ugc_wgw_assembly_contig_qc"]:::o
-  subgraph s8["if is_trio"]
-    subgraph s9["scatter i in range(length(labels))"]
-      n14["ugc_wgw_yak_trioeval"]:::o
+  subgraph s8["scatter gfa in primary_gfas"]
+    n10["primary_gfa2fa"]:::o
+  end
+  n11["ugc_wgw_flagger_align"]:::o
+  n12["ugc_wgw_flagger_correct_bam"]:::o
+  n13["ugc_wgw_flagger_hmm"]:::o
+  n14["asm_methbat_pileup"]:::u
+  n15["ugc_wgw_assembly_contig_qc"]:::o
+  subgraph s9["if is_trio"]
+    subgraph s10["scatter i in range(length(labels))"]
+      n16["ugc_wgw_yak_trioeval"]:::o
     end
   end
-  n15["ugc_wgw_manifest_write"]:::o
+  n17["ugc_wgw_manifest_write"]:::o
   n1 --> n8
-  n1 --> n10
   n2 --> n4
   n2 --> n5
   n3 --> n4
@@ -751,28 +764,31 @@ flowchart TD
   n4 --> n5
   n4 --> n6
   n4 --> n8
-  n4 --> n14
+  n4 --> n16
   n5 --> n8
-  n5 --> n14
+  n5 --> n16
   n6 --> n8
-  n6 --> n14
+  n6 --> n16
   n8 -.-> s7
-  n9 --> n10
-  n9 --> n13
-  n9 --> n14
-  n10 --> n11
-  n10 --> n12
+  n8 -.-> s8
+  n9 --> n11
+  n9 --> n15
+  n9 --> n16
   n11 --> n12
+  n11 --> n13
+  n11 --> n14
   n12 --> n13
-  classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
-  classDef u fill:#e9edf1,stroke:#8a8f95,color:#22272e
-  classDef b fill:none,stroke:#8a8f95
-  class s1,s2,s3,s4,s5,s6,s7,s8,s9 b
+  n13 --> n15
+  classDef default fill:none,stroke:#8a8f95
+  classDef o fill:#2c6aa0,stroke:#2c6aa0,color:#fff
+  classDef u fill:#5d6875,stroke:#5d6875,color:#fff
+  classDef b fill:#1f7a70,fill-opacity:0.10,stroke:#1f7a70,stroke-opacity:0.45
+  class s1,s2,s3,s4,s5,s6,s7,s8,s9,s10 b
 ```
 
 ## ugc_wgw_assembly_call
 
-Source `workflows/ugc_wgw_assembly_call.wdl`, depth 1, Mermaid source 905 characters.
+Source `workflows/ugc_wgw_assembly_call.wdl`, depth 1, Mermaid source 987 characters.
 
 Inlined workflows: none.
 
@@ -813,14 +829,15 @@ flowchart TD
   n7 --> n9
   n7 --> n10
   n8 --> n9
-  classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
-  classDef b fill:none,stroke:#8a8f95
+  classDef default fill:none,stroke:#8a8f95
+  classDef o fill:#2c6aa0,stroke:#2c6aa0,color:#fff
+  classDef b fill:#1f7a70,fill-opacity:0.10,stroke:#1f7a70,stroke-opacity:0.45
   class s1,s2,s3,s4 b
 ```
 
 ## ugc_wgw_cohort_pangenome
 
-Source `workflows/ugc_wgw_cohort_pangenome.wdl`, depth 1, Mermaid source 992 characters.
+Source `workflows/ugc_wgw_cohort_pangenome.wdl`, depth 1, Mermaid source 1074 characters.
 
 Inlined workflows: none.
 
@@ -866,7 +883,8 @@ flowchart TD
   n7 --> n8
   n9 --> n10
   n11 --> n12
-  classDef o fill:#cdeae6,stroke:#2a7f77,color:#0f3330
-  classDef b fill:none,stroke:#8a8f95
+  classDef default fill:none,stroke:#8a8f95
+  classDef o fill:#2c6aa0,stroke:#2c6aa0,color:#fff
+  classDef b fill:#1f7a70,fill-opacity:0.10,stroke:#1f7a70,stroke-opacity:0.45
   class s1,s2,s3,s4 b
 ```

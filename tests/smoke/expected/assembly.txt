@@ -9,3 +9,8 @@ flagger_bed/*.asm.flagger.bed
 flagger_summary/*.asm.flagger.summary.tsv
 ugc_wgw_manifest/*.assembly.ugc_wgw_manifest.json
 contig_qc/*.asm.contig_qc.tsv
+read_alignment_bam/*.asm.reads.bam
+read_alignment_bam_index/*.asm.reads.bam.bai
+asm_cpg_pileup_bed/*.asm.reads.5mC.bed.gz
+asm_cpg_pileup_bed_index/*.asm.reads.5mC.bed.gz.tbi
+asm_cpg_pileup_summary/*.asm.reads.summary.json

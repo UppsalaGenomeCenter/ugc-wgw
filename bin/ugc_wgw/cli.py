@@ -104,6 +104,30 @@ def build_parser() -> argparse.ArgumentParser:
     a = cs.add_parser("freeze", help="freeze an immutable, ordered sample list under a cohort ID")
     a.add_argument("cohort_id")
     a.add_argument("--samples", required=True, metavar="FILE", help="one sample ID per line")
+    a = cs.add_parser("rank", help="order a cohort's members for a pangenome graph by the structural variants each adds "
+                                   "(greedy cover of the read-based cohort_merge SV VCF), with saturation curves; "
+                                   "--emit writes the first K of a saved ranking as the member list of a nested cohort")
+    a.add_argument("cohort_id")
+    a.add_argument("--mode", default="standalone", choices=("standalone", "joint"),
+                   help="whose cohort_merge and cohort_qc runs to read (default: standalone)")
+    a.add_argument("--any-version", action="store_true", help="runs of every ugc-wgw version (default: the current one)")
+    a.add_argument("--out-dir", metavar="DIR", help="output directory (default: <results>/reports/rank)")
+    a.add_argument("--first", metavar="FILE", help="members placed at the top in this order (trio children, a control); one ID per line")
+    a.add_argument("--min-depth", type=float, metavar="X", help="leave out members below this mean depth")
+    a.add_argument("--min-read-n50", type=float, metavar="BP", help="leave out members below this read length N50")
+    a.add_argument("--common-min", type=float, default=0.01, metavar="F",
+                   help="carrier frequency from which an SV counts as common and decides the order (default: 0.01)")
+    a.add_argument("--related-min", type=float, default=0.1, metavar="R",
+                   help="cohort_qc relatedness from which a member is held back behind an earlier pick (default: 0.1)")
+    a.add_argument("--jobs", type=int, default=1, metavar="N", help="build missing per-sample digests in N processes")
+    a.add_argument("--threshold", action="append", default=[], metavar="KEY=VALUE", help="QC threshold override, as for summary; repeatable")
+    a.add_argument("--emit", type=int, metavar="K", help="do not rank: write the first K members of the saved ranking "
+                                                         "(0 = all of it, relatives included) for `cohort freeze`")
+    a.add_argument("--pass-list", metavar="FILE", help="with --emit: only members named in FILE (summary --pass-list), "
+                                                       "so a member whose assembly failed QC is replaced by the next in rank")
+    a.add_argument("--from", dest="rank_file", metavar="FILE", help="with --emit: the saved ranking (default: <out-dir>/<cohort_id>.rank.tsv)")
+    a.add_argument("--out", metavar="FILE", help="with --emit: the list to write (default: <out-dir>/<cohort_id>.top<K>.txt)")
+    a.add_argument("--include-related", action="store_true", help="with --emit K: do not skip the held-back relatives")
 
     for name in ("submit", "retry"):
         s = sub.add_parser(name, help="run stages" if name == "submit" else "re-run failed/cancelled runs of one stage")
@@ -405,8 +429,30 @@ def cmd_samples(a: argparse.Namespace) -> int:
 
 
 def cmd_cohort(a: argparse.Namespace) -> int:
-    cfg, db, events, _ = _open(a)
+    cfg, db, events, version = _open(a)
     try:
+        if a.cohort_command == "rank":
+            from . import rank  # noqa: PLC0415 - only this subcommand needs it
+            out_dir = Path(a.out_dir) if a.out_dir else cfg.results_dir / "reports" / "rank"
+            if a.emit is not None:
+                src = Path(a.rank_file) if a.rank_file else out_dir / f"{a.cohort_id}.rank.tsv"
+                if not src.exists():
+                    raise UgcError(f"{src}: no saved ranking (run `ugc-wgw cohort rank {a.cohort_id}` first, or name it with --from)")
+                dest = Path(a.out) if a.out else out_dir / f"{a.cohort_id}.{'all' if a.emit == 0 else 'top' + str(a.emit)}.txt"
+                ids = rank.emit(src, a.emit, pass_list=Path(a.pass_list) if a.pass_list else None, out=dest,
+                                include_related=a.include_related)
+                diag(f"{len(ids)} member(s) of {src.name} -> {dest}")
+                print(dest)
+                return 0
+            code = manifest.load_code_info(cfg.code_dir)
+            reconcile(cfg, db, events, code, {})
+            for p in rank.run(cfg, db, code, cohort_id=a.cohort_id, mode=a.mode, version=None if a.any_version else version,
+                              out_dir=out_dir, digest_dir=cfg.results_dir / "reports" / "summary",
+                              thresholds=summary.thresholds_for(cfg, a.threshold), jobs=max(1, a.jobs),
+                              first_file=Path(a.first) if a.first else None, min_depth=a.min_depth, min_read_n50=a.min_read_n50,
+                              common_min=a.common_min, related_min=a.related_min):
+                print(p)
+            return 0
         thr = summary.thresholds_for(cfg)
         cohort = cohorts.freeze(db, events, a.cohort_id, Path(a.samples), duplicate_threshold=thr["duplicate_relatedness_min"])
         diag(f"froze cohort {cohort.cohort_id}: {len(cohort.members)} samples, sha256 {cohort.sample_list_sha256}")

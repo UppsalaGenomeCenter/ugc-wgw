@@ -39,6 +39,9 @@ ugc-wgw samples check [<id>...] [--stored] [--json | --tsv]   # size, reads, bas
 ugc-wgw samples remove <id>... [--force]                # refused for cohort members; --force deletes run rows too
 ugc-wgw samples list [--mode M] [--stage S] [--status failed,running] [--json]
 ugc-wgw cohort freeze <cohort_id> --samples <ids.txt>
+ugc-wgw cohort rank <cohort_id> [--mode M] [--any-version] [--first FILE] [--min-depth X] [--min-read-n50 BP] [--common-min F]
+            [--related-min R] [--out-dir DIR]             # members ordered by the SVs each adds; curves; a page
+ugc-wgw cohort rank <cohort_id> --emit K [--pass-list FILE] [--from FILE] [--out FILE] [--include-related]   # a nested member list
 ugc-wgw submit --mode {standalone,joint,assembly} [--stage S] [--samples ID... | --samples-file F | --cohort ID]
            [--max-inflight N] [--poll-interval SEC] [--any-version] [--dry-run] [--takeover]
 ugc-wgw retry  --stage S [--mode M] [--samples ... | --cohort ID] [--max-attempts N] [--dry-run] [--takeover]

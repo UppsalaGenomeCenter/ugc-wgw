@@ -254,6 +254,12 @@ cmd_check() {
       log "check $stage $subject: chrM records in $(basename "$jv") (GLnexus must skip chrM)"; return 1
     fi
   done
+  # 0.21.0 invariant: hifiasm's primary contigs are an output exactly when the assembly was not trio-binned
+  if [ "$stage" = assembly ] && [ -s "$cur/outputs.json" ]; then
+    local prim
+    prim=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); t=bool(d.get("ugc_wgw_assembly.trio")); p=bool(d.get("ugc_wgw_assembly.primary_fasta")) and bool(d.get("ugc_wgw_assembly.primary_stats")); print("ok" if p != t else ("trio-binned with primary contigs" if t else "no primary contigs"))' "$cur/outputs.json" 2>/dev/null || echo unreadable)
+    if [ "$prim" != ok ]; then log "check $stage $subject: $prim (outputs.json)"; return 1; fi
+  fi
   # the mitochondrial branch is off when the cohort holds a vcf-kind member (no mitorsaw call): its outputs are not expected then
   local mt_on=1 skipped=0
   case "$stage" in

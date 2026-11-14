@@ -174,9 +174,9 @@ class SequenceTest(unittest.TestCase):
         self.assertEqual(stages.sample_stages("standalone", "bam"), ("upstream", "downstream"))
         self.assertEqual(stages.sample_stages("joint", "vcf"), ("intake", "downstream"))
         self.assertEqual(stages.sample_stages("assembly", "vcf"), ())
-        self.assertEqual(stages.member_sequence("standalone", "vcf"), ("intake", "downstream", "cohort_qc", "cohort_merge", "cohort_freq", "cohort_tr", "cohort_methyl"))
+        self.assertEqual(stages.member_sequence("standalone", "vcf"), ("intake", "downstream", "cohort_qc", "cohort_merge", "cohort_freq", "cohort_tr", "cohort_methyl", "cohort_mqtl"))
         self.assertEqual(stages.member_sequence("joint", "vcf", has_gvcf=False, allow_standalone=True),
-                         ("intake", "cohort_qc", "downstream", "cohort_merge", "cohort_freq", "cohort_tr", "cohort_methyl"))
+                         ("intake", "cohort_qc", "downstream", "cohort_merge", "cohort_freq", "cohort_tr", "cohort_methyl", "cohort_mqtl"))
         self.assertEqual(stages.member_sequence("joint", "vcf", has_gvcf=False), stages.member_sequence("joint", "vcf"))
         with self.assertRaises(UgcError):
             stages.sample_stages("standalone", "fastq")

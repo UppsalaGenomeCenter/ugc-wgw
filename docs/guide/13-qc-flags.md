@@ -84,7 +84,9 @@ another.
 | `tr_outlier_count_high` | warn | The member has many more expansion outliers at ordinary tandem-repeat loci than the others (`cohort_tr`). | `tr_outlier_count_mad_max` (3 scaled MADs above the median) | An ancestry that is rare in the cohort, or a lower depth than the others; only then a sample problem. |
 
 No flag is raised for a class of the disease-locus screen of `cohort_tr`:
-it is a research screen, and a QC status must not carry a finding.
+it is a research screen, and a QC status must not carry a finding. For
+the same reason `cohort_mqtl` raises none; its inflation factor is shown
+on the cohort page with what moves it.
 
 ## Cohort warnings (the whole cohort, not a member)
 

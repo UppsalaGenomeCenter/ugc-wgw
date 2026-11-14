@@ -1210,7 +1210,16 @@ class SummaryEndToEnd(unittest.TestCase):
         self.assertEqual(cd["distributions"]["mito_unexplained"]["threshold"], 0.02)
         self.assertEqual([r["id"] for r in cd["members"]], ["S1", "S2"])
         self.assertEqual(cd["missing_members"], [])
-        self.assertEqual(set(cd["runs"]), {"cohort_qc", "cohort_merge", "cohort_freq", "cohort_tr", "cohort_methyl"})
+        self.assertEqual(set(cd["runs"]), {"cohort_qc", "cohort_merge", "cohort_freq", "cohort_tr", "cohort_methyl", "cohort_mqtl"})
+        # cohort_mqtl: the summary's numbers, the top pairs, the section with its caveats
+        mq = cd["callsets"]["cohort_mqtl"]
+        self.assertEqual((mq["summary"]["pairs"]["total"], mq["summary"]["hits"]["total"], mq["summary"]["inflation"]["lambda"]), (310000, 2, 1.04))
+        self.assertEqual((mq["n_top"], [r["gene_symbol"] for r in mq["top"]]), (2, ["HTT", "ATN1"]))
+        self.assertGreater(mq["mqtl_pairs"]["bytes"], 0)
+        for needle in ('id="sec-mqtl"', "Variants and methylation (cohort_mqtl)", "A research screen, not a diagnostic result", "pairs at q ≤ 0.05",
+                       "inflation factor", "Covariates in the model: sex, granulocyte", "chr4:3074000-3075200", "HTT", "-11.200 per allele",
+                       "3.400 per 100 bp", "islands not tested", "little spread"):
+            self.assertIn(needle, text, needle)
         # identity: cohort_qc's tables read, no flag for two unrelated members without a pedigree; the section and the member pages
         self.assertTrue(cd["identity"]["available"])
         self.assertEqual((cd["identity"]["counts"], cd["identity"]["n_fail"]), ({}, 0))

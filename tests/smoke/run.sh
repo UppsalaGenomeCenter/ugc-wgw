@@ -66,14 +66,14 @@ usage() { sed -n '2,/^# Environment:/p' "$0" | sed '$d'; exit "${1:-0}"; }   # t
 
 mode_of_stage() {
   case "$1" in
-    singleton|cohort_qc|cohort_merge|cohort_freq|cohort_tr|cohort_methyl|intake) echo standalone ;;   # the cohort stages exist in joint too: --mode joint; intake: run.sh entry
+    singleton|cohort_qc|cohort_merge|cohort_freq|cohort_tr|cohort_methyl|cohort_mqtl|intake) echo standalone ;;   # the cohort stages exist in joint too: --mode joint; intake: run.sh entry
     upstream|cohort_call|downstream) echo joint ;;
     assembly|assembly_call|cohort_pangenome) echo assembly ;;
     *) die "unknown stage $1" ;;
   esac
 }
 cohort_of_mode() { case "$1" in joint) echo SMOKEJ ;; *) echo SMOKE ;; esac; }
-is_cohort_stage() { case "$1" in cohort_qc|cohort_call|cohort_merge|cohort_freq|cohort_tr|cohort_methyl|cohort_pangenome) return 0 ;; *) return 1 ;; esac; }
+is_cohort_stage() { case "$1" in cohort_qc|cohort_call|cohort_merge|cohort_freq|cohort_tr|cohort_methyl|cohort_mqtl|cohort_pangenome) return 0 ;; *) return 1 ;; esac; }
 
 sheet=${UGC_WGW_SMOKE_SHEET:-$smoke/data/samples.tsv}     # run.sh entry registers another sheet in its variant project
 cohort_file=${UGC_WGW_SMOKE_COHORT:-$smoke/data/cohort.txt}
@@ -352,6 +352,7 @@ cmd_all() {  # cmd_all [standalone] [joint] [assembly]: the named phases in the 
     cmd_check cohort_freq SMOKE || fails=$((fails + 1))
     cmd_check cohort_tr SMOKE || fails=$((fails + 1))
     cmd_check cohort_methyl SMOKE || fails=$((fails + 1))
+    cmd_check cohort_mqtl SMOKE || fails=$((fails + 1))
   fi
   if [[ "$want" == *" joint "* ]]; then
     phase joint --mode joint --cohort SMOKEJ
@@ -363,6 +364,7 @@ cmd_all() {  # cmd_all [standalone] [joint] [assembly]: the named phases in the 
     cmd_check cohort_freq SMOKEJ || fails=$((fails + 1))
     cmd_check cohort_tr SMOKEJ || fails=$((fails + 1))
     cmd_check cohort_methyl SMOKEJ || fails=$((fails + 1))
+    cmd_check cohort_mqtl SMOKEJ || fails=$((fails + 1))
   fi
   if [[ "$want" == *" assembly "* ]]; then
     # every smoke sample is assembled (HG002 trio-binned, the others not): chr20 only, enough to wire
@@ -876,6 +878,6 @@ case "$1" in
   entry) cmd_entry ;;
   validate) shift; cmd_validate "$@" ;;
   -h|--help) usage ;;
-  singleton|upstream|intake|cohort_qc|cohort_call|downstream|cohort_merge|cohort_freq|cohort_tr|cohort_methyl|assembly|assembly_call|cohort_pangenome) cmd_stage "$@" ;;
+  singleton|upstream|intake|cohort_qc|cohort_call|downstream|cohort_merge|cohort_freq|cohort_tr|cohort_methyl|cohort_mqtl|assembly|assembly_call|cohort_pangenome) cmd_stage "$@" ;;
   *) die "unknown command $1" ;;
 esac

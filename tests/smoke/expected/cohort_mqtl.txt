@@ -1,0 +1,7 @@
+# Expected outputs of ugc_wgw_cohort_mqtl, one glob per line relative to out/.
+mqtl_matrix/*.mqtl.*.matrix.tsv.gz
+mqtl_covariates/*.mqtl.*.covariates.tsv
+mqtl_pairs/*.mqtl.*.pairs.tsv.gz
+mqtl_top/*.mqtl.*.top.tsv
+mqtl_summary/*.mqtl.*.summary.tsv
+ugc_wgw_manifest/*.cohort_mqtl.ugc_wgw_manifest.json

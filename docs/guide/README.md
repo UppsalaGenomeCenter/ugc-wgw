@@ -15,7 +15,8 @@ every command and key.
 **Reading the results** (analysts): 14 reading the pages, with 13 for
 what a QC flag means; 07 to find a file or use the exported tables; the
 stage pages under 08 for what an analysis does and how to read it
-(`cohort_qc`, `cohort_freq`, `cohort_tr`, `cohort_methyl`).
+(`cohort_qc`, `cohort_freq`, `cohort_tr`, `cohort_methyl`,
+`cohort_mqtl`).
 
 ## Chapters
 

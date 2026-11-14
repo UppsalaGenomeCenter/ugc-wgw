@@ -200,7 +200,7 @@ and the cohort stages' outputs (chapter 07, "Cohort tables").
 | Flag | Default | Meaning |
 |---|---|---|
 | `--cohort ID` | required | The frozen cohort. |
-| `--domains D[,D...]` | all | `members`, `coverage`, `variants`, `phasing`, `cn`, `pgx`, `hla`, `mito`, `identity`, `tr`, `methyl`, `assembly`; repeatable. |
+| `--domains D[,D...]` | all | `members`, `coverage`, `variants`, `phasing`, `cn`, `pgx`, `hla`, `mito`, `identity`, `tr`, `methyl`, `mqtl`, `assembly`; repeatable. |
 | `--mode M` | `standalone` | Which runs the digests come from, as for `summary`. |
 | `--any-version` | current | Runs of every ugc-wgw version. |
 | `--out DIR` | `<results>/cohorts/<ID>/<version>/export` | Output directory; refused when it holds files but no `export_manifest.json`, unless `--force`. |

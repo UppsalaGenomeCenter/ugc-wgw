@@ -101,7 +101,7 @@ class SubmitTest(unittest.TestCase):
         runs it alone, and the cohort's status shows it."""
         code, out, err = run_cli(["--project", self.proj, "submit", "--mode", "standalone", "--cohort", "C1"], env={"UGC_WGW_FAKE_FAIL_STAGES": "cohort_qc"})
         self.assertEqual(code, 1, err)                       # a failure is still reported ...
-        self.assertIn("7 done, 1 blocked", err)              # ... but the stages after cohort_qc ran
+        self.assertIn("8 done, 1 blocked", err)              # ... but the stages after cohort_qc ran
         db = self.db()
         try:
             self.assertEqual(db.latest_run("cohort", "C1", "cohort_qc", VERSION).status, "failed")
@@ -180,6 +180,12 @@ class SubmitTest(unittest.TestCase):
             self.assertEqual(used["cohort_merge"], db.latest_run("cohort", "C1", "cohort_merge", VERSION).run_id)
         finally:
             db.close()
+        # one optional stage is read by another: cohort_mqtl takes cohort_qc's ancestry, and only it is named
+        code, out, err = run_cli(base + ["--stage", "cohort_qc", "--rerun", "--dry-run"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("rerun of cohort_qc: these later stages already succeeded", out)
+        self.assertIn("in this order: cohort_mqtl (cohort C1)", out)
+        self.assertNotIn("cohort_merge (cohort C1)", out)
         # per-sample: only the named sample, and the later stages are counted for it
         code, _, err = run_cli(base + ["--stage", "singleton", "--samples", "S2", "--rerun"])
         self.assertEqual(code, 0, err)

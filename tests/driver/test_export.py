@@ -187,6 +187,13 @@ class ExportEndToEnd(unittest.TestCase):
         self.assertTrue(man["source_runs"]["members"]["S1"]["singleton"])
         self.assertEqual(sorted(man["domains"]["tr"]["files"]), tr_names)
         self.assertTrue(man["domains"]["tr"]["source_run"].startswith("C1-cohort_tr-"))
+        # cohort_mqtl's five tables, the matrix and the pairs still gzipped
+        mq = ["C1.mqtl.covariates.tsv", "C1.mqtl.matrix.tsv.gz", "C1.mqtl.pairs.tsv.gz", "C1.mqtl.summary.tsv", "C1.mqtl.top.tsv"]
+        self.assertEqual(sorted(n for n in names if n.startswith("C1.mqtl.")), mq)
+        self.assertEqual(sorted(man["domains"]["mqtl"]["files"]), mq)
+        self.assertTrue(man["domains"]["mqtl"]["source_run"].startswith("C1-cohort_mqtl-"))
+        with gzip.open(self.export_dir / "C1.mqtl.matrix.tsv.gz", "rt") as fh:
+            self.assertEqual(fh.readline().rstrip("\n").split("\t")[:6], ["chrom", "start", "end", "region_label", "gene_symbol", "region_type"])
         self.assertEqual(man["strata"]["kinds"], ["ALL", "sex"])
         self.assertIsNone(man["strata"]["ancestry"])
         for f in man["files"]:

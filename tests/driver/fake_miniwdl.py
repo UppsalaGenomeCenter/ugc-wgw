@@ -346,6 +346,10 @@ def make_outputs(stage: str, inputs: dict[str, object], run_dir: pathlib.Path,
         files["methyl_deconvolution"] = f"{sid}.methyl.{REF}.deconvolution.tsv"   # header only with run_deconvolve false
         if v.get("run_joint_segment"):
             files["joint_segments"] = f"{sid}.methyl.{REF}.joint.meth_regions.bed"
+    elif stage == "cohort_mqtl":
+        for name, suffix in (("mqtl_matrix", "matrix.tsv.gz"), ("mqtl_covariates", "covariates.tsv"), ("mqtl_pairs", "pairs.tsv.gz"),
+                             ("mqtl_top", "top.tsv"), ("mqtl_summary", "summary.tsv")):
+            files[name] = f"{sid}.mqtl.{REF}.{suffix}"
     elif stage == "cohort_tr":
         for name, suffix in (("tr_pathogenic_screen", "screen.tsv"), ("tr_screen_loci", "screen_loci.tsv"), ("tr_locus_summary", "loci.tsv.gz"),
                              ("tr_allele_spectrum", "spectrum.tsv.gz"), ("tr_outlier_pairs", "outliers.tsv.gz"), ("tr_outliers_top", "outliers_top.tsv"),

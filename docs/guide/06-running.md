@@ -502,9 +502,11 @@ reproduced. The rules:
   the outputs of the attempt being replaced until they are rerun too, in
   this order: cohort_freq (cohort C1), cohort_tr (cohort C1), ...`.
   Rerun the ones that should see the new outputs, in that order. An
-  optional stage (`cohort_qc`, `cohort_tr`) is read by no stage, so the
-  line does not appear for it; `summary` and `export` read the new
-  attempt on their next run.
+  optional stage (`cohort_qc`, `cohort_tr`, `cohort_mqtl`) holds no
+  stage up, and `summary` and `export` read its new attempt on their
+  next run. One optional stage is read by another: `cohort_mqtl` takes
+  the ancestry components of `cohort_qc`, so a rerun of `cohort_qc`
+  names `cohort_mqtl` when it has already succeeded.
 
 ## Stopping
 

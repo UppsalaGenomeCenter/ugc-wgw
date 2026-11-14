@@ -40,11 +40,11 @@ under `<results>/<samples|cohorts>/<id>/<v>/<stage>/`.
 flowchart LR
   subgraph standalone
     direction LR
-    a1(["singleton"]):::sample --> a0{{"cohort_qc"}}:::optional --> a2{{"cohort_merge"}}:::cohort --> a3{{"cohort_freq"}}:::cohort --> a5{{"cohort_tr"}}:::optional --> a4{{"cohort_methyl"}}:::cohort
+    a1(["singleton"]):::sample --> a0{{"cohort_qc"}}:::optional --> a2{{"cohort_merge"}}:::cohort --> a3{{"cohort_freq"}}:::cohort --> a5{{"cohort_tr"}}:::optional --> a4{{"cohort_methyl"}}:::cohort --> a6{{"cohort_mqtl"}}:::optional
   end
   subgraph joint
     direction LR
-    b1(["upstream"]):::sample --> b0{{"cohort_qc"}}:::optional --> b2{{"cohort_call"}}:::cohort --> b3(["downstream"]):::sample --> b4{{"cohort_merge"}}:::cohort --> b5{{"cohort_freq"}}:::cohort --> b7{{"cohort_tr"}}:::optional --> b6{{"cohort_methyl"}}:::cohort
+    b1(["upstream"]):::sample --> b0{{"cohort_qc"}}:::optional --> b2{{"cohort_call"}}:::cohort --> b3(["downstream"]):::sample --> b4{{"cohort_merge"}}:::cohort --> b5{{"cohort_freq"}}:::cohort --> b7{{"cohort_tr"}}:::optional --> b6{{"cohort_methyl"}}:::cohort --> b8{{"cohort_mqtl"}}:::optional
   end
   subgraph assembly
     direction LR
@@ -60,13 +60,14 @@ flowchart LR
 
 Rounded nodes run once per sample. Hexagons run once per cohort and start only
 when every frozen member has finished the stage before; `cohort_qc`, the
-identity check, and `cohort_tr`, the tandem-repeat screen, are the
-exceptions: the stages after them never wait for them.
+identity check, `cohort_tr`, the tandem-repeat screen, and `cohort_mqtl`,
+the variant-against-methylation screen, are the exceptions: no stage
+waits for them.
 Text version:
 
 ```
-standalone:  singleton ──► cohort_qc ──► cohort_merge ──► cohort_freq ──► cohort_tr ──► cohort_methyl
-joint:       upstream ──► cohort_qc ──► cohort_call ──► downstream ──► cohort_merge ──► cohort_freq ──► cohort_tr ──► cohort_methyl
+standalone:  singleton ──► cohort_qc ──► cohort_merge ──► cohort_freq ──► cohort_tr ──► cohort_methyl ──► cohort_mqtl
+joint:       upstream ──► cohort_qc ──► cohort_call ──► downstream ──► cohort_merge ──► cohort_freq ──► cohort_tr ──► cohort_methyl ──► cohort_mqtl
 assembly:    assembly ──► assembly_call ──► cohort_pangenome
              per-sample stage    per-cohort stage (waits for every member)
 ```

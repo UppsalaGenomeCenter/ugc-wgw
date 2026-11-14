@@ -234,6 +234,7 @@ def growth_from_hist(hist: dict[int, float], n: int) -> tuple[list[float], list[
 
 
 GROWTH_CHECKPOINTS = (1, 2, 5, 10, 20, 50, 100, 200, 400, 800)
+MQTL_TOP_ROWS = 500   # rows of cohort_mqtl's top table kept in the digest and on the page; the file has them all
 
 
 def _growth_html(growth: dict[str, object]) -> str:
@@ -310,6 +311,54 @@ def pangenome_growth(tables: list[dict[str, object]], members: list[str]) -> dic
         if seen:
             out[name] = [round(v) for v in total]
     return out
+
+
+def _mqtl_html(entry: dict[str, object]) -> str:
+    """The cohort page's cohort_mqtl section: what was tested, how many pairs stand at the false-discovery rate, the
+    inflation factor with what moves it, and the top pairs."""
+    s: dict[str, dict[str, object]] = entry.get("summary") or {}  # type: ignore[assignment]
+
+    def g(metric: str, key: str) -> object:
+        return (s.get(metric) or {}).get(key)
+
+    islands: dict[str, object] = s.get("islands") or {}
+    variants: dict[str, object] = s.get("variants_tested") or {}
+    notes = list((s.get("note") or {}).keys())
+    fdr = g("parameters", "fdr")
+    lam = g("inflation", "lambda")
+    body = ("<p class='small muted'>A research screen, not a diagnostic result: does carrying a structural variant, or a longer tandem repeat, go "
+            "with a different methylation of a CpG island within "
+            f"{_esc(sv.fmt_bp(g('parameters', 'window_bp')))}? One tissue, CpG islands only, autosomes only; an association is not a mechanism.</p>")
+    body += _cards([("members in the model", sv.fmt(g("members", "used"))), ("islands tested", sv.fmt(islands.get("tested"))),
+                    ("variants tested", ", ".join(f"{sv.fmt(v)} {k}" for k, v in sorted(variants.items())) or "0"),
+                    ("pairs tested", sv.fmt(g("pairs", "total"))),
+                    (f"pairs at q ≤ {fdr}", sv.fmt(g("hits", "total"))), ("islands with one", sv.fmt(g("hits", "islands"))),
+                    ("inflation factor", sv.fmt(lam, 2) if lam is not None else "–")])
+    for note in notes:
+        body += f"<p class='warn'>{_esc(note)}.</p>"
+    covs = [k for k in (s.get("covariate") or {}) if k != "intercept"]
+    body += ("<p class='small'>Covariates in the model: " + (_esc(", ".join(covs)) if covs else "none besides the intercept")
+             + ". Sex is there when both are present; the ancestry components and the blood cell fractions only when every member has them.</p>")
+    left = {k: v for k, v in islands.items() if k.startswith("not tested")}
+    if left:
+        body += ("<details><summary>islands not tested</summary>"
+                 + _table(["why", "islands"], [[k.replace("not tested: ", ""), sv.fmt(v)] for k, v in sorted(left.items())], cls="") + "</details>")
+    top: list[dict[str, str]] = entry.get("top") or []  # type: ignore[assignment]
+    if top:
+        rows = [[f"{r.get('chrom')}:{r.get('start')}-{r.get('end')}", r.get("gene_symbol") or "–", r.get("region_type") or "–", r.get("variant_type"),
+                 _clip(str(r.get("variant_id")), 40), sv.fmt(sp._num(r.get("variant_len"))), sv.fmt(sp._num(r.get("distance"))), r.get("n_minor"),
+                 f"{r.get('effect')} {str(r.get('effect_unit') or '').replace('points ', '')}", r.get("p"), r.get("q")] for r in top]
+        n_top = int(entry.get("n_top") or len(top))
+        body += (f"<h3>Pairs at q ≤ {_esc(fdr)}" + (f" (the first {len(top)} of {n_top}, by p-value)" if n_top > len(top) else "") + "</h3>"
+                 + big_table(["island", "gene", "region", "variant", "id", "length (bp)", "distance (bp)", "members off the commonest genotype",
+                              "effect (methylation points)", "p", "q"], rows, what="pairs"))  # type: ignore[arg-type]
+    elif not notes:
+        body += "<p class='muted'>No pair at that false-discovery rate.</p>"
+    body += ("<p class='small muted'>Methylation is rank-normalised across the members before the test; the effect is the slope on the "
+             "original scale. The inflation factor is the median test statistic over its expectation: about 1 when most pairs are null, "
+             "above it when relatives, population structure or a batch run through the cohort (the exclude_ids input leaves members out). "
+             "Every tested pair is in the pairs table of the export.</p>")
+    return body
 
 
 def _pangenome_entry(outs: Outputs, thr: dict[str, float] | None = None) -> dict[str, object]:
@@ -735,6 +784,19 @@ def build_cohort_digest(cohort: Cohort, members: dict[str, dict[str, object]], c
                     if isinstance(p, str) and Path(p).exists():
                         entry[key] = parser(sp.read_lines(Path(p)))  # type: ignore[operator]
                 for name in ("tr_locus_summary", "tr_allele_spectrum", "tr_outlier_pairs"):   # the big tables: sizes only
+                    p = outs.opt(name)
+                    if isinstance(p, str) and Path(p).exists():
+                        entry[name] = {"bytes": Path(p).stat().st_size}
+            elif stage == "cohort_mqtl":
+                p = outs.opt("mqtl_summary")
+                if isinstance(p, str) and Path(p).exists():
+                    entry["summary"] = sp.parse_tr_summary(sp.read_lines(Path(p))).get("mqtl", {})   # the same long format
+                p = outs.opt("mqtl_top")
+                if isinstance(p, str) and Path(p).exists():
+                    _cols, rows_top = sp.table(sp.read_lines(Path(p)))
+                    entry["n_top"] = len(rows_top)
+                    entry["top"] = rows_top[:MQTL_TOP_ROWS]
+                for name in ("mqtl_matrix", "mqtl_pairs"):
                     p = outs.opt(name)
                     if isinstance(p, str) and Path(p).exists():
                         entry[name] = {"bytes": Path(p).stat().st_size}
@@ -1417,6 +1479,12 @@ def render_cohort(d: dict[str, object], tools: list[dict[str, object]], *, proje
     if d.get("mode") != "assembly":
         add("sec-methyl", "Methylation (cohort_methyl)", _methyl_html(meth, cme, dist.get("methyl_events"), thr, link) if cme else
             "<p class='muted'>cohort_methyl has not run for this cohort (<code>ugc-wgw submit --cohort " + _esc(cid) + " --stage cohort_methyl</code>).</p>")
+
+    # structural variants and repeats against methylation (cohort_mqtl, optional)
+    cmq: dict[str, object] = callsets.get("cohort_mqtl", {}) or {}
+    if d.get("mode") != "assembly":
+        add("sec-mqtl", "Variants and methylation (cohort_mqtl)", _mqtl_html(cmq) if cmq.get("summary") else
+            "<p class='muted'>cohort_mqtl has not run for this cohort (<code>ugc-wgw submit --cohort " + _esc(cid) + " --stage cohort_mqtl</code>).</p>")
 
     # targeted callers across the cohort (export.targeted_summary: the same tables `ugc-wgw export` writes)
     tg: dict[str, object] = d.get("targeted", {}) or {}  # type: ignore[assignment]

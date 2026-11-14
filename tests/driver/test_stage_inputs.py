@@ -103,6 +103,9 @@ class SourcesTest(unittest.TestCase):
         self.gen("cohort_freq", "cohort", "C1")                                                # ... so the mt sets travel
         self.gen("cohort_tr", "cohort", "C1")                                                  # cohort_merge's TRGT VCF, index and LPS table, the sex groups
         self.gen("cohort_methyl", "cohort", "C1")                                              # S2 is legacy: its report is null, the stage makes it
+        self.seed("cohort_methyl", "cohort", "C1")
+        self.seed("cohort_qc", "cohort", "C1", run_ancestry=True)
+        self.gen("cohort_mqtl", "cohort", "C1")                                                # cohort_methyl's profiles and cell types, cohort_merge's VCFs, cohort_qc's ancestry
         # assembly, trio and sample mode; assembly_call with (S1 has a singleton) and without read-based calls
         self.gen("assembly", "sample", "K1", "assembly")
         self.gen("assembly", "sample", "S1", "assembly")
@@ -186,7 +189,7 @@ class ListingTest(unittest.TestCase):
 
     def test_stage_and_mode_filters_and_the_table(self):
         rows, _ = self.rows("--mode", "standalone")
-        self.assertEqual(sorted(set(r["stage"] for r in rows)), ["cohort_freq", "cohort_merge", "cohort_methyl", "cohort_qc", "cohort_tr", "singleton"])
+        self.assertEqual(sorted(set(r["stage"] for r in rows)), ["cohort_freq", "cohort_merge", "cohort_methyl", "cohort_mqtl", "cohort_qc", "cohort_tr", "singleton"])
         rows, _ = self.rows("--stage", "assembly")
         self.assertEqual(set(r["stage"] for r in rows), {"assembly"})
         self.assertIn("hifiasm_threads", [r["input"] for r in rows])

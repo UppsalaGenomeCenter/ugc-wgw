@@ -1,0 +1,26 @@
+{
+  "ugc_wgw_cohort_mqtl.ugc_wgw_version": "<ugc_wgw_version>",
+  "ugc_wgw_cohort_mqtl.cohort_id": "String",
+  "ugc_wgw_cohort_mqtl.sample_ids": [
+    "String"
+  ],
+  "ugc_wgw_cohort_mqtl.sample_sexes": [
+    "String (XX, XY or empty per member, aligned with sample_ids)"
+  ],
+  "ugc_wgw_cohort_mqtl.scored_profiles": [
+    "File (scored_profiles_annotated of cohort_methyl, one per member it scored)"
+  ],
+  "ugc_wgw_cohort_mqtl.methyl_deconvolution": "File? (methyl_deconvolution of cohort_methyl)",
+  "ugc_wgw_cohort_mqtl.sv_vcf": "File (cohort_sv_vcf of cohort_merge)",
+  "ugc_wgw_cohort_mqtl.sv_vcf_index": "File (cohort_sv_vcf_index of cohort_merge)",
+  "ugc_wgw_cohort_mqtl.trgt_vcf": "File (cohort_trgt_vcf of cohort_merge)",
+  "ugc_wgw_cohort_mqtl.trgt_vcf_index": "File (cohort_trgt_vcf_index of cohort_merge)",
+  "ugc_wgw_cohort_mqtl.ancestry": "File? (qc_ancestry of cohort_qc)",
+  "ugc_wgw_cohort_mqtl.window_bp": 100000,
+  "ugc_wgw_cohort_mqtl.min_carriers": 10,
+  "ugc_wgw_cohort_mqtl.min_members": 40,
+  "ugc_wgw_cohort_mqtl.fdr": 0.05,
+  "ugc_wgw_cohort_mqtl.ref_map_file": "<local_path_prefix>/ugc_wgw_ref_map.GRCh38_GIABv3.tsv",
+  "ugc_wgw_cohort_mqtl.backend": "HPC",
+  "ugc_wgw_cohort_mqtl.preemptible": true
+}

@@ -17,6 +17,8 @@ class StageSpec:
     builder: str       # function name in inputs.py
     optional: bool = False   # never a prerequisite of the stages after it (cohort_qc: its flags gate a freeze, not a run;
                              # cohort_tr: a screen and a resource nothing downstream reads)
+    reads_optional: tuple[str, ...] = ()   # optional stages whose latest run this stage reads when there is one
+                                           # (cohort_mqtl: cohort_qc's ancestry components); a rerun of one names this stage
 
 
 STAGES: dict[str, StageSpec] = {
@@ -30,14 +32,15 @@ STAGES: dict[str, StageSpec] = {
     "cohort_freq": StageSpec("cohort_freq", "cohort", "ugc_wgw_cohort_freq.wdl", "build_cohort_freq"),
     "cohort_tr": StageSpec("cohort_tr", "cohort", "ugc_wgw_cohort_tr.wdl", "build_cohort_tr", optional=True),
     "cohort_methyl": StageSpec("cohort_methyl", "cohort", "ugc_wgw_cohort_methyl.wdl", "build_cohort_methyl"),
+    "cohort_mqtl": StageSpec("cohort_mqtl", "cohort", "ugc_wgw_cohort_mqtl.wdl", "build_cohort_mqtl", optional=True, reads_optional=("cohort_qc",)),
     "assembly": StageSpec("assembly", "sample", "ugc_wgw_assembly.wdl", "build_assembly"),
     "assembly_call": StageSpec("assembly_call", "sample", "ugc_wgw_assembly_call.wdl", "build_assembly_call"),
     "cohort_pangenome": StageSpec("cohort_pangenome", "cohort", "ugc_wgw_cohort_pangenome.wdl", "build_cohort_pangenome"),
 }
 
 MODES: dict[str, tuple[str, ...]] = {
-    "standalone": ("singleton", "cohort_qc", "cohort_merge", "cohort_freq", "cohort_tr", "cohort_methyl"),
-    "joint": ("upstream", "cohort_qc", "cohort_call", "downstream", "cohort_merge", "cohort_freq", "cohort_tr", "cohort_methyl"),
+    "standalone": ("singleton", "cohort_qc", "cohort_merge", "cohort_freq", "cohort_tr", "cohort_methyl", "cohort_mqtl"),
+    "joint": ("upstream", "cohort_qc", "cohort_call", "downstream", "cohort_merge", "cohort_freq", "cohort_tr", "cohort_methyl", "cohort_mqtl"),
     "assembly": ("assembly", "assembly_call", "cohort_pangenome"),
 }
 

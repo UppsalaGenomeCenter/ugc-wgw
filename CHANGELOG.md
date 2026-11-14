@@ -5,6 +5,45 @@ offline bundle. An entry opens with the upstream tag it is built on and a
 short summary, with anything an existing project has to do; the rest is
 under Details.
 
+## 0.23.0
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin (0.6.0), the
+images and the reference entries unchanged.
+
+A new optional cohort stage, `cohort_mqtl`: are structural variants and
+tandem-repeat lengths associated with the methylation of the CpG islands
+next to them? It runs last in both read-based modes from what
+`cohort_merge` and `cohort_methyl` wrote; no other stage waits for it and
+nothing changes for existing results. A research screen, not a diagnostic
+result.
+
+<details>
+<summary>Details</summary>
+
+- **The methylation matrix.** One table, a row per CpG island and a
+  column per member, from the members' scored profiles (`mqtl_matrix`),
+  with the covariates beside it (`mqtl_covariates`).
+- **The test.** Per region shard, every autosomal island with enough
+  covered members and some spread, against every structural variant
+  (carrier dosage) and tandem repeat (mean allele length) within 100 kb
+  that enough members carry. Methylation is rank-normalised; sex, the
+  ancestry components of `cohort_qc` and the blood cell fractions of the
+  deconvolution are covariates where every member has them; Student's t
+  and Benjamini-Hochberg over the run. Standard-library Python and
+  bcftools in an existing image.
+- **Outputs.** Every tested pair with r, t, p, q and the effect in
+  methylation points (`mqtl_pairs`), the pairs at the false-discovery
+  rate (`mqtl_top`), and a summary with the inflation factor
+  (`mqtl_summary`); a section on the cohort page; `ugc-wgw export
+  --domains mqtl`.
+- **Limits.** Nothing is tested below 40 members with a profile (the
+  tables then hold their headers and a note); autosomes only; cis only;
+  CpG islands only. Relatives and population structure raise the
+  inflation factor shown on the page; `exclude_ids` leaves members out.
+
+</details>
+
 ## 0.22.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

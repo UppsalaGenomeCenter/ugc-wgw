@@ -95,6 +95,18 @@ with many events and an unusual composition is first of all a different
 mixture of cells. [`cohort_methyl`'s page](stages/cohort_methyl.md) has
 "Reading the scores" and "Cell-type composition".
 
+### Variants and methylation (`cohort_mqtl`)
+
+When the stage ran: how many members are in the model, how many islands,
+variants and pairs were tested, how many pairs stand at the
+false-discovery rate, and the inflation factor (about 1 when nothing
+systematic runs through the cohort; the stage's page says what raises
+it). Then the top pairs: the island with its gene and region type, the
+variant, the distance, how many members differ from the commonest
+genotype, the effect in methylation points and the p- and q-values. It
+is a screen for research; a pair is a place to look, starting with the
+island's events in the Methylation section and the carriers' own pages.
+
 ### Targeted callers
 
 Across the cohort: Paraphase copy-number histograms of the regions with

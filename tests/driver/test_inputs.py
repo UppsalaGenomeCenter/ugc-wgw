@@ -282,6 +282,35 @@ class InputsTest(unittest.TestCase):
         self.assertEqual(d["sample_labels"], ["XY", "XY", "XX"])   # S3's sheet sex wins over the coverage call
         self.assertTrue(all("/downstream/" in p for p in d["cpg_pileup_beds"]))
 
+    def test_cohort_mqtl(self):
+        """The association stage reads cohort_merge's SV and TRGT VCFs, cohort_methyl's annotated profiles and cell-type
+        table, the members' sex groups, and cohort_qc's ancestry table only when a run has one. It needs the first two."""
+        for sid, sex in (("S1", "FEMALE"), ("S2", "FEMALE"), ("S3", "")):
+            seed_success(self.cfg, self.db, "singleton", "sample", sid, {"sample_id": sid, "inferred_sex": sex})
+        seed_success(self.cfg, self.db, "cohort_merge", "cohort", "C1", {"cohort_id": "C1", "sample_ids": ["S2", "S1", "S3"], "run_glnexus": True})
+        with self.assertRaises((UgcError, MissingOutputError)):
+            inputs.generate(self.ctx("cohort", "C1"), "cohort_mqtl")              # no cohort_methyl run yet
+        seed_success(self.cfg, self.db, "cohort_methyl", "cohort", "C1", {"cohort_id": "C1", "sample_ids": ["S2", "S1"]})   # S3 has no methylation
+        doc, members = inputs.generate(self.ctx("cohort", "C1"), "cohort_mqtl")
+        d = self.check_doc("cohort_mqtl", doc)
+        self.assertEqual((d["sample_ids"], d["sample_sexes"]), (["S2", "S1", "S3"], ["XX", "XY", "XX"]))
+        self.assertEqual([p.rsplit("/", 1)[-1] for p in d["scored_profiles"]],
+                         ["S2.GRCh38_GIABv3.methbat.scored.annotated.tsv", "S1.GRCh38_GIABv3.methbat.scored.annotated.tsv"])
+        self.assertTrue(d["methyl_deconvolution"].endswith("C1.methyl.GRCh38_GIABv3.deconvolution.tsv"))
+        self.assertTrue(d["sv_vcf"].endswith("C1.merged.GRCh38_GIABv3.structural_variants.vcf.gz"))
+        self.assertTrue(d["sv_vcf_index"].endswith(".structural_variants.vcf.gz.tbi"))
+        self.assertTrue(d["trgt_vcf"].endswith("C1.merged.GRCh38_GIABv3.trgt.vcf.gz"))
+        self.assertNotIn("ancestry", d)                                           # no cohort_qc run: the model goes without the components
+        self.assertNotIn("window_bp", d)
+        stages_used = {(m.get("sample_id") or m.get("cohort_id"), m["stage"]) for m in members}
+        self.assertTrue({("C1", "cohort_merge"), ("C1", "cohort_methyl")} <= stages_used)
+        seed_success(self.cfg, self.db, "cohort_qc", "cohort", "C1", {"cohort_id": "C1", "sample_ids": ["S2", "S1", "S3"], "run_ancestry": True})
+        self.cfg.stage_inputs = {"cohort_mqtl": {"min_members": 4, "exclude_ids": ["S3"]}}
+        d = self.check_doc("cohort_mqtl", inputs.generate(self.ctx("cohort", "C1"), "cohort_mqtl")[0])
+        self.assertTrue(d["ancestry"].endswith("C1.qc.GRCh38_GIABv3.somalier-ancestry.tsv"))
+        self.assertEqual((d["min_members"], d["exclude_ids"]), (4, ["S3"]))
+        self.cfg.stage_inputs = {}
+
     def test_cohort_tr(self):
         """The tandem-repeat stage reads cohort_merge's TRGT VCF, its index and the LPS table, and the members' sex groups;
         no per-sample file. Without a cohort_merge run it has nothing to read."""

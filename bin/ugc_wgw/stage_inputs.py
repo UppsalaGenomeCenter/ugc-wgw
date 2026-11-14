@@ -150,6 +150,17 @@ SOURCES: dict[str, dict[str, Source]] = {
         "trgt_lps": (DRIVER, "cohort_merge outputs (cohort_trgt_lps)"),
         "sample_sexes": (DRIVER, "the resolved sex of each member's run (declared, else coverage, else somalier), as XX/XY"),
     },
+    "cohort_mqtl": {
+        **_COMMON, **_COHORT,
+        "sample_sexes": (DRIVER, "the resolved sex of each member's run (declared, else coverage, else somalier), as XX/XY"),
+        "scored_profiles": (DRIVER, "cohort_methyl outputs (scored_profiles_annotated)"),
+        "methyl_deconvolution": (DRIVER, "cohort_methyl outputs (methyl_deconvolution), when the stage wrote it"),
+        "sv_vcf": (DRIVER, "cohort_merge outputs (cohort_sv_vcf)"),
+        "sv_vcf_index": (DRIVER, "cohort_merge outputs (cohort_sv_vcf_index)"),
+        "trgt_vcf": (DRIVER, "cohort_merge outputs (cohort_trgt_vcf)"),
+        "trgt_vcf_index": (DRIVER, "cohort_merge outputs (cohort_trgt_vcf_index)"),
+        "ancestry": (DRIVER, "cohort_qc outputs (qc_ancestry) of the cohort, any version or mode, when a run has one"),
+    },
     "cohort_methyl": {
         **_COMMON, **_COHORT,
         "sample_labels": (DRIVER, "per member: the resolved sex group (XX/XY) and the values of the project's methyl_label_columns as column=value, ';'-joined"),

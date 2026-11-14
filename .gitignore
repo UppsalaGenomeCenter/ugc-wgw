@@ -14,6 +14,6 @@ wheels/
 # python
 __pycache__/
 *.pyc
-.venv/
+.venv
 *.egg-info/
 plugins/ugc_wgw_miniwdl/build/

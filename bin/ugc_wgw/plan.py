@@ -207,9 +207,11 @@ def check_rerun(sel: Selection) -> None:
 def rerun_followups(db: DB, sel: Selection, ugc_wgw_version: str, *, any_version: bool = False) -> list[str]:
     """The stages after `sel.stage` that already succeeded for the rerun's subjects and so keep the outputs of the
     attempt being replaced until they are run again themselves: `stage (n samples)` or `stage (cohort id)`, in the
-    mode's order. Empty for an optional stage, which no stage reads."""
-    if not sel.rerun or not sel.stage or stage_spec(sel.stage).optional:
+    mode's order. An optional stage holds nothing up; only a stage that reads it when it exists (`reads_optional`:
+    cohort_mqtl takes cohort_qc's ancestry) is named for it."""
+    if not sel.rerun or not sel.stage:
         return []
+    optional = stage_spec(sel.stage).optional
     cohort = _cohort(db, sel)
     version = None if any_version else ugc_wgw_version
     samples = _subjects(db, sel, cohort)
@@ -218,6 +220,8 @@ def rerun_followups(db: DB, sel: Selection, ugc_wgw_version: str, *, any_version
         return []
     out: list[str] = []
     for later in stages[stages.index(sel.stage) + 1:]:
+        if optional and sel.stage not in stage_spec(later).reads_optional:
+            continue
         if stage_spec(later).subject_type == "sample":
             n = sum(1 for sid in samples
                     if later in member_stages(db, sel.mode, sid, allow_standalone=sel.allow_standalone_members)

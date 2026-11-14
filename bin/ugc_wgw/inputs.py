@@ -666,6 +666,35 @@ def build_cohort_methyl(ctx: BuildContext) -> dict[str, object]:
     return doc
 
 
+def build_cohort_mqtl(ctx: BuildContext) -> dict[str, object]:
+    """Structural variants and tandem repeats against methylation: cohort_methyl's annotated scored profiles (one per
+    member that stage scored; the workflow reads the sample ID from the file name) and its cell-type table, cohort_merge's
+    SV and TRGT VCFs, the members' sex groups, and cohort_qc's ancestry table when a run of it exists (never required)."""
+    doc = common_inputs(ctx)
+    members = ctx.members()
+    doc["cohort_id"] = ctx.subject_id
+    doc["sample_ids"] = members
+    doc["sample_sexes"] = [_sex_group(ctx, sid, "")[0] for sid in members]
+    _, cm = ctx.prior("cohort_merge", "cohort", ctx.subject_id)
+    doc["sv_vcf"] = cm.req("cohort_sv_vcf")
+    doc["sv_vcf_index"] = cm.req("cohort_sv_vcf_index")
+    doc["trgt_vcf"] = cm.req("cohort_trgt_vcf")
+    doc["trgt_vcf_index"] = cm.req("cohort_trgt_vcf_index")
+    _, me = ctx.prior("cohort_methyl", "cohort", ctx.subject_id)
+    profiles = me.arr("scored_profiles_annotated")
+    if not profiles:
+        raise UgcError(f"cohort_mqtl {ctx.subject_id}: cohort_methyl's run has no annotated scored profile")
+    doc["scored_profiles"] = profiles
+    deconv = me.opt("methyl_deconvolution")
+    if deconv:
+        doc["methyl_deconvolution"] = deconv
+    qc = ctx.optional_prior("cohort_qc", "cohort", ctx.subject_id)
+    ancestry = qc.opt("qc_ancestry") if qc is not None else None
+    if ancestry:
+        doc["ancestry"] = ancestry
+    return doc
+
+
 def _trio_parents(ctx: BuildContext, rec: SampleRecord) -> tuple[SampleRecord, SampleRecord] | None:
     """Both parents registered with reads and distinct from each other and the child -> (father, mother); else None."""
     if not rec.father_id and not rec.mother_id:
@@ -779,6 +808,7 @@ BUILDERS = {
     "cohort_freq": build_cohort_freq,
     "cohort_tr": build_cohort_tr,
     "cohort_methyl": build_cohort_methyl,
+    "cohort_mqtl": build_cohort_mqtl,
     "assembly": build_assembly,
     "assembly_call": build_assembly_call,
     "cohort_pangenome": build_cohort_pangenome,

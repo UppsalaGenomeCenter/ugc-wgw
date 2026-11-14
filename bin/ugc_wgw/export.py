@@ -22,7 +22,7 @@ from .outputs import Outputs
 from .util import UgcError, diag, sha256_file, utc_now, write_json
 
 EXPORT_SCHEMA = 1
-DOMAINS = ("members", "coverage", "variants", "phasing", "cn", "pgx", "hla", "mito", "identity", "tr", "methyl", "assembly")
+DOMAINS = ("members", "coverage", "variants", "phasing", "cn", "pgx", "hla", "mito", "identity", "tr", "methyl", "mqtl", "assembly")
 STRATA = ("none", "sex", "ancestry", "all")
 # domain -> (cohort stage, ((output name, file suffix), ...)): the stage's own tables, copied byte for byte when it ran
 COPY_DOMAINS: dict[str, tuple[str, tuple[tuple[str, str], ...]]] = {
@@ -35,6 +35,8 @@ COPY_DOMAINS: dict[str, tuple[str, tuple[tuple[str, str], ...]]] = {
                                  ("methyl_imprinting", "imprinting"), ("methyl_samples", "samples"), ("methyl_events", "events"),
                                  ("methyl_deconvolution", "deconvolution"),
                                  ("comparisons", "compare"))),   # an array output: one file per pair, `<prefix>.compare.<baseline>_vs_<compare>.tsv`
+    "mqtl": ("cohort_mqtl", (("mqtl_matrix", "matrix"), ("mqtl_covariates", "covariates"), ("mqtl_pairs", "pairs"), ("mqtl_top", "top"),
+                             ("mqtl_summary", "summary"))),   # the matrix and the pairs are gzipped: they keep .gz
 }
 ANCESTRY_SOURCE = ("cohort_qc", "qc_ancestry")   # somalier's ancestry TSV: `#sample_id`, `predicted_ancestry`, probabilities, PCs
 ANCESTRY_NOTE = "ancestry is somalier's projection onto the 1000 Genomes superpopulations (AFR, AMR, EAS, EUR, SAS): a description of structure, not an origin"

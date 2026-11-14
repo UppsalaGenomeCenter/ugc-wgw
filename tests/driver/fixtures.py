@@ -802,6 +802,34 @@ def fixture_bytes(name: str, sid: str, stage: str, inferred_sex: str = "", index
         text = GENOME_BP_HEADER + f"GRCh38#0\t1\t{60_000_000 + index * 1_000_000}\n" + "".join(f"{m}#{h}\t{3 + i}\t{61_000_000 + i * 100_000 - h * 50_000}\n" for i, m in enumerate(ms) for h in (1, 2))
     elif name == "chrom_degree_stats":
         text = DEGREE
+    elif name == "mqtl_summary":
+        n = len(members or [])
+        rows = [("members", "used", n), ("members", "cohort", n), ("covariate", "intercept", 1), ("covariate", "sex", 1), ("covariate", "granulocyte", 1),
+                ("islands", "in the shard", 30000), ("islands", "tested", 9000), ("islands", "not tested: little spread", 18000),
+                ("islands", "not tested: not an autosome", 1200), ("variants_tested", "DEL", 21000), ("variants_tested", "INS", 26000),
+                ("variants_tested", "TR", 140000), ("pairs", "total", 310000), ("hits", "total", 2), ("hits", "islands", 2),
+                ("hits_by_variant_type", "DEL", 1), ("hits_by_variant_type", "TR", 1), ("inflation", "lambda", "1.040"),
+                ("parameters", "fdr", "0.05"), ("parameters", "window_bp", "100000"), ("parameters", "min_carriers", "10")]
+        text = "resource\tmetric\tkey\tvalue\n" + "".join(f"mqtl\t{m}\t{k}\t{v}\n" for m, k, v in rows)
+    elif name == "mqtl_matrix":
+        ms = members or []
+        text = ("\t".join(["chrom", "start", "end", "region_label", "gene_symbol", "region_type", "n_members", "mean", "sd"] + ms) + "\n"
+                + "\t".join(["chr4", "3074000", "3075200", "CpG:_120", "HTT", "promoter", str(len(ms)), "41.00", "9.50"] + ["41.0"] * len(ms)) + "\n"
+                + "\t".join(["chr12", "6936000", "6936900", "CpG:_88", "ATN1", "gene_body", str(len(ms)), "77.00", "6.10"] + ["77.0"] * len(ms)) + "\n")
+    elif name in ("mqtl_top", "mqtl_pairs"):
+        head = ["chrom", "start", "end", "region_label", "gene_symbol", "region_type", "variant_type", "variant_id", "variant_start", "variant_end",
+                "variant_len", "distance", "n", "n_minor", "r", "t", "df", "p", "effect", "effect_unit", "q"]
+        rows2 = [["chr4", "3074000", "3075200", "CpG:_120", "HTT", "promoter", "DEL", "svx_del_chr4_3080100_612", "3080100", "3080712", "612", "4900", "860",
+                  "44", "-0.3100", "-9.530", "848", "1.500e-20", "-11.200", "points per allele", "4.650e-15"],
+                 ["chr12", "6936000", "6936900", "CpG:_88", "ATN1", "gene_body", "TR", "chr12_6936716_6936773_CAG", "6936716", "6936773", "57", "0", "860",
+                  "120", "0.2100", "6.260", "848", "6.100e-10", "3.400", "points per 100 bp", "9.455e-05"]]
+        if name == "mqtl_pairs":      # every tested pair: the two hits and one that is none
+            rows2.append(["chr12", "6936000", "6936900", "CpG:_88", "ATN1", "gene_body", "INS", "svx_ins_chr12_6990000_210", "6990000", "6990001", "210", "53100",
+                          "860", "31", "0.0100", "0.290", "848", "7.700e-01", "0.300", "points per allele", "7.700e-01"])
+        text = "\t".join(head) + "\n" + "".join("\t".join(r) + "\n" for r in rows2)
+    elif name == "mqtl_covariates":
+        text = "sample_id\tused\twhy_not\tsex\tPC1\tPC2\tPC3\tPC4\tPC5\tgranulocyte\tmonocyte\tT-cell\tB-cell\tNK-cell\n" + "".join(
+            f"{m}\tyes\t\tXX\t\t\t\t\t\t0.5000\t0.1000\t0.2000\t0.0500\t0.0300\n" for m in (members or []))
     elif name == "chrom_growth":
         # per chromosome: 1 Mb of non-reference sequence in every member, 100 kb in each member alone; 60 Mb in all, 500 kb in each alone;
         # the ordered growth adds a member's own 100 kb (500 kb) at its turn

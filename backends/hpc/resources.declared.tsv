@@ -58,7 +58,7 @@ ugc_wgw_haplogrep	1	2G	-	-	-	singleton,upstream,cohort_merge	workflows/ugc_wgw/m
 ugc_wgw_hifiasm_assemble	48	288G	-	-	-	assembly	workflows/ugc_wgw/assembly/hifiasm.wdl:9	cpu from workflow input default; cpu input: hifiasm_threads; memory from workflow input default; memory input: hifiasm_mem_gb; command uses threads
 ugc_wgw_input_checks	1	2G	-	-	-	singleton,upstream,intake	workflows/ugc_wgw/intake/checks.wdl:9	
 ugc_wgw_liftover_unreliable	2	8G	-	-	-	assembly_call	workflows/ugc_wgw/assembly/masking.wdl:7	
-ugc_wgw_manifest_write	1	1G	-	-	-	singleton,upstream,cohort_qc,cohort_call,intake,downstream,cohort_merge,cohort_freq,cohort_tr,cohort_methyl,assembly,assembly_call,cohort_pangenome	workflows/ugc_wgw/provenance.wdl:9	
+ugc_wgw_manifest_write	1	1G	-	-	-	singleton,upstream,cohort_qc,cohort_call,intake,downstream,cohort_merge,cohort_freq,cohort_tr,cohort_methyl,cohort_mqtl,assembly,assembly_call,cohort_pangenome	workflows/ugc_wgw/provenance.wdl:9	
 ugc_wgw_methbat_build	1	8G	-	-	-	cohort_methyl	workflows/ugc_wgw/methyl/cohort.wdl:9	memory from workflow input default; memory input: build_mem_gb
 ugc_wgw_methbat_compare	1	2G	-	-	-	cohort_methyl	workflows/ugc_wgw/methyl/cohort.wdl:267	
 ugc_wgw_methbat_deconvolve	1	4G	-	-	-	cohort_methyl	workflows/ugc_wgw/methyl/cohort.wdl:487	memory from input default
@@ -70,6 +70,9 @@ ugc_wgw_minimap2_align_asm	16	32G	-	-	-	assembly_call	workflows/ugc_wgw/assembly
 ugc_wgw_mito_collapse	1	1G	-	-	-	singleton,upstream,cohort_merge	workflows/ugc_wgw/mito/collapse.wdl:9	
 ugc_wgw_mito_haplogroups_gather	1	1G	-	-	-	cohort_merge	workflows/ugc_wgw/mito/merge.wdl:110	
 ugc_wgw_mito_merge	2	4G	-	-	-	cohort_merge	workflows/ugc_wgw/mito/merge.wdl:9	cpu from input default; memory from input default; command uses threads
+ugc_wgw_mqtl_gather	1	4G	-	-	-	cohort_mqtl	workflows/ugc_wgw/mqtl/cohort.wdl:700	memory from workflow input default; memory input: gather_mem_gb
+ugc_wgw_mqtl_matrix	1	8G	-	-	-	cohort_mqtl	workflows/ugc_wgw/mqtl/cohort.wdl:7	memory from workflow input default; memory input: matrix_mem_gb
+ugc_wgw_mqtl_shard	1	8G	-	-	-	cohort_mqtl	workflows/ugc_wgw/mqtl/cohort.wdl:204	memory from workflow input default; memory input: shard_mem_gb
 ugc_wgw_pangenome_freq_summary	1	4G	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/vcf_post.wdl:169	
 ugc_wgw_pangenome_growth	4	-	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/growth.wdl:7	cpu from input default; memory: "~{mem} GiB" where gfa = ugc_wgw_cactus_chrom.gfa; mem = select_first([mem_gb, ceil(size(gfa, "GB") * 10 + 8)]); command uses threads
 ugc_wgw_pangenome_member_stats	1	4G	-	-	-	cohort_pangenome	workflows/ugc_wgw/pangenome/member_stats.wdl:7	
@@ -81,7 +84,7 @@ ugc_wgw_pbdv_call_cpu	32	64G	-	-	-	singleton,upstream	workflows/ugc_wgw/pblab/pb
 ugc_wgw_pbdv_call_gpu	16	64G	-	-	-	singleton,upstream	workflows/ugc_wgw/pblab/pblab.wdl:154	cpu from input default; memory from input default; command uses threads; gpu
 ugc_wgw_pbweave_align	24	96G	-	-	-	singleton,upstream	workflows/ugc_wgw/pblab/pblab.wdl:9	cpu from input default; memory from input default; command uses threads; command uses mem
 ugc_wgw_qc_summary	1	2G	-	-	-	cohort_qc	workflows/ugc_wgw/qc/somalier.wdl:609	
-ugc_wgw_regions_prepare	1	1G	-	-	-	cohort_call,cohort_merge,cohort_freq,cohort_tr	workflows/ugc_wgw/cohort/regions.wdl:9	
+ugc_wgw_regions_prepare	1	1G	-	-	-	cohort_call,cohort_merge,cohort_freq,cohort_tr,cohort_mqtl	workflows/ugc_wgw/cohort/regions.wdl:9	
 ugc_wgw_reliable_regions	1	4G	-	-	-	assembly_call	workflows/ugc_wgw/assembly/masking.wdl:93	
 ugc_wgw_resolve_sex	1	1G	-	-	-	singleton,upstream,intake	workflows/ugc_wgw/qc/somalier.wdl:176	
 ugc_wgw_somalier_ancestry	2	8G	-	-	-	cohort_qc	workflows/ugc_wgw/qc/somalier.wdl:516	memory from workflow input default; memory input: ancestry_mem_gb

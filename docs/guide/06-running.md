@@ -422,7 +422,8 @@ ugc-wgw cohort freeze C1 --samples /proj/ugc/projects/c26/identity.txt
 ```
 
 `--pass-on identity` keeps the members without an identity failure
-(`duplicate`, `pedigree_mismatch`, `sex_not_inferred`) and, of every
+(`duplicate`, `pedigree_mismatch`, `related_hub`, `sex_not_inferred`) and,
+of every
 *undeclared* related pair (relatedness at or above
 `related_relatedness_max`, 0.2, with no pedigree link in the sheet:
 siblings nobody registered, a re-delivered sample under a new ID), the one

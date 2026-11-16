@@ -211,6 +211,18 @@ if [ "$images" = data ] || [ "$images" = install ]; then
     [ ! -f "$mmi" ] && [ ! -f "$asm/human_GRCh38_GIABv3_asm.fasta" ]   # no build images in the bundle: the installer says how to build them and the map still names them
     grep -q 'not built: the bundle carries no quay.io/pacbio/pbmm2' "$scratch/install.log"
   fi
+  # the site file was kept, and an install without --site reads it: the account stays in the new miniwdl.cfg
+  cmp -s "$scratch/site.cfg" "$scratch/prefix/site.cfg" || { echo "the site file was not kept in the prefix" >&2; exit 1; }
+  scripts/install-bundle.sh --bundle "$tarball" --prefix "$scratch/prefix" --force > "$scratch/reinstall-nosite.log" 2>&1
+  grep -q 'site values: .*site.cfg (kept from the last install' "$scratch/reinstall-nosite.log"
+  grep -q '"slurm_account"' "$scratch/prefix/current/miniwdl.cfg" || { echo "an install without --site lost the account" >&2; exit 1; }
+  # a prefix from before the file was kept: no --site is refused instead of rendering a configuration without the site
+  mv "$scratch/prefix/site.cfg" "$scratch/site.kept"
+  if scripts/install-bundle.sh --bundle "$tarball" --prefix "$scratch/prefix" --force > "$scratch/reinstall-refused.log" 2>&1; then
+    echo "an install without --site into a sited prefix was not refused" >&2; exit 1
+  fi
+  grep -q 'no --site given, and the installed version' "$scratch/reinstall-refused.log"
+  grep -q '"slurm_account"' "$scratch/prefix/current/miniwdl.cfg"   # the refusal changed nothing
   # a second install must reuse the tree (no copy), verify it, keep the index, and link every SIF from the store (0 added)
   scripts/install-bundle.sh --bundle "$tarball" --prefix "$scratch/prefix" --site "$scratch/site.cfg" --force > "$scratch/reinstall.log" 2>&1
   grep -q 'reference tree present' "$scratch/reinstall.log"
@@ -266,7 +278,8 @@ assert m["base"]["name"] == a["name"] and m["base"]["images"] == n, m["base"]
 assert sum(1 for f in m["files"] if f["path"].startswith("sif/")) == 1
 assert [i["sif"] for i in m["images"] if i["shipped"]][0].find("hifiasm") >= 0
 PYEOF
-[ "$(stat -c %s "$tarB")" -lt 20000000 ]
+# code and wheels alone (20 MB at 0.23.3 and growing with the repository); the full test bundle is gigabytes
+[ "$(stat -c %s "$tarB")" -lt 40000000 ]
 # verify-only: fine against the prefix that holds A, refused against a fresh one, fine with --sif-source
 scripts/install-bundle.sh --bundle "$tarB" --prefix "$scratch/pfxA" --verify-only > "$scratch/verifyB.log" 2>&1
 grep -q "images: $n_fake required; 1 shipped; $((n_fake - 1)) in the SIF store" "$scratch/verifyB.log"

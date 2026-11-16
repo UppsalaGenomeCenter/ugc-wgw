@@ -5,6 +5,41 @@ offline bundle. An entry opens with the upstream tag it is built on and a
 short summary, with anything an existing project has to do; the rest is
 under Details.
 
+## 0.23.4
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin (0.6.0), the
+images and the reference entries unchanged.
+
+Two changes for sites in production: the identity check finds mildly
+contaminated samples, and the installer no longer renders a configuration
+without the site's values. No workflow changed; nothing has to be run
+again, the pages and pass lists change at the next `ugc-wgw summary`.
+
+**Upgrading:** pass `--site <site file>` to `install-bundle.sh` once more.
+It is kept as `<prefix>/site.cfg` and read from there afterwards.
+
+<details>
+<summary>Details</summary>
+
+- **`related_hub` counts a member's partners from a relatedness of 0.1**
+  (new threshold `related_hub_relatedness_min`; it was 0.2, the level of
+  the `related` warning). A contaminated or mixed sample looks related to
+  many members; a mild one has its partners between 0.1 and 0.2 and was
+  only warned as `related`, with an innocent partner beside it. The pass
+  lists (`--pass-on identity`, `all`) change accordingly. `ugc-wgw cohort
+  rank` counted from 0.1 already.
+- **A sample page's "closest relative"** is the closest member that is
+  not such a hub, or none, with a line naming the hub. A contaminated
+  sample is otherwise the closest relative of nearly everyone.
+- **`install-bundle.sh` keeps the site file** as `<prefix>/site.cfg` and
+  reads it when `--site` is not given. An install without `--site` into a
+  prefix that was installed with a partition or an account, and has no
+  kept file yet, is refused: until now it rendered `miniwdl.cfg` without
+  account, partition, scratch variable and task limits, silently.
+
+</details>
+
 ## 0.23.3
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

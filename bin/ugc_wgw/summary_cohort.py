@@ -559,8 +559,10 @@ def identity_flags(pairs: list[dict[str, object]], members_tbl: list[dict[str, o
     """The cohort-level identity flags per member, from cohort_qc's tables (docs/guide/07-results.md, "Identity"):
     `duplicate` (fail, both members of a pair at or above duplicate_relatedness_min), `pedigree_mismatch` (fail, child and
     parent of a declared pair outside pedigree_relatedness_min..max, or missing from the table), `related` (warn, both
-    members of an undeclared pair at or above related_relatedness_max), `related_hub` (fail, a member related that way to
-    related_hub_min members or more: contamination, whose pairs count against nobody else), `het_outlier` (warn, heterozygosity ratio beyond
+    members of an undeclared pair at or above related_relatedness_max), `related_hub` (fail, a member related at
+    related_hub_relatedness_min or more to related_hub_min members or more: contamination, whose pairs count against nobody
+    else; the count starts at 0.1, below the `related` warning, because a mild mixture has its partners there: the 864
+    cohort's second and third hub, 2026-11-16), `het_outlier` (warn, heterozygosity ratio beyond
     median ± het_ratio_mad_max scaled MADs, from four members), and `sex_mismatch` (warn) for a member whose own run
     predates the somalier extract when cohort_qc's chrX call disagrees with the sheet or the coverage inference."""
     flags: dict[str, list[dict[str, object]]] = {sid: [] for sid in order}
@@ -572,10 +574,11 @@ def identity_flags(pairs: list[dict[str, object]], members_tbl: list[dict[str, o
     dup_min, ped_min, ped_max, rel_max = (thr["duplicate_relatedness_min"], thr["pedigree_relatedness_min"],
                                           thr["pedigree_relatedness_max"], thr["related_relatedness_max"])
     hub_min = int(thr.get("related_hub_min", 10))
+    hub_floor = float(thr.get("related_hub_relatedness_min", 0.1))
     # a member related to many others is the anomaly, not its partners (summary_parsers.related_hubs)
-    hubs = sp.related_hubs(pairs, lo=rel_max, hi=dup_min, hub_min=hub_min)
+    hubs = sp.related_hubs(pairs, lo=hub_floor, hi=dup_min, hub_min=hub_min)
     for sid, n in hubs.items():
-        flag(sid, "related_hub", "fail", f"related at or above {rel_max:g} to {n} members with no pedigree link in the sheet (at least "
+        flag(sid, "related_hub", "fail", f"related at or above {hub_floor:g} to {n} members with no pedigree link in the sheet (at least "
              f"{hub_min}): a contaminated or mixed sample looks related to everyone; its partners are not flagged on its account", n, hub_min)
     rel: dict[tuple[str, str], float] = {}
     for p in pairs:
@@ -633,6 +636,20 @@ def identity_flags(pairs: list[dict[str, object]], members_tbl: list[dict[str, o
             flag(sid, "sex_mismatch", "warn", f"somalier's chrX call in cohort_qc is {som_raw} ({som}) but " + ", ".join(f"{n} says {raw} ({g})" for n, raw, g in dis),
                  som_raw, sample.get("sex_sheet"))
     return flags
+
+
+def closest_clean(pairs: list[dict[str, object]], hubs: set[str]) -> dict[str, dict[str, object]]:
+    """Per member, the closest partner in cohort_qc's pairs table that is not a hub: {relative, relatedness, ibs0}.
+    A member whose every listed partner is a hub has no entry."""
+    best: dict[str, dict[str, object]] = {}
+    for p in pairs:
+        a, b, r = str(p.get("sample_a") or ""), str(p.get("sample_b") or ""), p.get("relatedness")
+        if not isinstance(r, (int, float)) or a in hubs or b in hubs:
+            continue
+        for x, y in ((a, b), (b, a)):
+            if x not in best or float(r) > float(best[x]["relatedness"]):  # type: ignore[arg-type]
+                best[x] = {"relative": y, "relatedness": float(r), "ibs0": p.get("ibs0")}
+    return best
 
 
 def identity_pass(d: dict[str, object], sheet_order: dict[str, int]) -> tuple[list[str], list[tuple[str, str]]]:
@@ -879,8 +896,18 @@ def build_cohort_digest(cohort: Cohort, members: dict[str, dict[str, object]], c
         for fl in iflags.values():
             for code in {str(f["code"]) for f in fl}:
                 counts[code] = counts.get(code, 0) + 1
+        hub_ids = {sid for sid, fl in iflags.items() if any(f.get("code") == "related_hub" for f in fl)}
+        clean = closest_clean(qc_pairs, hub_ids)
+        id_members: dict[str, dict[str, object]] = {}
+        for sid in cohort.members:
+            row = dict(by_id.get(sid, {"sample_id": sid}), flags=iflags.get(sid, []))
+            if sid not in hub_ids and str(row.get("closest_relative") or "") in hub_ids:   # the page shows the closest that is not a hub
+                c = clean.get(sid, {})
+                row.update({"closest_is_hub": True, "closest_clean_relative": c.get("relative"),
+                            "closest_clean_relatedness": c.get("relatedness"), "closest_clean_ibs0": c.get("ibs0")})
+            id_members[sid] = row
         identity.update({"flags": iflags, "counts": counts, "pairs": qc_pairs,
-                         "members": {sid: dict(by_id.get(sid, {"sample_id": sid}), flags=iflags.get(sid, [])) for sid in cohort.members},
+                         "members": id_members,
                          "n_fail": sum(1 for r in present if r.get("identity_status") == "fail"),
                          "legacy_extracted": qc_entry.get("legacy_extracted", [])})
 

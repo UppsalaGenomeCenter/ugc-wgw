@@ -155,7 +155,7 @@ A fixed menu on the left and these sections:
 | Methylation | CpG counts, MethBat's region classes, the imprinting regions; with `--cohort`, the member's cell-type composition beside the cohort's medians. |
 | Targeted callers | Paraphase, mitorsaw with the collapsed chrM counts and a haplogroup per haplotype, StarPhase, kivvi. |
 | Assembly | When the sample has one: below. |
-| Identity | With `--cohort`: closest relative, relatedness and expectation, heterozygosity ratio, somalier's chrX call, ancestry, its identity flags. |
+| Identity | With `--cohort`: closest relative, relatedness and expectation, heterozygosity ratio, somalier's chrX call, ancestry, its identity flags. When the closest sample of the table is a contaminated one (`related_hub`), which is close to everybody, the card shows the closest member that is not, or none, and a line names the hub. |
 | Messages, files, software | The workflow messages, the files read, tool versions as pinned, engine versions, the reference build and its checksums, citations. |
 
 The blocks marked "with `--cohort`" come from the cohort's runs and are

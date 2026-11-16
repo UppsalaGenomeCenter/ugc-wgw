@@ -55,6 +55,7 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "pedigree_relatedness_max": 0.65,     # ... as does one above this (a "parent" that is a duplicate)
     "related_relatedness_max": 0.2,       # an undeclared pair at or above this warns `related`
     "related_hub_min": 10,                # a member related (undeclared) to this many members or more fails `related_hub`: contamination, not kinship; its partners are not flagged on its account
+    "related_hub_relatedness_min": 0.1,   # ... counting the partners from this relatedness on (cohort_qc's table starts there; `cohort rank` counts the same way): a mild mixture has its partners between 0.1 and 0.2
     "het_ratio_mad_max": 3.0,             # het/(het+hom-alt) beyond median ± this many MADs across the cohort warns `het_outlier`
     "tr_outlier_count_mad_max": 3.0,      # a member's expansion outliers at ordinary loci (cohort_tr) beyond median + this many scaled MADs across the cohort warns `tr_outlier_count_high`
     "cell_composition_mad_max": 4.0,      # a member's distance from the cohort's median cell-type composition (cohort_methyl's deconvolution)
@@ -1541,14 +1542,24 @@ def render_sample(d: dict[str, object], tools: list[dict[str, object]], *, proje
         ir = identity_row
         iflags: list[dict[str, object]] = ir.get("flags", []) or []  # type: ignore[assignment]
         exp = ir.get("closest_expected")
+        # the closest sample of cohort_qc's table may be a contaminated one, which is close to everybody: the card then
+        # shows the closest member that is not, and a line names the hub
+        closest, closest_r, closest_ibs0, hub_note = ir.get("closest_relative") or "–", ir.get("closest_relatedness"), ir.get("closest_ibs0"), ""
+        if ir.get("closest_is_hub"):
+            hub_note = (f"<p class='small muted'>The closest sample in cohort_qc's table is <b>{_esc(closest)}</b> (relatedness "
+                        f"{_esc(sv.fmt(closest_r, 3))}), which fails <code>related_hub</code>: a contaminated or mixed sample looks related to "
+                        "everyone, so it is not this member's relative.</p>")
+            closest = ir.get("closest_clean_relative") or "none at 0.1 or above"
+            closest_r, closest_ibs0 = ir.get("closest_clean_relatedness"), ir.get("closest_clean_ibs0")
         add("sec-identity", f"Identity in cohort {identity_cohort}",
-            _cards([("somalier sex (cohort_qc)", ir.get("somalier_sex") or "unknown"), ("closest relative", ir.get("closest_relative") or "–"),
-                    ("relatedness", sv.fmt(ir.get("closest_relatedness"), 3)), ("expected from the pedigree", sv.fmt(exp, 2) if exp not in (None, "") else "none declared"),
-                    ("IBS0 with the closest", sv.fmt(ir.get("closest_ibs0"))), ("heterozygosity ratio", sv.fmt(ir.get("het_ratio"), 3)),
+            _cards([("somalier sex (cohort_qc)", ir.get("somalier_sex") or "unknown"), ("closest relative", closest),
+                    ("relatedness", sv.fmt(closest_r, 3) if closest_r is not None else "–"), ("expected from the pedigree", sv.fmt(exp, 2) if exp not in (None, "") else "none declared"),
+                    ("IBS0 with the closest", sv.fmt(closest_ibs0) if closest_ibs0 is not None else "–"), ("heterozygosity ratio", sv.fmt(ir.get("het_ratio"), 3)),
                     ("ancestry (1000 Genomes projection)", f"{ir.get('ancestry')} ({sv.fmt(ir.get('ancestry_prob'), 2)})" if ir.get("ancestry") else "not run"),
                     ("extract made in cohort_qc", ir.get("extracted_here") or "no")])
             + ("<h3>Identity flags</h3>" + _table(["flag", "severity", "message"], [[f.get("code"), Raw(f"<span class='flag-{_esc(f.get('severity'))}'>{_esc(f.get('severity'))}</span>"), f.get("message")] for f in iflags], cls="")
                if iflags else "<p class='muted'>No identity flag.</p>")
+            + hub_note
             + f"<p class='small muted'>From the cohort's latest <code>cohort_qc</code> run; the cohort page's Identity section has every pair.</p>")
 
     # messages and files

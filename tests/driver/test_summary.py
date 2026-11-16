@@ -703,7 +703,7 @@ class IdentityTest(unittest.TestCase):
                        "identity": {"legacy": False, "somalier": "x"}} for s in order}
         flags = sc.identity_flags(pairs, members, digests, order, thr)
         self.assertEqual([(f["code"], f["severity"], f["value"]) for f in flags["HUB"] if f["code"] != "het_outlier"], [("related_hub", "fail", 12)])
-        self.assertIn("related at or above 0.2 to 12 members", flags["HUB"][0]["message"])
+        self.assertIn("related at or above 0.1 to 12 members", flags["HUB"][0]["message"])
         self.assertEqual(sorted(f["code"] for f in flags["M01"]), ["related"])          # its own pair with M02, not the hub
         self.assertEqual(flags["M03"], [])
         rows = [{"id": s, "present": True, "identity_status": "fail" if any(f["severity"] == "fail" for f in flags[s]) else "pass"} for s in order]
@@ -711,7 +711,7 @@ class IdentityTest(unittest.TestCase):
         passed, excluded = sc.identity_pass(d, {s: i for i, s in enumerate(order)})
         self.assertEqual(passed, ["M01"] + others[2:])
         self.assertEqual([sid for sid, _w in excluded], ["HUB", "M02"])
-        self.assertIn("related at or above 0.2 to 12 members", dict(excluded)["HUB"])
+        self.assertIn("related at or above 0.1 to 12 members", dict(excluded)["HUB"])
         # the hub found later in the sheet changes nothing for its partners
         passed2, excluded2 = sc.identity_pass(d, {s: i for i, s in enumerate(others + ["HUB"])})
         self.assertEqual(passed2, ["M01"] + others[2:])
@@ -719,6 +719,24 @@ class IdentityTest(unittest.TestCase):
         loose = sc.identity_flags(pairs, members, digests, order, dict(thr, related_hub_min=20))
         self.assertEqual(sorted(f["code"] for f in loose["M03"]), ["related"])
         self.assertNotIn("related_hub", {f["code"] for f in loose["HUB"]})
+        # a mild mixture has its partners between 0.1 and 0.2 (the 864 cohort's second and third hub): counted from 0.1
+        # it fails, and the partner it shares a pair of 0.2 or more with is not warned on its account
+        mild = [{"sample_a": "MILD", "sample_b": m, "relatedness": 0.15, "ibs0": 600, "expected": None} for m in others[:11]]
+        mild.append({"sample_a": "MILD", "sample_b": "M12", "relatedness": 0.21, "ibs0": 550, "expected": None})
+        order2 = ["MILD"] + others
+        members2 = [{"sample_id": s, "het_ratio": 0.70 if s == "MILD" else 0.63, "somalier_sex": "MALE"} for s in order2]
+        digests2 = {s: digests.get(s, digests["HUB"]) for s in order2}
+        f2 = sc.identity_flags(mild, members2, digests2, order2, thr)
+        self.assertEqual([(f["code"], f["value"]) for f in f2["MILD"] if f["code"] == "related_hub"], [("related_hub", 12)])
+        self.assertEqual(f2["M12"], [])
+        # counted from 0.2, as before 0.23.4, it is no hub and its one partner at 0.21 is warned with it
+        f3 = sc.identity_flags(mild, members2, digests2, order2, dict(thr, related_hub_relatedness_min=0.2))
+        self.assertNotIn("related_hub", {f["code"] for f in f3["MILD"]})
+        self.assertEqual(sorted(f["code"] for f in f3["M12"]), ["related"])
+        # the closest partner that is not a hub: M01's is M02 (their own pair), M03 has none in the table
+        clean = sc.closest_clean(pairs, {"HUB"})
+        self.assertEqual((clean["M01"]["relative"], clean["M01"]["relatedness"], clean["M01"]["ibs0"]), ("M02", 0.3, 400))
+        self.assertNotIn("M03", clean)
 
     def test_flags_and_pass(self):
         from ugc_wgw import summary_cohort as sc
@@ -1247,6 +1265,19 @@ class SummaryEndToEnd(unittest.TestCase):
         s1 = self.check_html(self.out_dir / "S1.summary.html")
         self.assertIn("Identity in cohort C1", s1)
         self.assertIn("No identity flag", s1)
+        # a member whose closest sample in cohort_qc's table is a hub: the card shows the closest that is not one, or none
+        d1 = json.loads((self.out_dir / "S1.summary.json").read_text())
+        row = {"sample_id": "S1", "somalier_sex": "MALE", "closest_relative": "HUB", "closest_relatedness": 0.222, "closest_ibs0": 650,
+               "het_ratio": 0.65, "flags": [], "closest_is_hub": True, "closest_clean_relative": None, "closest_clean_relatedness": None,
+               "closest_clean_ibs0": None}
+        page = summary.render_sample(d1, [], project_name="p", project_url="", identity_row=row, identity_cohort="C1")
+        for needle in ("none at 0.1 or above", "The closest sample in cohort_qc's table is <b>HUB</b> (relatedness 0.222)", "fails <code>related_hub</code>"):
+            self.assertIn(needle, page, needle)
+        page = summary.render_sample(d1, [], project_name="p", project_url="", identity_cohort="C1",
+                                     identity_row=dict(row, closest_clean_relative="S2", closest_clean_relatedness=0.483, closest_clean_ibs0=290))
+        for needle in (">S2<", "0.483", ">290<", "<b>HUB</b>"):
+            self.assertIn(needle, page, needle)
+        self.assertNotIn("none at 0.1 or above", page)
         self.assertEqual(cd["callsets"]["cohort_merge"]["sv"]["counts"], {"DEL": 2, "INS": 1, "BND": 1, "DUP": 1})
         self.assertEqual(cd["callsets"]["cohort_merge"]["sv"]["samples"], ["S1", "S2"])
         # the mitochondrial sets of cohort_merge and cohort_freq (0.15)

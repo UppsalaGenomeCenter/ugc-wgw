@@ -244,6 +244,12 @@ SIF, because a delta can only be installed where its base was. It ends with
     --references /proj/ugc/references --site site.cfg --activate
 ```
 
+The site file is kept as `<prefix>/site.cfg`. A later install (a delta
+for the next version) reads it when `--site` is not given and says so;
+give `--site` again to change a value. A prefix that was installed with a
+partition or an account before the file was kept refuses an install
+without `--site`, rather than render a configuration without them.
+
 The installer refuses to overwrite an existing `<prefix>/versions/<v>` unless
 `--force` is given. `--activate` repoints `<prefix>/current`; without it the
 version is installed but not current. Before anything is placed, the

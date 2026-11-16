@@ -63,7 +63,7 @@ gates on.
 |---|---|---|---|---|
 | `duplicate` | fail (both members) | A pair is the same individual by relatedness: a re-delivered sample or monozygotic twins. | `duplicate_relatedness_min` (0.9) | Keep one; `--pass-on identity` drops the later one in the sheet. |
 | `pedigree_mismatch` | fail (child and parent) | A parent-child pair the sheet declares is not related like one. | `pedigree_relatedness_min`, `pedigree_relatedness_max` (0.35, 0.65) | A sheet error as often as a swap: check the pedigree first. |
-| `related_hub` | fail | A member is related, without a pedigree link, to many members: contamination makes a sample look related to everyone. Its partners are not flagged on its account. | `related_hub_min` (10 members) | Exclude the member; expect `het_outlier` on it too. |
+| `related_hub` | fail | A member is related, without a pedigree link, to many members: contamination makes a sample look related to everyone. Its partners are not flagged on its account. The partners are counted from a relatedness of 0.1, below the `related` warning: a mildly mixed sample has its partners between 0.1 and 0.2. | `related_hub_min` (10 members), `related_hub_relatedness_min` (0.1; 0.2 before 0.23.4) | Exclude the member; expect `het_outlier` on it too. |
 | `related` | warn | An undeclared pair is related (neither member a hub). | `related_relatedness_max` (0.2) | Declare the relation in the sheet, or keep one member for unrelated-cohort statistics. |
 | `het_outlier` | warn | The member's heterozygosity ratio is far from the cohort's. | `het_ratio_mad_max` (3 scaled MADs) | Contamination or a sample mix when high; consanguinity or ancestry when low. |
 

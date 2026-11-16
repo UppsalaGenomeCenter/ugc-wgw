@@ -21,6 +21,8 @@
 #      {{TASK_RUNTIME_DEFAULTS}} from TASK_TIME_MINUTES + SLURM_PARTITION + SLURM_ACCOUNT (+ the _GPU pair),
 #      {{SINGULARITY_RUN_OPTIONS}} from SINGULARITY_NV,
 #      {{TASK_CPU_MAX}}, {{TASK_MEMORY_MAX}}, {{TASK_RESOURCES}}, {{TASK_SCRATCH_ENV}}; site values from --site KEY=VALUE
+#      (kept as <root>/site.cfg and read from there by a later install without --site; a prefix installed with a
+#      partition or an account and no kept file refuses an install without --site)
 #      lines, see backends/hpc/site.cfg.example); create <root>/resources.tsv from the example when
 #      absent, validate it when present
 #   4. references: copy the build's tree and manifest.json out of the bundled reference data
@@ -411,6 +413,19 @@ fi
 TASK_CONCURRENCY=50; CALL_CACHE_DIR="$prefix/call_cache"; SLURM_EXTRA_ARGS=""; TASK_TIME_MINUTES=4320
 SLURM_PARTITION=""; SLURM_ACCOUNT=""; TASK_CPU_MAX=0; TASK_MEMORY_MAX=0; TASK_RESOURCES="$prefix/resources.tsv"
 SLURM_PARTITION_GPU=""; SLURM_ACCOUNT_GPU=""; SINGULARITY_NV=0; TASK_SCRATCH_ENV=""
+# A later install without --site takes the site file the last install kept (<prefix>/site.cfg). A prefix whose
+# installed version was rendered with a partition or an account, and that has no kept file (installs before 0.23.4),
+# is refused: the new miniwdl.cfg would lose the account, the partition, the scratch variable and the task limits
+# without a word, and its jobs would be submitted that way (the 864 cohort's 0.23.2 install, 2026-11-16).
+site_kept="$prefix/site.cfg"
+if [ -z "$site" ]; then
+  if [ -f "$site_kept" ]; then
+    site=$site_kept
+    log "site values: $site_kept (kept from the last install; --site FILE replaces it)"
+  elif [ -f "$prefix/current/miniwdl.cfg" ] && grep -qE '"slurm_(partition|account)' "$prefix/current/miniwdl.cfg"; then
+    die "no --site given, and the installed version ($(readlink "$prefix/current" 2>/dev/null || echo current)) was rendered with a partition or an account: without the site file this version's miniwdl.cfg would have neither, nor the scratch variable and the task limits. Pass --site <the site file of the last install>; it is kept as $site_kept from now on."
+  fi
+fi
 if [ -n "$site" ]; then
   [ -f "$site" ] || die "site file not found: $site"
   while IFS='=' read -r key value; do
@@ -464,6 +479,10 @@ log "   outputs: hardlinked, symlinked across file systems (ugc_wgw_miniwdl.pth)
 # ---- 3. miniwdl.cfg and the resource policy ---------------------------------
 log "3. miniwdl.cfg"
 mkdir -p "$CALL_CACHE_DIR"
+if [ -n "$site" ] && [ "$site" != "$site_kept" ]; then
+  cp "$site" "$site_kept.tmp" && mv "$site_kept.tmp" "$site_kept"   # the next install without --site reads it
+  log "   site file kept as $site_kept"
+fi
 log "   node-local scratch: ${TASK_SCRATCH_ENV:-off}${TASK_SCRATCH_ENV:+ (bound at /mnt/scratch, TMPDIR inside every task)}"
 "$python_exe" - "$dest/code/backends/hpc/miniwdl.cfg.template" "$dest/miniwdl.cfg" \
   "SIF_CACHE_DIR=$dest/sif" "CALL_CACHE_DIR=$CALL_CACHE_DIR" "TASK_CONCURRENCY=$TASK_CONCURRENCY" \

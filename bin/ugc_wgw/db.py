@@ -480,7 +480,13 @@ class DB:
         if ugc_wgw_version is not None:
             sql += " AND ugc_wgw_version = ?"
             params.append(ugc_wgw_version)
-        sql += where_extra + " ORDER BY attempt DESC, rowid DESC LIMIT 1"
+            order = "attempt DESC, rowid DESC"
+        else:
+            # across versions the attempt number says nothing: it starts at 1 in every version. The latest run is the
+            # one that ended last (a run that has not ended is later still). Until 0.23.2 the highest attempt won,
+            # so `--any-version` gave a stage the inputs of an old version's third attempt over a new first one.
+            order = "COALESCE(finished_at, '9999') DESC, rowid DESC"
+        sql += where_extra + f" ORDER BY {order} LIMIT 1"
         row = self.conn.execute(sql, params).fetchone()
         return _run_from_row(row) if row else None
 

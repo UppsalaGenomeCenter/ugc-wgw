@@ -5,6 +5,31 @@ offline bundle. An entry opens with the upstream tag it is built on and a
 short summary, with anything an existing project has to do; the rest is
 under Details.
 
+## 0.23.3
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin (0.6.0), the
+images and the reference entries unchanged.
+
+A driver fix for projects that have been upgraded: with `--any-version`
+a stage could be given the outputs of an older run of the stage before
+it. No workflow changed.
+
+<details>
+<summary>Details</summary>
+
+- Across versions the driver chose the successful run with the highest
+  attempt number, and attempts start at 1 in every version. A stage with
+  three attempts at an old version and one at a new version was read
+  from the old one. The latest run across versions is now the one that
+  ended last; within a version the attempt number decides as before.
+- `ugc-wgw summary` and `ugc-wgw export` chose by end time already and
+  were not affected.
+- A cohort stage that was run with `--any-version` after the stage it
+  reads had been run again at a newer version should be run once more.
+
+</details>
+
 ## 0.23.2
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

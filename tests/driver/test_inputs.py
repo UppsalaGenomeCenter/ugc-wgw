@@ -523,6 +523,28 @@ class InputsTest(unittest.TestCase):
         _, members = inputs.generate(ctx, "cohort_merge")
         self.assertEqual({m["sample_id"]: m["ugc_wgw_version"] for m in members}, {"S1": "0.0.9", "S2": VERSION, "S3": VERSION})
 
+    def test_any_version_takes_the_run_that_ended_last_not_the_highest_attempt(self):
+        """Attempt numbers start at 1 in every version, so across versions the latest success is the one that ended
+        last (the 864 cohort, 2026-11-16: cohort_mqtl was given cohort_methyl's attempt 3 of 0.16.0 instead of
+        attempt 1 of 0.23.2, and so no cell fractions)."""
+        old = seed_success(self.cfg, self.db, "singleton", "sample", "S1", {"sample_id": "S1"}, version="0.0.9", attempt=3)
+        self.db.conn.execute("UPDATE runs SET finished_at = '2026-01-01T00:00:00Z' WHERE run_id = ?", (old.run_id,))
+        new = seed_success(self.cfg, self.db, "singleton", "sample", "S1", {"sample_id": "S1"})        # attempt 1 at VERSION
+        self.assertEqual(self.db.latest_success("sample", "S1", "singleton", None).run_id, new.run_id)
+        self.assertEqual(self.db.latest_success("sample", "S1", "singleton", "0.0.9").run_id, old.run_id)   # within a version: the attempt
+        for sid in ("S2", "S3"):
+            seed_success(self.cfg, self.db, "singleton", "sample", sid, {"sample_id": sid})
+        ctx = inputs.BuildContext(self.cfg, self.db, "standalone", VERSION, "cohort", "C1", cohort=self.cohort, any_version=True)
+        _, members = inputs.generate(ctx, "cohort_merge")
+        self.assertEqual({m["sample_id"]: m["ugc_wgw_version"] for m in members}["S1"], VERSION)
+        # a rerun at the old version after the upgrade ended later: it is the latest, whatever its number
+        self.db.conn.execute("UPDATE runs SET finished_at = '2099-01-01T00:00:00Z' WHERE run_id = ?", (old.run_id,))
+        self.assertEqual(self.db.latest_success("sample", "S1", "singleton", None).run_id, old.run_id)
+        # a run that has not ended is the latest run (not the latest success)
+        self.db.conn.execute("UPDATE runs SET finished_at = NULL, status = 'running' WHERE run_id = ?", (new.run_id,))
+        self.assertEqual(self.db.latest_run("sample", "S1", "singleton", None).run_id, new.run_id)
+        self.assertEqual(self.db.latest_success("sample", "S1", "singleton", None).run_id, old.run_id)
+
 
 if __name__ == "__main__":
     unittest.main()

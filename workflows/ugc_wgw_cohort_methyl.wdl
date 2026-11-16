@@ -7,6 +7,7 @@ version 1.0
 import "../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/backend_configuration/backend_configuration.wdl" as BackendConfiguration
 import "ugc_wgw/methyl/report.wdl" as MethylReport
 import "ugc_wgw/methyl/cohort.wdl" as Methyl
+import "ugc_wgw/cohort/bundle.wdl" as Bundle
 import "ugc_wgw/provenance.wdl" as Provenance
 
 workflow ugc_wgw_cohort_methyl {
@@ -302,18 +303,46 @@ workflow ugc_wgw_cohort_methyl {
 
   # ---- the tables the driver reads, and provenance ----
 
+  # the summary reads four small files per member; as four tars they are four inputs, not four per member (0.23.2:
+  # the bind list of 864 members' files was longer than Slurm takes on a command line)
+  call Bundle.ugc_wgw_files_bundle as bundle_events { input:
+    files = ugc_wgw_methbat_profile_bg.events,
+    name = "~{out_prefix}.member_events",
+    runtime_attributes = default_runtime_attributes
+  }
+
+  call Bundle.ugc_wgw_files_bundle as bundle_counts { input:
+    files = ugc_wgw_methbat_profile_bg.counts,
+    name = "~{out_prefix}.member_counts",
+    runtime_attributes = default_runtime_attributes
+  }
+
+  call Bundle.ugc_wgw_files_bundle as bundle_reports { input:
+    files = member_report,
+    name = "~{out_prefix}.member_reports",
+    runtime_attributes = default_runtime_attributes
+  }
+
+  if (run_deconvolve) {
+    call Bundle.ugc_wgw_files_bundle as bundle_deconvolution { input:
+      files = select_all(ugc_wgw_methbat_deconvolve.estimate),
+      name = "~{out_prefix}.member_deconvolution",
+      runtime_attributes = default_runtime_attributes
+    }
+  }
+
   call Methyl.ugc_wgw_methyl_summary { input:
     sample_ids = sample_ids,
     labels = sample_labels,
-    events = ugc_wgw_methbat_profile_bg.events,
-    counts = ugc_wgw_methbat_profile_bg.counts,
-    reports = member_report,
+    events_bundle = bundle_events.bundle,
+    counts_bundle = bundle_counts.bundle,
+    reports_bundle = bundle_reports.bundle,
     report_sources = report_source,
     comparisons = ugc_wgw_methbat_compare.comparison,
     compare_notes = ugc_wgw_methbat_compare.note,
     background = ugc_wgw_methbat_build.background,
     methbat_map = methbat_map,
-    deconvolution = select_all(ugc_wgw_methbat_deconvolve.estimate),
+    deconvolution_bundle = bundle_deconvolution.bundle,
     background_min_datasets = background_min_datasets,
     out_prefix = out_prefix,
     mem_gb = summary_mem_gb,

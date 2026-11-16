@@ -660,7 +660,7 @@ flowchart TD
 
 ## ugc_wgw_cohort_methyl
 
-Source `workflows/ugc_wgw_cohort_methyl.wdl`, depth 1, Mermaid source 1126 characters.
+Source `workflows/ugc_wgw_cohort_methyl.wdl`, depth 1, Mermaid source 1360 characters.
 
 Inlined workflows: none.
 
@@ -692,21 +692,32 @@ flowchart TD
   subgraph s8["if run_joint_segment"]
     n8["ugc_wgw_methbat_joint_segment"]:::o
   end
-  n9["ugc_wgw_methyl_summary"]:::o
-  n10["ugc_wgw_manifest_write"]:::o
+  n9["bundle_events"]:::o
+  n10["bundle_counts"]:::o
+  n11["bundle_reports"]:::o
+  subgraph s9["if run_deconvolve"]
+    n12["bundle_deconvolution"]:::o
+  end
+  n13["ugc_wgw_methyl_summary"]:::o
+  n14["ugc_wgw_manifest_write"]:::o
   n1 --> n4
   n1 --> n7
-  n1 --> n9
+  n1 --> n13
   n2 --> n4
-  n3 --> n9
+  n3 --> n11
   n4 --> n5
   n5 --> n9
-  n6 --> n9
-  n7 --> n9
+  n5 --> n10
+  n6 --> n12
+  n7 --> n13
+  n9 --> n13
+  n10 --> n13
+  n11 --> n13
+  n12 --> n13
   classDef default fill:none,stroke:#8a8f95
   classDef o fill:#2c6aa0,stroke:#2c6aa0,color:#fff
   classDef b fill:#1f7a70,fill-opacity:0.10,stroke:#1f7a70,stroke-opacity:0.45
-  class s1,s2,s3,s4,s5,s6,s7,s8 b
+  class s1,s2,s3,s4,s5,s6,s7,s8,s9 b
 ```
 
 ## ugc_wgw_cohort_mqtl

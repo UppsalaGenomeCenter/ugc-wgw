@@ -590,14 +590,14 @@ task ugc_wgw_methyl_summary {
     labels: {
       description: "Their labels, ';'-joined, aligned"
     }
-    events: {
-      description: "Their events files (ugc_wgw_methbat_profile_bg), aligned"
+    events_bundle: {
+      description: "Their events files (ugc_wgw_methbat_profile_bg), aligned; as one tar in the members' order (ugc_wgw_files_bundle)"
     }
-    counts: {
-      description: "Their counts files, aligned"
+    counts_bundle: {
+      description: "Their counts files, aligned; as one tar in the members' order (ugc_wgw_files_bundle)"
     }
-    reports: {
-      description: "Their methbat reports, aligned"
+    reports_bundle: {
+      description: "Their methbat reports, aligned; as one tar in the members' order (ugc_wgw_files_bundle)"
     }
     report_sources: {
       description: "run or stage per member, aligned"
@@ -614,8 +614,8 @@ task ugc_wgw_methyl_summary {
     methbat_map: {
       description: "The CpG-island gene map"
     }
-    deconvolution: {
-      description: "The members' deconvolution estimates, aligned with sample_ids, when run"
+    deconvolution_bundle: {
+      description: "The members' deconvolution estimates, aligned with sample_ids, as one tar, when run"
     }
     background_min_datasets: {
       description: "The minimum members per label for a comparison, for the notes"
@@ -634,29 +634,41 @@ task ugc_wgw_methyl_summary {
   input {
     Array[String] sample_ids
     Array[String] labels
-    Array[File] events
-    Array[File] counts
-    Array[File] reports
+    File events_bundle
+    File counts_bundle
+    File reports_bundle
     Array[String] report_sources
     Array[File] comparisons = []
     Array[String] compare_notes = []
     File background
     File methbat_map
-    Array[File] deconvolution = []
+    File? deconvolution_bundle
     Int background_min_datasets = 10
     String out_prefix
     Int mem_gb = 4
     RuntimeAttributes runtime_attributes
   }
 
-  Int disk_size = ceil(size(background, "GB") * 2 + size(events, "GB") * 3 + 10)
+  Int disk_size = ceil(size(background, "GB") * 2 + size(events_bundle, "GB") * 4 + 10)
 
   command <<<
     set -euo pipefail
 
-    python3 - "~{out_prefix}" "~{write_lines(sample_ids)}" "~{write_lines(labels)}" "~{write_lines(events)}" "~{write_lines(counts)}" \
-      "~{write_lines(reports)}" "~{write_lines(report_sources)}" "~{write_lines(comparisons)}" "~{write_lines(compare_notes)}" \
-      "~{background}" "~{methbat_map}" "~{write_lines(deconvolution)}" ~{background_min_datasets} <<'EOF'
+    # the per-member files arrive as tars (one input each instead of one per member: the bind list of 864 members
+    # times four files was more than Slurm takes on a command line); the entries sort into the members' order
+    unpack() {  # unpack <tar or nothing> <name>: <name>.list holds the extracted paths in order
+      mkdir -p "$2"
+      if [ -n "$1" ]; then tar -xf "$1" -C "$2"; fi
+      find "$PWD/$2" -type f | LC_ALL=C sort > "$2.list"
+    }
+    unpack "~{events_bundle}" events
+    unpack "~{counts_bundle}" counts
+    unpack "~{reports_bundle}" reports
+    unpack "~{default="" deconvolution_bundle}" deconvolution
+
+    python3 - "~{out_prefix}" "~{write_lines(sample_ids)}" "~{write_lines(labels)}" events.list counts.list \
+      reports.list "~{write_lines(report_sources)}" "~{write_lines(comparisons)}" "~{write_lines(compare_notes)}" \
+      "~{background}" "~{methbat_map}" deconvolution.list ~{background_min_datasets} <<'EOF'
     # ---- methyl_summary.py (begin) ----
     import json, sys
     from collections import Counter, defaultdict

@@ -239,7 +239,7 @@ Reading the tables:
 
 ## ugc_wgw_cohort_methyl
 
-8 tasks, in first-call order.
+9 tasks, in first-call order.
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
@@ -250,6 +250,7 @@ Reading the tables:
 | `ugc_wgw_methbat_deconvolve` | 1 | 4G | memory from input default | `workflows/ugc_wgw/methyl/cohort.wdl:487` |
 | `ugc_wgw_methbat_compare` | 1 | 2G | - | `workflows/ugc_wgw/methyl/cohort.wdl:267` |
 | `ugc_wgw_methbat_joint_segment` | 8 | 32G | cpu from workflow input default; cpu input: joint_segment_threads; memory from workflow input default; memory input: joint_segment_mem_gb; command uses threads | `workflows/ugc_wgw/methyl/cohort.wdl:397` |
+| `ugc_wgw_files_bundle` | 1 | 2G | - | `workflows/ugc_wgw/cohort/bundle.wdl:9` |
 | `ugc_wgw_methyl_summary` | 1 | 4G | memory from workflow input default; memory input: summary_mem_gb | `workflows/ugc_wgw/methyl/cohort.wdl:561` |
 
 ## ugc_wgw_cohort_mqtl

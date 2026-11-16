@@ -106,25 +106,26 @@ inventory (`task-resources.md`). Three fixes, in the order to try them:
 
 Every task runs `apptainer exec` on a SIF from `[singularity] image_cache`,
 named from the image reference (chapter 04). If a task fails at once with an
-Apptainer message about pulling, resolving or opening `docker://...`, the SIF is
-missing or misnamed: compare the image string in the task's `command` (or the
-workflow's `runtime` block) with `ls <prefix>/versions/<v>/sif/`. A missing
-image means the bundle was built without it (`--images ugc-wgw` or `none`) or a
-new tool was added without repopulating the cache; the maintainer rebuilds the
-bundle. (A delta bundle cannot leave an image out: the installer refuses it
-when the site's SIF store lacks one, so a missing SIF under a version means
-the directory, or the store, was edited by hand; chapter 04.) A different registry name in the rendered inputs
-(`ugc_wgw_container_registry`) than the one the SIFs were cached under has the
-same symptom for the svx and trgt-lps tasks of `cohort_merge` and the hifiasm
-and minimap2 tasks of `assembly` and `assembly_call`. A pull attempt
+Apptainer message about pulling, resolving or opening `docker://...`, the
+SIF is missing or misnamed: compare the image string in the task's `command`
+(or the workflow's `runtime` block) with `ls <prefix>/versions/<v>/sif/`. A
+missing image means the bundle was built without it (`--images ugc-wgw` or
+`none`) or a new tool was added without repopulating the cache; the
+maintainer rebuilds the bundle. (A delta bundle cannot leave an image out:
+the installer refuses it when the site's SIF store lacks one, so a missing
+SIF under a version means the directory, or the store, was edited by hand;
+chapter 04.) A different registry name in the rendered inputs
+(`ugc_wgw_container_registry`) than the one the SIFs were cached under has
+the same symptom for the svx and trgt-lps tasks of `cohort_merge` and the
+hifiasm and minimap2 tasks of `assembly` and `assembly_call`. A pull attempt
 (`pinging container registry … i/o timeout`) for an image that the newest
 version does ship means the project's `miniwdl.cfg` is an older version's,
 whose `image_cache` predates the image: since 0.16.0 the driver refuses such
-a project before submitting (`every engine path must belong to one
-installed version`); move it with `ugc-wgw upgrade --install` (chapter 10).
-A run that fails at once with `error_class=OutOfBounds … node=decl-<name>:
-Map key not found` read a reference map that lacks a key the workflow
-needs: the project's `ref_map_file` is a map rendered by an older version
+a project before submitting (`every engine path must belong to one installed
+version`); move it with `ugc-wgw upgrade --install` (chapter 10). A run that
+fails at once with `error_class=OutOfBounds … node=decl-<name>: Map key not
+found` read a reference map that lacks a key the workflow needs: the
+project's `ref_map_file` is a map rendered by an older version
 (`versions/<old>/references/`). The driver now refuses that before
 submitting, naming the keys; `upgrade --install` moves the project to the
 installed version's map.
@@ -184,8 +185,22 @@ what the warnings prevent.
   run_options` (chapter 04); on an install from before 0.12.2 add the four
   words to that line and `ugc-wgw retry` the stage: the per-sample tasks
   replay from the call cache and only the shards run. `ugc-wgw resources`
-  warns when the override is missing. The next ceiling is the total size of
-  the arguments, 2 MB on Linux: about 4,000 samples at two files each.
+  warns when the override is missing. The next ceiling is the one below.
+- **A cohort task is never submitted: `sbatch: error: Batch job submission
+  failed: Pathname of a file, directory or other parameter too long`.**
+  The task has too many input files. miniwdl binds each of them into the
+  container, the bind list is part of the command line `sbatch` is given,
+  and Slurm's controller refuses a submit line above 1 MB
+  (`max_submit_line_size` in `SchedulerParameters`; a site can raise it to
+  2 MB at most). At this pipeline's path lengths that is about 3,400
+  files in one task: a task that takes one file per member reaches it at
+  some 3,400 members, one that takes a VCF and its index per member at
+  about 1,700. Up to 0.23.1 `cohort_methyl`'s summary took four files per
+  member and failed at 864 with the cell-type estimates; since 0.23.2 it
+  reads them as four tars. If another task meets the limit, the remedy is
+  in the workflow (fewer inputs per task), not in the project: report it.
+  Beyond the submit line, Linux allows 2 MB of arguments to one program,
+  about twice as many files.
 - **`ugc-wgw resources`: `run_options has no --nv`**, or the task fails with
   `could not find a GPU` / `CUDA_ERROR_NO_DEVICE` / TensorFlow listing no
   GPU, or pbdv stops within seconds with `CUDA error

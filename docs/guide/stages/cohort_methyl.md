@@ -46,7 +46,9 @@ Text version: one `ugc_wgw_methbat_build` (or N with `leave_one_out`);
 per member `ugc_wgw_methbat_report` when its run has none, then
 `ugc_wgw_methbat_profile_bg`; per pair `ugc_wgw_methbat_compare`;
 optionally `ugc_wgw_methbat_joint_segment` and, per member,
-`ugc_wgw_methbat_deconvolve`; one `ugc_wgw_methyl_summary`; the manifest.
+`ugc_wgw_methbat_deconvolve`; four `ugc_wgw_files_bundle` (the members'
+events, counts, reports and estimates, each as one tar); one
+`ugc_wgw_methyl_summary`; the manifest.
 
 Why the labels matter: the background's statistics are per label, and a
 member is compared against each label it carries (`ALL` always, its sex

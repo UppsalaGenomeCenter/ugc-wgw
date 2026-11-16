@@ -5,6 +5,35 @@ offline bundle. An entry opens with the upstream tag it is built on and a
 short summary, with anything an existing project has to do; the rest is
 under Details.
 
+## 0.23.2
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin (0.6.0), the
+images and the reference entries unchanged.
+
+A fix for large cohorts: `cohort_methyl` could not submit its summary
+task for 864 members (`sbatch: error: Batch job submission failed:
+Pathname of a file, directory or other parameter too long`). Its outputs
+are unchanged; a failed run is submitted again and replays its per-member
+tasks from the call cache.
+
+<details>
+<summary>Details</summary>
+
+- miniwdl binds every input file of a task into its container, and the
+  bind list is part of the command line given to `sbatch`. Slurm refuses a
+  submit line above 1 MB by default (`max_submit_line_size`), which at
+  this pipeline's path lengths is about 3,400 files in one task. The
+  summary took four small files per member.
+- New task `ugc_wgw_files_bundle`: one array of files as one tar whose
+  entries keep the array's order. The members' events, counts, reports
+  and cell-type estimates reach the summary as four tars.
+- The troubleshooting chapter describes the limit: about 3,400 members
+  for a task with one file per member, about 1,700 for one with a VCF and
+  its index per member.
+
+</details>
+
 ## 0.23.1
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

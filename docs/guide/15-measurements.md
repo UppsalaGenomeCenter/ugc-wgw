@@ -86,6 +86,15 @@ until a whole-genome cohort has measured it). The per-sample
 minutes on a whole-genome BAM: the checks read the header and the first
 2,000 reads, the VCF headers and sample lists).
 
+`cohort_mqtl` on 861 members (2026-11-16, 0.23.0): 25,708 islands against
+569,169 variants within 100 kb, 2.41 million pairs.
+
+| task | jobs | cores | peak RSS | wall time (mean) |
+|---|---|---|---|---|
+| `ugc_wgw_mqtl_matrix` | 1 | 1 | 1.4 GB | 4 min |
+| `ugc_wgw_mqtl_shard` | 26 | 1 | 1.1 GB | 3 min |
+| `ugc_wgw_mqtl_gather` | 1 | 1 | 3.2 GB | 1 min |
+
 ## The pangenome's sizes
 
 `cohort_pangenome` has two tasks whose rows the chr20 scaling pilot sets
@@ -250,6 +259,35 @@ alignments, one per read on the other haplotype, doubled the file and
 made a pileup count each read twice; they are not written. And the
 pileup's mapping-quality floor is 0: with 1, 4.4% of the CpGs of the
 assembly had no row.
+
+The stage as 0.21.0 froze it, on five 20x genomes on the cluster
+(2026-11-14; ten runs in the accounting):
+
+| task | cores | request | peak RSS | wall time (mean) |
+|---|---|---|---|---|
+| `ugc_wgw_hifiasm_assemble` | 48 | a whole node | 80 GB | 1h52m |
+| `ugc_wgw_flagger_align` | 32 | 64 GiB | 46 GB (72 %) | 1h00m |
+| `ugc_wgw_flagger_correct_bam` | 8 | 16 GiB | 0.1 GB | 20 min |
+| `ugc_wgw_flagger_hmm` | 16 | 32 GiB | 3.8 GB | 7 min |
+| `methbat_pileup` on the own assembly | 8 | 16 GiB | 1.0 GB | 7 min |
+
+About 130 core-hours per sample for the stage. What a sample keeps:
+
+| output | size |
+|---|---|
+| `read_alignment_bam` (reads on the own assembly, with 5mC tags) | 20 to 23 GiB |
+| `asm_cpg_pileup_bed` | 0.75 to 0.78 GiB |
+| `hap_fastas` (both haplotypes) | 1.7 GiB |
+| `primary_fasta` | 0.87 GiB |
+
+The alignment is nine tenths of the sample's reference-aligned BAM, as on
+the smoke (0.86). The pileup counts 61 to 62 million CpG sites per
+sample, both haplotypes together: twice the 29 million the same reads
+give on the reference, so the reads reach the assembly with their tags.
+The five assemblies are those of the first run (0.12.1) by every figure
+that was kept from it: haplotypes 2.91 to 3.04 Gb, the smaller N50 8.4
+to 14.4 Mb, HMM-Flagger's non-Hap share 0.41 to 1.12 % (0.42 to 1.12 %
+then), no `asm_*` flag.
 
 ## Evaluation profiles
 

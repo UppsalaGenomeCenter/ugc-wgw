@@ -234,7 +234,8 @@ def growth_from_hist(hist: dict[int, float], n: int) -> tuple[list[float], list[
 
 
 GROWTH_CHECKPOINTS = (1, 2, 5, 10, 20, 50, 100, 200, 400, 800)
-MQTL_TOP_ROWS = 500   # rows of cohort_mqtl's top table kept in the digest and on the page; the file has them all
+MQTL_TOP_ROWS = 500   # islands of cohort_mqtl's result kept in the digest and on the page; the files have them all
+MQTL_CELL_TYPES = ("granulocyte", "monocyte", "T-cell", "B-cell", "NK-cell")
 
 
 def _growth_html(growth: dict[str, object]) -> str:
@@ -313,9 +314,22 @@ def pangenome_growth(tables: list[dict[str, object]], members: list[str]) -> dic
     return out
 
 
+def mqtl_islands(top_rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    """cohort_mqtl's top table (pairs in order of p) as one row per island: the lead pair and `n_pairs`, how many
+    pairs of the island stand. What the stage's islands table holds since 0.23.1; a run of 0.23.0 has the pairs alone."""
+    lead: dict[tuple[str, str], dict[str, str]] = {}
+    for r in top_rows:
+        k = (str(r.get("chrom")), str(r.get("start")))
+        if k not in lead:
+            lead[k] = dict(r, n_pairs="0")
+        lead[k]["n_pairs"] = str(int(lead[k]["n_pairs"]) + 1)
+    return list(lead.values())
+
+
 def _mqtl_html(entry: dict[str, object]) -> str:
-    """The cohort page's cohort_mqtl section: what was tested, how many pairs stand at the false-discovery rate, the
-    inflation factor with what moves it, and the top pairs."""
+    """The cohort page's cohort_mqtl section: what was tested, how many pairs and islands stand at the false-discovery
+    rate, the two inflation factors and how to read them, the covariates that are missing, and the islands with
+    their lead pairs."""
     s: dict[str, dict[str, object]] = entry.get("summary") or {}  # type: ignore[assignment]
 
     def g(metric: str, key: str) -> object:
@@ -325,39 +339,59 @@ def _mqtl_html(entry: dict[str, object]) -> str:
     variants: dict[str, object] = s.get("variants_tested") or {}
     notes = list((s.get("note") or {}).keys())
     fdr = g("parameters", "fdr")
-    lam = g("inflation", "lambda")
+    lam, lam_far = g("inflation", "lambda"), g("inflation", "lambda_far")
     body = ("<p class='small muted'>A research screen, not a diagnostic result: does carrying a structural variant, or a longer tandem repeat, go "
             "with a different methylation of a CpG island within "
-            f"{_esc(sv.fmt_bp(g('parameters', 'window_bp')))}? One tissue, CpG islands only, autosomes only; an association is not a mechanism.</p>")
+            f"{_esc(sv.fmt_bp(g('parameters', 'window_bp')))}? One tissue, CpG islands only, autosomes only. An association is not a mechanism: "
+            "small variants are not tested, so the variant named here is often the best marker of a haplotype, not its cause.</p>")
     body += _cards([("members in the model", sv.fmt(g("members", "used"))), ("islands tested", sv.fmt(islands.get("tested"))),
+                    (f"islands with a pair at q ≤ {fdr}", sv.fmt(g("hits", "islands"))),
                     ("variants tested", ", ".join(f"{sv.fmt(v)} {k}" for k, v in sorted(variants.items())) or "0"),
-                    ("pairs tested", sv.fmt(g("pairs", "total"))),
-                    (f"pairs at q ≤ {fdr}", sv.fmt(g("hits", "total"))), ("islands with one", sv.fmt(g("hits", "islands"))),
-                    ("inflation factor", sv.fmt(lam, 2) if lam is not None else "–")])
+                    ("pairs tested", sv.fmt(g("pairs", "total"))), (f"pairs at q ≤ {fdr}", sv.fmt(g("hits", "total"))),
+                    ("inflation, far pairs (the null)", sv.fmt(lam_far, 2) if lam_far is not None else "–"),
+                    ("inflation, tested pairs", sv.fmt(lam, 2) if lam is not None else "–")])
     for note in notes:
         body += f"<p class='warn'>{_esc(note)}.</p>"
     covs = [k for k in (s.get("covariate") or {}) if k != "intercept"]
     body += ("<p class='small'>Covariates in the model: " + (_esc(", ".join(covs)) if covs else "none besides the intercept")
              + ". Sex is there when both are present; the ancestry components and the blood cell fractions only when every member has them.</p>")
+    if not notes:
+        if not any(c in covs for c in MQTL_CELL_TYPES):
+            body += ("<p class='warn'>The blood cell fractions are not in the model: cohort_methyl's run has no cell-type table with every "
+                     "member (a run from before 0.20.0 has none). Rerun cohort_methyl, then this stage.</p>")
+        if not any(c.startswith("PC") for c in covs):
+            body += ("<p class='warn'>The ancestry components are not in the model: no cohort_qc run has them for every member. "
+                     "Population structure is then free to make associations; read the far pairs' inflation factor.</p>")
     left = {k: v for k, v in islands.items() if k.startswith("not tested")}
     if left:
         body += ("<details><summary>islands not tested</summary>"
                  + _table(["why", "islands"], [[k.replace("not tested: ", ""), sv.fmt(v)] for k, v in sorted(left.items())], cls="") + "</details>")
-    top: list[dict[str, str]] = entry.get("top") or []  # type: ignore[assignment]
-    if top:
+    isl: list[dict[str, str]] = entry.get("islands") or []  # type: ignore[assignment]
+    if isl:
+        def effect(r: dict[str, str]) -> str:
+            # a run of 0.23.0 gave repeats per 100 bp, which extrapolates a repeat that varies by a base pair or two
+            v, unit = sp._num(r.get("effect")), str(r.get("effect_unit") or "")
+            if unit == "points per 100 bp" and isinstance(v, (int, float)):
+                v, unit = v / 100.0, "points per bp"
+            return f"{v:.3g} {unit.replace('points ', '')}" if isinstance(v, (int, float)) else "–"
+
         rows = [[f"{r.get('chrom')}:{r.get('start')}-{r.get('end')}", r.get("gene_symbol") or "–", r.get("region_type") or "–", r.get("variant_type"),
                  _clip(str(r.get("variant_id")), 40), sv.fmt(sp._num(r.get("variant_len"))), sv.fmt(sp._num(r.get("distance"))), r.get("n_minor"),
-                 f"{r.get('effect')} {str(r.get('effect_unit') or '').replace('points ', '')}", r.get("p"), r.get("q")] for r in top]
-        n_top = int(entry.get("n_top") or len(top))
-        body += (f"<h3>Pairs at q ≤ {_esc(fdr)}" + (f" (the first {len(top)} of {n_top}, by p-value)" if n_top > len(top) else "") + "</h3>"
-                 + big_table(["island", "gene", "region", "variant", "id", "length (bp)", "distance (bp)", "members off the commonest genotype",
-                              "effect (methylation points)", "p", "q"], rows, what="pairs"))  # type: ignore[arg-type]
+                 effect(r), r.get("p"), r.get("q"), r.get("n_pairs")] for r in isl]
+        n_isl = int(entry.get("n_islands") or len(isl))
+        body += (f"<h3>Islands with a pair at q ≤ {_esc(fdr)}" + (f" (the first {len(isl)} of {n_isl}, by the lead pair's p-value)" if n_isl > len(isl) else "")
+                 + "</h3><p class='small muted'>One row per island: its lead pair, and how many of its pairs stand. Variants on one "
+                 "haplotype are in linkage, so an island counts once however many of them reach the rate.</p>"
+                 + big_table(["island", "gene", "region", "lead variant", "id", "length (bp)", "distance (bp)", "members off the commonest genotype",
+                              "effect (methylation points)", "p", "q", "pairs at the rate"], rows, what="islands"))  # type: ignore[arg-type]
     elif not notes:
         body += "<p class='muted'>No pair at that false-discovery rate.</p>"
     body += ("<p class='small muted'>Methylation is rank-normalised across the members before the test; the effect is the slope on the "
-             "original scale. The inflation factor is the median test statistic over its expectation: about 1 when most pairs are null, "
-             "above it when relatives, population structure or a batch run through the cohort (the exclude_ids input leaves members out). "
-             "Every tested pair is in the pairs table of the export.</p>")
+             "original scale, per copy of a structural variant or per base pair of the member's mean repeat length. An inflation factor is "
+             "the median test statistic over its expectation. Among the far pairs (an island against variants megabases away on its "
+             "chromosome, where no cis effect reaches) it should be about 1; above that, relatives, population structure or a batch run "
+             "through the cohort (the exclude_ids input leaves members out). Among the tested pairs it is also raised by real "
+             "associations and is no measure of trouble by itself. Every tested pair is in the pairs table of the export.</p>")
     return body
 
 
@@ -791,11 +825,18 @@ def build_cohort_digest(cohort: Cohort, members: dict[str, dict[str, object]], c
                 p = outs.opt("mqtl_summary")
                 if isinstance(p, str) and Path(p).exists():
                     entry["summary"] = sp.parse_tr_summary(sp.read_lines(Path(p))).get("mqtl", {})   # the same long format
+                rows_isl: list[dict[str, str]] | None = None
+                p = outs.opt("mqtl_islands")
+                if isinstance(p, str) and Path(p).exists():
+                    _cols, rows_isl = sp.table(sp.read_lines(Path(p)))
                 p = outs.opt("mqtl_top")
                 if isinstance(p, str) and Path(p).exists():
-                    _cols, rows_top = sp.table(sp.read_lines(Path(p)))
-                    entry["n_top"] = len(rows_top)
-                    entry["top"] = rows_top[:MQTL_TOP_ROWS]
+                    if rows_isl is None:      # a run of 0.23.0: the pairs alone
+                        _cols, rows_top = sp.table(sp.read_lines(Path(p)))
+                        rows_isl = mqtl_islands(rows_top)
+                if rows_isl is not None:
+                    entry["n_islands"] = len(rows_isl)
+                    entry["islands"] = rows_isl[:MQTL_TOP_ROWS]
                 for name in ("mqtl_matrix", "mqtl_pairs"):
                     p = outs.opt(name)
                     if isinstance(p, str) and Path(p).exists():

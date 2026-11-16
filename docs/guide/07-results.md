@@ -181,9 +181,12 @@ page says how to read it.
 | `mqtl_covariates` | `.covariates.tsv`: one row per cohort member: `used`, `why_not`, `sex`, `PC1` to `PC5`, the five blood cell fractions. |
 | `mqtl_pairs` | `.pairs.tsv.gz`: one row per tested island and variant: the island's columns, `variant_type` (`INS`, `DEL`, `DUP`, `INV`, `TR`), `variant_id`, `variant_start`, `variant_end`, `variant_len`, `distance`, `n`, `n_minor` (members off the commonest genotype), `r`, `t`, `df`, `p`, `effect`, `effect_unit`, `q`. |
 | `mqtl_top` | `.top.tsv`: the pairs with `q` at or below the false-discovery rate, by p-value. |
-| `mqtl_summary` | `.summary.tsv`: long format: members, islands and variants tested, pairs, hits, covariates in the model, the inflation factor, the parameters. |
+| `mqtl_islands` | `.islands.tsv`: one row per island with such a pair: the lead pair's columns and `n_pairs`. The table to read first. |
+| `mqtl_summary` | `.summary.tsv`: long format: members, islands and variants tested, pairs, hits, covariates in the model, the inflation factors of the tested pairs (`lambda`) and of the far pairs (`lambda_far`, `far_p05_share`), the parameters. |
 
-`ugc-wgw export --domains mqtl` copies the five.
+`effect_unit` is `points per allele` for a structural variant and `points
+per bp` for a repeat (0.23.0: `points per 100 bp`).
+`ugc-wgw export --domains mqtl` copies the six.
 
 ### `intake`
 
@@ -490,7 +493,7 @@ appended.
 | `C1.identity.*.tsv` | copies | the tables of `cohort_qc`, when the stage has run for the cohort in this mode; skipped with a message otherwise |
 | `C1.tr.screen.tsv`, `.screen_loci.tsv`, `.loci.tsv.gz`, `.spectrum.tsv.gz`, `.outliers.tsv.gz`, `.outliers_top.tsv`, `.samples.tsv`, `.summary.tsv` | copies | `cohort_tr`'s tables (above); `C1.tr.screen.tsv` is the one to filter by gene or class, `C1.tr.spectrum.tsv.gz` the allele-length resource |
 | `C1.methyl.background.tsv`, `.summary.tsv`, `.regions.tsv`, `.imprinting.tsv`, `.samples.tsv`, `.events.tsv`, `.compare.<baseline>_vs_<compare>.tsv` | copies | `cohort_methyl`'s tables (chapter 07 above); `C1.methyl.events.tsv` is the one to filter by a gene list |
-| `C1.mqtl.matrix.tsv.gz`, `.covariates.tsv`, `.pairs.tsv.gz`, `.top.tsv`, `.summary.tsv` | copies | `cohort_mqtl`'s tables (above), when the stage has run; the matrix and the pairs stay gzipped |
+| `C1.mqtl.matrix.tsv.gz`, `.covariates.tsv`, `.pairs.tsv.gz`, `.top.tsv`, `.islands.tsv`, `.summary.tsv` | copies | `cohort_mqtl`'s tables (above), when the stage has run; the matrix and the pairs stay gzipped |
 | `export_manifest.json` | | ugc-wgw version, the cohort's freeze, the mode, the digest schema and thresholds, the strata used, the run ids read per member and per cohort stage, the domains written or skipped, every file with its rows, bytes and sha256 |
 
 Frequencies are computed over the members with a call: `n_called` is the

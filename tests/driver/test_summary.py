@@ -7,7 +7,7 @@ from unittest import mock
 from html.parser import HTMLParser
 from pathlib import Path
 
-from ugc_wgw import config, summary
+from ugc_wgw import config, summary, summary_cohort
 from ugc_wgw import summary_parsers as sp
 from ugc_wgw import summary_svg as sv
 from ugc_wgw.db import DB
@@ -1214,12 +1214,27 @@ class SummaryEndToEnd(unittest.TestCase):
         # cohort_mqtl: the summary's numbers, the top pairs, the section with its caveats
         mq = cd["callsets"]["cohort_mqtl"]
         self.assertEqual((mq["summary"]["pairs"]["total"], mq["summary"]["hits"]["total"], mq["summary"]["inflation"]["lambda"]), (310000, 2, 1.04))
-        self.assertEqual((mq["n_top"], [r["gene_symbol"] for r in mq["top"]]), (2, ["HTT", "ATN1"]))
+        self.assertEqual((mq["n_islands"], [(r["gene_symbol"], r["n_pairs"]) for r in mq["islands"]]), (2, [("HTT", "3"), ("ATN1", "1")]))
+        self.assertEqual(mq["summary"]["inflation"]["lambda_far"], 1.01)
         self.assertGreater(mq["mqtl_pairs"]["bytes"], 0)
         for needle in ('id="sec-mqtl"', "Variants and methylation (cohort_mqtl)", "A research screen, not a diagnostic result", "pairs at q ≤ 0.05",
-                       "inflation factor", "Covariates in the model: sex, granulocyte", "chr4:3074000-3075200", "HTT", "-11.200 per allele",
-                       "3.400 per 100 bp", "islands not tested", "little spread"):
+                       "islands with a pair at q ≤ 0.05", "inflation, far pairs (the null)", "inflation, tested pairs",
+                       "Covariates in the model: sex, granulocyte", "chr4:3074000-3075200", "HTT", "-11.2 per allele",
+                       "0.034 per bp", "pairs at the rate", "islands not tested", "little spread", "small variants are not tested",
+                       "The ancestry components are not in the model"):
             self.assertIn(needle, text, needle)
+        self.assertNotIn("The blood cell fractions are not in the model", text)      # the fixture's model has granulocytes
+        # a run of 0.23.0 has the pairs alone: one row per island from them, repeats shown per base pair
+        rows_top = [{"chrom": "chr1", "start": "10", "end": "20", "variant_id": "a", "p": "1e-9", "effect": "250.0", "effect_unit": "points per 100 bp"},
+                    {"chrom": "chr1", "start": "10", "end": "20", "variant_id": "b", "p": "1e-7", "effect": "1.0", "effect_unit": "points per allele"},
+                    {"chrom": "chr2", "start": "10", "end": "20", "variant_id": "c", "p": "1e-5", "effect": "2.0", "effect_unit": "points per allele"}]
+        isl = summary_cohort.mqtl_islands(rows_top)
+        self.assertEqual([(r["variant_id"], r["n_pairs"]) for r in isl], [("a", "2"), ("c", "1")])
+        old = summary_cohort._mqtl_html({"summary": {"parameters": {"fdr": 0.05, "window_bp": 100000}, "covariate": {"sex": 1, "PC1": 1},
+                                                      "inflation": {"lambda": 1.38}}, "islands": isl, "n_islands": 2})
+        for needle in ("2.5 per bp", "The blood cell fractions are not in the model", "inflation, tested pairs"):
+            self.assertIn(needle, old, needle)
+        self.assertNotIn("per 100 bp", old)
         # identity: cohort_qc's tables read, no flag for two unrelated members without a pedigree; the section and the member pages
         self.assertTrue(cd["identity"]["available"])
         self.assertEqual((cd["identity"]["counts"], cd["identity"]["n_fail"]), ({}, 0))

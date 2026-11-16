@@ -5,6 +5,41 @@ offline bundle. An entry opens with the upstream tag it is built on and a
 short summary, with anything an existing project has to do; the rest is
 under Details.
 
+## 0.23.1
+
+Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference
+data container `GRCh38_GIABv3`, as 0.4.0; the miniwdl plugin (0.6.0), the
+images and the reference entries unchanged.
+
+`cohort_mqtl` reports what a first whole cohort showed it should: islands
+instead of pairs, a null to judge inflation by, and repeat effects in a
+unit a repeat spans. Only this stage and its page section changed; a
+result of 0.23.0 stays valid and is drawn the new way.
+
+<details>
+<summary>Details</summary>
+
+- **`mqtl_islands`**: one row per CpG island with a pair at the
+  false-discovery rate, its lead pair and how many of its pairs stand.
+  Variants on one haplotype are in linkage, so pairs overcount; the
+  cohort page lists islands.
+- **A null from far pairs.** Each tested island is also tested against
+  ten variants at least 5 Mb away on its chromosome. Their inflation
+  factor (`lambda_far`) and share beyond the 5 % point (`far_p05_share`)
+  say whether relatives, population structure or a batch inflate the
+  test. The factor of the tested pairs stays in the summary; real
+  associations raise it too.
+- **A repeat's effect is in methylation points per base pair** of the
+  member's mean allele length (`points per bp`), no longer per 100 bp.
+- The page warns when the blood cell fractions or the ancestry
+  components are not in the model (a `cohort_methyl` run from before
+  0.20.0 has no cell-type table: rerun it, then this stage), and says
+  that small variants are not tested, so a lead variant marks a
+  haplotype.
+- `gather_mem_gb` defaults to 8.
+
+</details>
+
 ## 0.23.0
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

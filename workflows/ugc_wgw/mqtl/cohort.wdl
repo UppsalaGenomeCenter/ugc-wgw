@@ -203,13 +203,16 @@ task ugc_wgw_mqtl_matrix {
 
 task ugc_wgw_mqtl_shard {
   meta {
-    description: "One region shard of the screen: every autosomal island of the shard with enough covered members and some spread is tested against every structural variant (carrier dosage 0, 1, 2; svx's ./. is a non-carrier) and every tandem repeat (the mean of the member's two allele lengths) within window_bp of it. Methylation is rank-normalised across the members; both sides are residualised on the covariates (an intercept, sex, the ancestry components and the blood cell fractions when every used member has them); the test is the correlation of the residuals with a two-sided p-value from Student's t. The effect is also given on the methylation scale: points per allele, or per 100 bp of repeat length. A variant is tested when at least min_carriers members differ from the commonest genotype and at least as many have it. Standard-library Python."
+    description: "One region shard of the screen: every autosomal island of the shard with enough covered members and some spread is tested against every structural variant (carrier dosage 0, 1, 2; svx's ./. is a non-carrier) and every tandem repeat (the mean of the member's two allele lengths) within window_bp of it. Methylation is rank-normalised across the members; both sides are residualised on the covariates (an intercept, sex, the ancestry components and the blood cell fractions when every used member has them); the test is the correlation of the residuals with a two-sided p-value from Student's t. The effect is also given on the methylation scale: points per allele, or per base pair of the member's mean repeat length. A variant is tested when at least min_carriers members differ from the commonest genotype and at least as many have it. For calibration every tested island with all members is also tested against far_per_island variants drawn at random at least far_bp away on its chromosome, where no cis effect reaches: their statistics are the run's null (0.23.1). Standard-library Python."
     outputs: {
       pairs: {
         description: "<out_prefix>.pairs.tsv: one row per tested pair (no q-value yet: the gather corrects over the whole run)"
       },
       counts: {
         description: "<out_prefix>.counts.tsv: metric, key, value: islands seen, tested and left out by reason, variants tested by type, the model's covariates, members"
+      },
+      far: {
+        description: "<out_prefix>.far.tsv: the t statistics of the far pairs, one per line"
       }
     }
   }
@@ -257,6 +260,12 @@ task ugc_wgw_mqtl_shard {
     test_trs: {
       description: "Test tandem repeats"
     }
+    far_bp: {
+      description: "A far pair's variant lies at least this far from the island, on the same chromosome"
+    }
+    far_per_island: {
+      description: "Far pairs drawn per tested island (0: none)"
+    }
     out_prefix: {
       description: "Output prefix"
     }
@@ -283,6 +292,8 @@ task ugc_wgw_mqtl_shard {
     Float min_island_sd = 2.0
     Boolean test_svs = true
     Boolean test_trs = true
+    Int far_bp = 5000000
+    Int far_per_island = 10
     String out_prefix
     Int mem_gb = 4
     RuntimeAttributes runtime_attributes
@@ -318,12 +329,15 @@ task ugc_wgw_mqtl_shard {
 
     cat > mqtl_shard.py <<'EOF'
     # ---- mqtl_shard.py (begin) ----
-    import gzip, math, re, sys
+    import gzip, math, random, re, sys
     from array import array
+    from bisect import bisect_left, bisect_right
     from statistics import NormalDist
     (matrix_path, cov_path, bed_path, sv_path, sv_samples_path, tr_path, tr_samples_path, prefix,
      window, min_carriers, min_members, min_frac, min_sd) = sys.argv[1:14]
     window, min_carriers, min_members, min_frac, min_sd = int(window), int(min_carriers), int(min_members), float(min_frac), float(min_sd)
+    far_bp = int(sys.argv[14]) if len(sys.argv) > 14 else 5000000
+    far_n = int(sys.argv[15]) if len(sys.argv) > 15 else 10
     PAIR_COLS = ["chrom", "start", "end", "region_label", "gene_symbol", "region_type", "variant_type", "variant_id", "variant_start",
                  "variant_end", "variant_len", "distance", "n", "n_minor", "r", "t", "df", "p", "effect", "effect_unit"]
     AUTOSOME = re.compile(r"^(chr)?[0-9]+$")
@@ -470,11 +484,15 @@ task ugc_wgw_mqtl_shard {
     for nm in names:
         bump("covariate", nm)
 
-    def write_out(rows):
+    def write_out(rows, far=()):
         with open(prefix + ".pairs.tsv", "w") as out:
             out.write("\t".join(PAIR_COLS) + "\n")
             for r in rows:
                 out.write("\t".join(r) + "\n")
+        with open(prefix + ".far.tsv", "w") as out:
+            out.write("t\n")
+            for x in far:
+                out.write(f"{x:.4f}\n")
         with open(prefix + ".counts.tsv", "w") as out:
             out.write("metric\tkey\tvalue\n")
             for (m, k), v in sorted(counts.items()):
@@ -603,9 +621,14 @@ task ugc_wgw_mqtl_shard {
     tested_variants = set()
     full = tuple(range(n_used))
     cur_chrom, vlist, nxt, active, g_cache = None, [], 0, [], {}
+    # the null: pairs too far apart for any cis effect, drawn the same way in every run of the shard
+    with open(bed_path) as fh:
+        rnd = random.Random("far:" + fh.readline().strip())
+    far, vstarts, far_cache = [], [], {}
     for chrom, start, end, label, gene, rtype, present, y in islands:
         if chrom != cur_chrom:
             cur_chrom, vlist, nxt, active, g_cache = chrom, variants.get(chrom, []), 0, [], {}
+            vstarts, far_cache = [v[0] for v in vlist], {}
         while nxt < len(vlist) and vlist[nxt][0] <= end + window:
             active.append(vlist[nxt])
             nxt += 1
@@ -657,30 +680,60 @@ task ugc_wgw_mqtl_shard {
             r, t, df, p, slope = res
             dist = 0 if (vstart <= end and vend >= start) else (start - vend if vend < start else vstart - end)
             if vtype == "TR":
-                effect, unit = slope * 100.0, "points per 100 bp"
+                effect, unit = slope, "points per bp"
             else:
                 effect, unit = slope, "points per allele"
             rows.append([chrom, str(start), str(end), label, gene, rtype, vtype, vid, str(vstart), str(vend), str(vlen), str(dist), str(len(y)),
-                         str(minor), f"{r:.4f}", f"{t:.3f}", str(df), f"{p:.3e}", f"{effect:.3f}", unit])
+                         str(minor), f"{r:.4f}", f"{t:.3f}", str(df), f"{p:.3e}", f"{effect:.4f}", unit])
             tested_variants.add((vtype, vid))
             bump("pairs", "tested")
             bump("pairs_by_type", vtype)
             island_tested = True
         bump("islands", "tested" if island_tested else "not tested: no usable variant in the window")
+        if island_tested and is_full and far_n > 0:
+            lo = bisect_left(vstarts, start - far_bp)        # the variants before lo and from hi on are far enough
+            hi = bisect_right(vstarts, end + far_bp)
+            pool = lo + (len(vlist) - hi)
+            got = tries = 0
+            while pool and got < far_n and tries < 4 * far_n:
+                tries += 1
+                k = rnd.randrange(pool)
+                v = vlist[k if k < lo else hi + (k - lo)]
+                fk = (v[2], v[3])
+                fhit = far_cache.get(fk)
+                if fhit is None:
+                    gv, _why = usable(v[2], v[5])
+                    if gv is None:
+                        fhit = (None, 0.0)
+                    else:
+                        rg = array("d", residual(gv, q_full))
+                        fhit = (rg, sum(x * x for x in rg))
+                    if len(far_cache) < 4000:
+                        far_cache[fk] = fhit
+                if fhit[0] is None:
+                    continue
+                res = test_residuals(ry, rraw, syy, fhit[0], fhit[1], len(y), len(q))
+                if res is None:
+                    continue
+                far.append(res[1])
+                got += 1
     for vtype, _vid in tested_variants:
         bump("variants_tested", vtype)
-    write_out(rows)
+    if far:
+        bump("far_pairs", "tested", len(far))
+    write_out(rows, far)
     print(f"{len(islands)} islands, {len(rows)} pairs, {n_used} members, covariates: {', '.join(names)}", file=sys.stderr)
     # ---- mqtl_shard.py (end) ----
     EOF
 
     python3 mqtl_shard.py "~{matrix}" "~{covariates}" "~{regions_bed}" sv.txt sv_samples.txt tr.txt tr_samples.txt "~{out_prefix}" \
-      ~{window_bp} ~{min_carriers} ~{min_members} ~{min_island_members_fraction} ~{min_island_sd}
+      ~{window_bp} ~{min_carriers} ~{min_members} ~{min_island_members_fraction} ~{min_island_sd} ~{far_bp} ~{far_per_island}
   >>>
 
   output {
     File pairs = "~{out_prefix}.pairs.tsv"
     File counts = "~{out_prefix}.counts.tsv"
+    File far = "~{out_prefix}.far.tsv"
   }
 
   runtime {
@@ -699,13 +752,16 @@ task ugc_wgw_mqtl_shard {
 
 task ugc_wgw_mqtl_gather {
   meta {
-    description: "The shards' pairs as one table with Benjamini-Hochberg q-values over every test of the run, the pairs at or below the false-discovery rate as the top table, and the summary: members, islands and variants tested and why the others were not, pairs and hits by variant type and region type, the covariates in the model, and the inflation factor (the median of the squared t statistics over 0.455, the median of a chi-square with one degree of freedom)."
+    description: "The shards' pairs as one table with Benjamini-Hochberg q-values over every test of the run, the pairs at or below the false-discovery rate as the top table, and the summary: members, islands and variants tested and why the others were not, pairs and hits by variant type and region type, the covariates in the model, and two inflation factors (the median of the squared t statistics over 0.455, the median of a chi-square with one degree of freedom): of the tested pairs, where real cis effects raise it, and of the far pairs, the run's null, which says whether relatives, population structure or a batch inflate the test. The islands table has one row per island with a pair at the rate: its lead pair and how many pairs stand (variants on one haplotype are in linkage, so the island is the unit of discovery)."
     outputs: {
       pairs_gz: {
         description: "<out_prefix>.pairs.tsv.gz: every tested pair with its q-value, in genome order"
       },
       top: {
         description: "<out_prefix>.top.tsv: the pairs with q at or below fdr, by p-value"
+      },
+      islands: {
+        description: "<out_prefix>.islands.tsv: per island with a pair at or below fdr, its lead pair and n_pairs, by the lead's p-value"
       },
       summary: {
         description: "<out_prefix>.summary.tsv: resource, metric, key, value"
@@ -719,6 +775,9 @@ task ugc_wgw_mqtl_gather {
     }
     counts: {
       description: "The shards' counts tables"
+    }
+    far: {
+      description: "The shards' far-pair statistics"
     }
     fdr: {
       description: "The false-discovery rate of the top table"
@@ -740,10 +799,11 @@ task ugc_wgw_mqtl_gather {
   input {
     Array[File] pairs
     Array[File] counts
+    Array[File] far = []
     Float fdr = 0.05
     String parameters
     String out_prefix
-    Int mem_gb = 4
+    Int mem_gb = 8
     RuntimeAttributes runtime_attributes
   }
 
@@ -757,6 +817,7 @@ task ugc_wgw_mqtl_gather {
     # ---- mqtl_gather.py (begin) ----
     import gzip, sys
     pairs_list, counts_list, fdr, parameters, prefix = sys.argv[1:6]
+    far_list = sys.argv[6] if len(sys.argv) > 6 else ""
     fdr = float(fdr)
     head, rows = None, []
     for path in (l.strip() for l in open(pairs_list) if l.strip()):
@@ -796,6 +857,18 @@ task ugc_wgw_mqtl_gather {
         for i in hits:
             out.write("\t".join(rows[i] + [f"{q[i]:.3e}"]) + "\n")
 
+    # one row per island with a pair at the rate: the lead pair (hits are in order of p) and how many pairs stand
+    lead, n_pairs = {}, {}
+    for i in hits:
+        k = (rows[i][col["chrom"]], rows[i][col["start"]])
+        if k not in lead:
+            lead[k] = i
+        n_pairs[k] = n_pairs.get(k, 0) + 1
+    with open(prefix + ".islands.tsv", "w") as out:
+        out.write("\t".join(head + ["q", "n_pairs"]) + "\n")
+        for k, i in lead.items():
+            out.write("\t".join(rows[i] + [f"{q[i]:.3e}", str(n_pairs[k])]) + "\n")
+
     counts = {}
     for path in (l.strip() for l in open(counts_list) if l.strip()):
         with open(path) as fh:
@@ -825,6 +898,18 @@ task ugc_wgw_mqtl_gather {
         chi = sorted(float(r[col["t"]]) ** 2 for r in rows)
         median = chi[m // 2] if m % 2 else (chi[m // 2 - 1] + chi[m // 2]) / 2.0
         out_rows.append(("mqtl", "inflation", "lambda", f"{median / 0.4549364:.3f}"))
+    far_chi = []
+    for path in (l.strip() for l in open(far_list) if l.strip()) if far_list else ():
+        with open(path) as fh:
+            fh.readline()
+            far_chi.extend(float(l) ** 2 for l in fh if l.strip())
+    if far_chi:
+        far_chi.sort()
+        k = len(far_chi)
+        median = far_chi[k // 2] if k % 2 else (far_chi[k // 2 - 1] + far_chi[k // 2]) / 2.0
+        out_rows.append(("mqtl", "inflation", "lambda_far", f"{median / 0.4549364:.3f}"))
+        # 3.841 is the chi-square of p = 0.05: the share of far pairs beyond it, 0.05 when the test is calibrated
+        out_rows.append(("mqtl", "inflation", "far_p05_share", f"{sum(1 for x in far_chi if x > 3.841459) / k:.4f}"))
     out_rows.append(("mqtl", "parameters", "fdr", f"{fdr:g}"))
     for kv in parameters.split(";"):
         if "=" in kv:
@@ -838,12 +923,13 @@ task ugc_wgw_mqtl_gather {
     # ---- mqtl_gather.py (end) ----
     EOF
 
-    python3 mqtl_gather.py "~{write_lines(pairs)}" "~{write_lines(counts)}" ~{fdr} "~{parameters}" "~{out_prefix}"
+    python3 mqtl_gather.py "~{write_lines(pairs)}" "~{write_lines(counts)}" ~{fdr} "~{parameters}" "~{out_prefix}" "~{write_lines(far)}"
   >>>
 
   output {
     File pairs_gz = "~{out_prefix}.pairs.tsv.gz"
     File top = "~{out_prefix}.top.tsv"
+    File islands = "~{out_prefix}.islands.tsv"
     File summary = "~{out_prefix}.summary.tsv"
   }
 

@@ -98,14 +98,18 @@ mixture of cells. [`cohort_methyl`'s page](stages/cohort_methyl.md) has
 ### Variants and methylation (`cohort_mqtl`)
 
 When the stage ran: how many members are in the model, how many islands,
-variants and pairs were tested, how many pairs stand at the
-false-discovery rate, and the inflation factor (about 1 when nothing
-systematic runs through the cohort; the stage's page says what raises
-it). Then the top pairs: the island with its gene and region type, the
-variant, the distance, how many members differ from the commonest
-genotype, the effect in methylation points and the p- and q-values. It
-is a screen for research; a pair is a place to look, starting with the
-island's events in the Methylation section and the carriers' own pages.
+variants and pairs were tested, how many islands and pairs stand at the
+false-discovery rate, and two inflation factors: of the far pairs, the
+null (about 1 when nothing systematic runs through the cohort), and of
+the tested pairs, which real associations raise as well. A warning names
+a covariate group the model lacks. Then the islands, one row each: the
+island with its gene and region type, its lead variant, the distance,
+how many members differ from the commonest genotype, the effect in
+methylation points, the p- and q-values and how many of the island's
+pairs stand. It is a screen for research; an island is a place to look,
+starting with its events in the Methylation section and the carriers'
+own pages. [`cohort_mqtl`'s page](stages/cohort_mqtl.md) has "Reading
+the result".
 
 ### Targeted callers
 

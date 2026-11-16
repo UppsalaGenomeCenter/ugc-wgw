@@ -262,7 +262,7 @@ Reading the tables:
 | `ugc_wgw_regions_prepare` | 1 | 1G | - | `workflows/ugc_wgw/cohort/regions.wdl:9` |
 | `ugc_wgw_mqtl_matrix` | 1 | 8G | memory from workflow input default; memory input: matrix_mem_gb | `workflows/ugc_wgw/mqtl/cohort.wdl:7` |
 | `ugc_wgw_mqtl_shard` | 1 | 8G | memory from workflow input default; memory input: shard_mem_gb | `workflows/ugc_wgw/mqtl/cohort.wdl:204` |
-| `ugc_wgw_mqtl_gather` | 1 | 4G | memory from workflow input default; memory input: gather_mem_gb | `workflows/ugc_wgw/mqtl/cohort.wdl:700` |
+| `ugc_wgw_mqtl_gather` | 1 | 8G | memory from workflow input default; memory input: gather_mem_gb | `workflows/ugc_wgw/mqtl/cohort.wdl:753` |
 
 ## ugc_wgw_assembly
 

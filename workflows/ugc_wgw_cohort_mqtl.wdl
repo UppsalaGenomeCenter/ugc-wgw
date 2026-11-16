@@ -25,8 +25,11 @@ workflow ugc_wgw_cohort_mqtl {
       mqtl_top: {
         description: "<cohort_id>.mqtl.<ref>.top.tsv: the pairs at or below the false-discovery rate, by p-value"
       },
+      mqtl_islands: {
+        description: "<cohort_id>.mqtl.<ref>.islands.tsv: one row per island with such a pair: its lead pair and how many pairs stand"
+      },
       mqtl_summary: {
-        description: "<cohort_id>.mqtl.<ref>.summary.tsv: members, islands, variants, pairs, hits, the covariates in the model, the inflation factor, the parameters"
+        description: "<cohort_id>.mqtl.<ref>.summary.tsv: members, islands, variants, pairs, hits, the covariates in the model, the inflation factors of the tested and of the far pairs, the parameters"
       },
       ugc_wgw_workflow_version: {
         description: "ugc_wgw_version echoed"
@@ -158,7 +161,7 @@ workflow ugc_wgw_cohort_mqtl {
     Boolean test_trs = true
     Int matrix_mem_gb = 8
     Int shard_mem_gb = 8
-    Int gather_mem_gb = 4
+    Int gather_mem_gb = 8
 
     File ref_map_file
 
@@ -234,6 +237,7 @@ workflow ugc_wgw_cohort_mqtl {
   call Mqtl.ugc_wgw_mqtl_gather { input:
     pairs = ugc_wgw_mqtl_shard.pairs,
     counts = ugc_wgw_mqtl_shard.counts,
+    far = ugc_wgw_mqtl_shard.far,
     fdr = fdr,
     parameters = "window_bp=~{window_bp};min_carriers=~{min_carriers};min_members=~{min_members};min_island_members_fraction=~{min_island_members_fraction};min_island_sd=~{min_island_sd};min_island_coverage=~{min_island_coverage};test_svs=~{test_svs};test_trs=~{test_trs}",
     out_prefix = out_prefix,
@@ -255,6 +259,7 @@ workflow ugc_wgw_cohort_mqtl {
     File mqtl_covariates = ugc_wgw_mqtl_matrix.covariates
     File mqtl_pairs = ugc_wgw_mqtl_gather.pairs_gz
     File mqtl_top = ugc_wgw_mqtl_gather.top
+    File mqtl_islands = ugc_wgw_mqtl_gather.islands
     File mqtl_summary = ugc_wgw_mqtl_gather.summary
     String ugc_wgw_workflow_version = ugc_wgw_version
     File ugc_wgw_manifest = ugc_wgw_manifest_write.ugc_wgw_manifest

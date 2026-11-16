@@ -153,9 +153,9 @@ class ShardTest(unittest.TestCase):
         tr = [["chr1", "405000", "405090", "chr1_405000_405090_CAG", "CAG", "."] + ["."] + [f"{int(x)},{int(x)}" for x in self.tr_len[::-1]]]
         (self.tmp / "tr.txt").write_text("".join("\t".join(r) + "\n" for r in tr))
 
-    def run_shard(self, prefix="s1", min_members=40, cov="cov.tsv"):
+    def run_shard(self, prefix="s1", min_members=40, cov="cov.tsv", far=()):
         run_script("mqtl_shard.py", ["matrix.tsv.gz", cov, "shard.bed", "sv.txt", "samples.txt", "tr.txt", "samples.txt", prefix,
-                                     "100000", "10", str(min_members), "0.8", "2.0"], self.tmp)
+                                     "100000", "10", str(min_members), "0.8", "2.0", *far], self.tmp)
         pairs = read_tsv(self.tmp / f"{prefix}.pairs.tsv")
         counts = {(r["metric"], r["key"]): int(r["value"]) for r in read_tsv(self.tmp / f"{prefix}.counts.tsv")}
         return pairs, counts
@@ -174,8 +174,11 @@ class ShardTest(unittest.TestCase):
         self.assertEqual(int(hit["df"]), self.N - 9 - 1)
         tr = by[("CpG:_4", "chr1_405000_405090_CAG")]
         self.assertLess(float(tr["p"]), 1e-10)
-        self.assertAlmostEqual(float(tr["effect"]), 5.0, delta=1.0)           # 0.05 points per bp
-        self.assertEqual(tr["effect_unit"], "points per 100 bp")
+        self.assertAlmostEqual(float(tr["effect"]), 0.05, delta=0.01)         # per base pair of the mean allele length
+        self.assertEqual(tr["effect_unit"], "points per bp")
+        # no variant of the fixture is 5 Mb from an island: the far table has its header alone
+        self.assertEqual((self.tmp / "s1.far.tsv").read_text(), "t\n")
+        self.assertNotIn(("far_pairs", "tested"), counts)
         # the island that follows an ancestry component: its variant is no hit while the components are in the model
         self.assertGreater(float(by[("CpG:_3", "svConfounded")]["p"]), 1e-3)
         # nulls: 60 variants against the null island, p-values spread over the unit interval
@@ -213,9 +216,29 @@ class ShardTest(unittest.TestCase):
         self.assertIn(("covariate", "granulocyte"), counts)
         self.assertEqual(int(by[("CpG:_1", "svEffect")]["df"]), self.N - 4 - 1)     # intercept, sex, granulocyte, T-cell
 
+    def test_far_pairs_are_the_null(self):
+        """Every tested island with all members is also tested against variants too far away for a cis effect; their
+        t statistics are the run's null. Here "far" is 150 kb so the fixture has such variants."""
+        pairs, counts = self.run_shard(prefix="f1", far=("150000", "10"))
+        far = [float(x) for x in (self.tmp / "f1.far.tsv").read_text().split()[1:]]
+        self.assertEqual(counts[("far_pairs", "tested")], len(far))
+        # the island at 400 kb has the sixty null variants and the planted one below 250 kb: ten draws; the island at
+        # 100 kb has three usable variants beyond 250 kb, the ones at 200 and 300 kb what lies on their far side
+        self.assertGreaterEqual(len(far), 10 + 3)
+        self.assertLessEqual(len(far), 4 * 10)
+        # the cis table does not change, and the draw is the same in every run of the shard
+        again, counts2 = self.run_shard(prefix="f2", far=("150000", "10"))
+        self.assertEqual((self.tmp / "f1.far.tsv").read_text(), (self.tmp / "f2.far.tsv").read_text())
+        plain, _ = self.run_shard(prefix="f3")
+        self.assertEqual(pairs, plain)
+        # none on request
+        _, counts0 = self.run_shard(prefix="f4", far=("150000", "0"))
+        self.assertNotIn(("far_pairs", "tested"), counts0)
+
     def test_too_few_members_writes_headers_and_a_note(self):
         pairs, counts = self.run_shard(prefix="s3", min_members=500)
         self.assertEqual(pairs, [])
+        self.assertEqual((self.tmp / "s3.far.tsv").read_text(), "t\n")
         self.assertEqual(counts[("note", "fewer than 500 members with a profile: nothing tested")], 1)
         self.assertEqual((self.tmp / "s3.pairs.tsv").read_text().split("\t")[0], "chrom")
 
@@ -294,6 +317,25 @@ class MatrixAndGatherTest(unittest.TestCase):
         self.assertEqual((s[("hits_by_variant_type", "DEL")], s[("hits_by_variant_type", "INS")], s[("hits_by_region_type", "gene_body")]), ("1", "1", "1"))
         self.assertAlmostEqual(float(s[("inflation", "lambda")]), ((1.0 + 4.0) / 2) / 0.4549364, places=2)
         self.assertEqual((s[("parameters", "window_bp")], s[("parameters", "fdr")], s[("covariate", "sex")]), ("100000", "0.05", "1"))
+        self.assertNotIn(("inflation", "lambda_far"), s)                       # no far table given
+        isl = read_tsv(self.tmp / "out.islands.tsv")
+        self.assertEqual([(r["variant_id"], r["n_pairs"]) for r in isl], [("v1", "1"), ("v3", "1")])
+        # one island with three pairs at the rate and another with one: a row each, the lead pair, by the lead's p;
+        # the far pairs give their own inflation factor and the share beyond the 5% point
+        (self.tmp / "c.pairs.tsv").write_text("\t".join(cols) + "\n" + "\n".join([
+            row("chr3", 500, "w1", "TR", 6.0, 1e-8), row("chr3", 500, "w2", "DEL", 9.0, 1e-12), row("chr3", 500, "w3", "INS", 4.0, 1e-4),
+            row("chr3", 9000, "w4", "TR", 7.0, 1e-9), row("chr3", 9000, "w5", "TR", 0.2, 0.9)]) + "\n")
+        (self.tmp / "c.counts.tsv").write_text("metric\tkey\tvalue\nislands\ttested\t2\nfar_pairs\ttested\t5\n")
+        (self.tmp / "c.far.tsv").write_text("t\n0.1000\n-0.5000\n0.6745\n1.0000\n-2.5000\n")
+        for name, body in (("pairs3.txt", "c.pairs.tsv"), ("counts3.txt", "c.counts.tsv"), ("far3.txt", "c.far.tsv")):
+            (self.tmp / name).write_text(body + "\n")
+        run_script("mqtl_gather.py", ["pairs3.txt", "counts3.txt", "0.05", "", "out3", "far3.txt"], self.tmp)
+        isl = read_tsv(self.tmp / "out3.islands.tsv")
+        self.assertEqual([(r["start"], r["variant_id"], r["n_pairs"]) for r in isl], [("500", "w2", "3"), ("9000", "w4", "1")])
+        self.assertEqual(isl[0]["q"], read_tsv(self.tmp / "out3.top.tsv")[0]["q"])
+        s3 = {(r["metric"], r["key"]): r["value"] for r in read_tsv(self.tmp / "out3.summary.tsv")}
+        self.assertAlmostEqual(float(s3[("inflation", "lambda_far")]), 0.6745 ** 2 / 0.4549364, places=2)   # the median t: 1.0 exactly
+        self.assertEqual((s3[("inflation", "far_p05_share")], s3[("far_pairs", "tested")], s3[("hits", "islands")]), ("0.2000", "5", "2"))
         # no pairs at all: headers, zero hits, no inflation row
         (self.tmp / "e.pairs.tsv").write_text("\t".join(cols) + "\n")
         (self.tmp / "e.counts.tsv").write_text("metric\tkey\tvalue\nnote\tfewer than 40 members with a profile: nothing tested\t1\nmembers\tused\t4\n")
@@ -303,6 +345,7 @@ class MatrixAndGatherTest(unittest.TestCase):
         s2 = {(r["metric"], r["key"]): r["value"] for r in read_tsv(self.tmp / "out2.summary.tsv")}
         self.assertEqual((s2[("pairs", "total")], s2[("hits", "total")], s2[("note", "fewer than 40 members with a profile: nothing tested")]), ("0", "0", "1"))
         self.assertNotIn(("inflation", "lambda"), s2)
+        self.assertEqual((self.tmp / "out2.islands.tsv").read_text().split("\t")[0], "chrom")
         self.assertEqual(read_tsv(self.tmp / "out2.pairs.tsv.gz"), [])
 
 

@@ -19,7 +19,7 @@ editing them by hand.
 - `ugc_wgw/pangenome/` — ours: cactus_split and cactus_chrom (Minigraph-Cactus v3.3.0's own commands), names, vcf_post, truvari
 - `ugc_wgw/fail.wdl` — ugc_wgw_fail: a task that fails with a message (WDL 1.0 has no assert)
 - `ugc_wgw/provenance.wdl` — ugc_wgw_manifest_write
-- `overrides/` — glnexus, pbmm2, sawfish (the image as a task input; 2.3.0_build1 by default since 0.17.0), upstream: copied+modified upstream files; every file listed in `DERIVED_FILES.md`
+- `overrides/` — glnexus, pbmm2, upstream: copied+modified upstream files (the sawfish override went with upstream v4.1.0, whose task pins 2.3.1); every file listed in `DERIVED_FILES.md`
 
 Header for every authored file:
 

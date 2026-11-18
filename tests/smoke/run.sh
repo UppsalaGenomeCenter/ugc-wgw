@@ -32,7 +32,7 @@
 #                                              and refine; tables under logs/validate-<stamp>/ and the row for VALIDATION.md;
 #                                              reports only, unless --min-f1 sets a floor
 #   run.sh eval <name> [compare]               a second project (project-<name>/, results-<name>/) with other tools on the
-#                                              same data: sawfish23 (the eval-sawfish23 profile), pblab (pbweave + pbdv on
+#                                              same data: pblab (pbweave + pbdv on
 #                                              a GPU), pblab-cpu, pbdv, pbdv-cpu, pbweave. Its standalone phase and
 #                                              validate, then per member against the production project: truvari bench of
 #                                              the phased SV VCFs, the PASS small variants and TRGT allele lengths shared
@@ -644,7 +644,6 @@ PY
 # the evaluations: <name> -> the init options of its project, and the tasks whose resources the comparison prints
 eval_init_args() {
   case "$1" in
-    sawfish23) echo "--profile eval-sawfish23" ;;
     pblab) echo "--aligner pbweave --deepvariant pbdv" ;;        # what the pblab profile sets, as flags (a flag wins over a profile)
     pblab-cpu) echo "--aligner pbweave --deepvariant pbdv-cpu" ;;
     pbdv) echo "--deepvariant pbdv" ;;                           # the caller alone: alignments replay from the cache
@@ -653,11 +652,11 @@ eval_init_args() {
     *) return 1 ;;
   esac
 }
-eval_tasks() { case "$1" in sawfish23) echo "sawfish" ;; *) echo "pbmm2|pbweave|deepvariant|pbdv|pbsamoa_merge" ;; esac; }
+eval_tasks() { echo "pbmm2|pbweave|deepvariant|pbdv|pbsamoa_merge"; }
 
 cmd_eval() {  # cmd_eval <name> [compare]: a second project with the evaluation's tools, its standalone phase, validate, then the comparison; "compare" = the comparison alone, on finished runs
   local what=${1:-} step=${2:-} init_args
-  init_args=$(eval_init_args "$what") || die "eval: the known evaluations: sawfish23 pblab pblab-cpu pbdv pbdv-cpu pbweave"
+  init_args=$(eval_init_args "$what") || die "eval: the known evaluations: pblab pblab-cpu pbdv pbdv-cpu pbweave"
   [ -z "$step" ] || [ "$step" = compare ] || die "eval: the second word is 'compare' or nothing"
   [ -z "$variant" ] || die "eval: run it without UGC_WGW_SMOKE_VARIANT (it sets the variant itself)"
   set_ugc   # the production project is the base of the comparison

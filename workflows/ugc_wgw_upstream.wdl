@@ -43,6 +43,12 @@ workflow ugc_wgw_upstream {
     use_alignment_chunking: {
       description: "Whether to chunk BAM files for alignment. If false, all reads will be aligned in a single chunk."
     }
+    pbsamoa_merge_mem_gb: {
+      description: "Override the pbsamoa merge memory request (GB); upstream's input since v4.1.0. A site policy row for pbsamoa_merge still decides on the HPC"
+    }
+    run_fibertools: {
+      description: "Run fibertools to add nucleosome and MSP annotations to the aligned BAM (upstream v4.1.0; the reads must carry m6A calls). HiPhase and what follows it read the tagged BAM; sawfish, the small-variant callers, mosdepth, Paraphase, mitorsaw and kivvi keep the untagged one"
+    }
     run_sawfish_call: {
       description: "Run the single-sample sawfish call here (upstream single_sample). false: emit only the discover tarball, for cohorts that run the multi-sample call in ugc_wgw_cohort_call"
     }
@@ -115,6 +121,8 @@ workflow ugc_wgw_upstream {
     Boolean require_methylation_tags = true
     File ref_map_file
     Boolean use_alignment_chunking = true
+    Int pbsamoa_merge_mem_gb = 32
+    Boolean run_fibertools = false
     Boolean run_sawfish_call = true
     Boolean use_gpu = false
     Boolean use_parabricks_deepvariant = false
@@ -194,6 +202,8 @@ workflow ugc_wgw_upstream {
     sawfish_expected_bed_male = sawfish_expected_bed_male,
     sawfish_expected_bed_female = sawfish_expected_bed_female,
     use_alignment_chunking = use_alignment_chunking,
+    pbsamoa_merge_mem_gb = pbsamoa_merge_mem_gb,
+    run_fibertools = run_fibertools,
     single_sample = run_sawfish_call,
     use_gpu = use_gpu,
     use_parabricks_deepvariant = use_parabricks_deepvariant,
@@ -228,10 +238,20 @@ workflow ugc_wgw_upstream {
     runtime_attributes = default_runtime_attributes
   }
 
+  # the untagged BAM as an output of its own only when fibertools made a tagged one: without it aligned_hifi_reads is
+  # that BAM, and a default run's outputs are what they were before v4.1.0
+  if (run_fibertools) {
+    File untagged_bam = upstream.discover_aligned_bam
+    File untagged_bam_index = upstream.discover_aligned_bam_index
+  }
+
   output {
-    # alignments
+    # alignments (with run_fibertools, aligned_hifi_reads carries the nucleosome tags and discover_aligned_bam is
+    # the BAM sawfish discover read, which a joint sawfish call must be given)
     File aligned_hifi_reads = upstream.aligned_hifi_reads
     File aligned_hifi_reads_index = upstream.aligned_hifi_reads_index
+    File? discover_aligned_bam = untagged_bam
+    File? discover_aligned_bam_index = untagged_bam_index
     File? aligned_fail_reads = upstream.aligned_fail_reads
     File? aligned_fail_reads_index = upstream.aligned_fail_reads_index
     File? input_checks = upstream.input_checks  # with aligned_bam_in: the checks table of the given BAM

@@ -47,7 +47,20 @@ flowchart TD
 
 | Driver fills | You may override |
 |---|---|
-| `sample_id`, `hifi_reads`, `fail_reads` | `run_sawfish_call` (true), `use_alignment_chunking` (true), `use_gpu`, `use_parabricks_deepvariant`, `use_pbdv`, `aligner` |
+| `sample_id`, `hifi_reads`, `fail_reads` | `run_sawfish_call` (true), `use_alignment_chunking` (true), `pbsamoa_merge_mem_gb` (32), `run_fibertools` (false), `use_gpu`, `use_parabricks_deepvariant`, `use_pbdv`, `aligner` |
+
+`run_fibertools` (upstream's since v4.1.0, for Fiber-seq data: the reads
+must carry m6A calls) adds nucleosome and MSP tags to the aligned BAM with
+fibertools. `aligned_hifi_reads` is then the tagged BAM, which HiPhase and
+every step of `downstream` read, and the stage also writes
+`discover_aligned_bam`, the untagged BAM that mosdepth, the small-variant
+callers, sawfish, Paraphase, mitorsaw and kivvi used. It is wired as
+upstream wires it and has not run here on data with m6A calls. On reads
+without them the step succeeds and adds nothing: the "tagged" BAM is a
+copy with a fibertools line in its header. Nothing checks for m6A calls,
+so set it only for Fiber-seq data.
+`pbsamoa_merge_mem_gb` is upstream's input for the BAM merge's memory; on
+the HPC the site policy's row for `pbsamoa_merge` decides (chapter 12).
 
 `run_sawfish_call = true` gives every sample its own SV VCF, so `downstream`
 can run without a multi-sample call; set it to `false` only when

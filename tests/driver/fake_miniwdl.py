@@ -156,7 +156,11 @@ def make_outputs(stage: str, inputs: dict[str, object], run_dir: pathlib.Path,
         if not v.get("legacy"):
             files["methbat_report"] = f"{sid}.{REF}.methbat.report.tsv"
     elif stage == "upstream":
-        f("aligned_hifi_reads", f"{sid}.{REF}.hifi_reads.bam")
+        if v.get("run_fibertools"):   # upstream v4.1.0: the tagged BAM is the stage's alignment, the untagged one an output of its own
+            f("aligned_hifi_reads", f"{sid}.{REF}.ft.nucleosomes.bam")
+            f("discover_aligned_bam", f"{sid}.{REF}.hifi_reads.bam")
+        else:
+            f("aligned_hifi_reads", f"{sid}.{REF}.hifi_reads.bam")
         if v.get("aligned_bam_in"):
             files["input_checks"] = f"{sid}.input_checks.tsv"
             files["input_provenance"] = f"{sid}.input_provenance.tsv"

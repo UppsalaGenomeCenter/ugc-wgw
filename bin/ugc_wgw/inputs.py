@@ -314,8 +314,10 @@ def build_cohort_call(ctx: BuildContext) -> dict[str, object]:
                 raise UgcError(f"cohort_call {ctx.subject_id}: run_sawfish_joint_call needs every member's sawfish discover output; "
                                f"{sid} ({ctx.kind(sid)} kind) has none")
             discover.append(tar)
-            bams.append(outs.req("aligned_hifi_reads"))
-            bais.append(outs.req("aligned_hifi_reads_index"))
+            # the BAM the member's sawfish discover read: with fibertools (upstream v4.1.0) aligned_hifi_reads is the
+            # tagged copy under another name, and joint-call looks for the name its discover directory stored
+            bams.append(outs.opt("discover_aligned_bam") or outs.req("aligned_hifi_reads"))
+            bais.append(outs.opt("discover_aligned_bam_index") or outs.req("aligned_hifi_reads_index"))
     if left_out:
         LOGGER.warning("cohort_call %s: %d vcf member(s) without a gVCF left out of the joint call (--allow-standalone-members): %s",
                        ctx.subject_id, len(left_out), ", ".join(left_out[:5]) + (" ..." if len(left_out) > 5 else ""))

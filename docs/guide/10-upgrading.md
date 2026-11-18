@@ -76,12 +76,12 @@ ugc-wgw --project /proj/ugc/projects/cohort2026 upgrade --install /proj/ugc/curr
 (or `--install <root>/versions/<v>`): it rewrites the four engine paths to
 that version, moves the reference map to the same place under the new
 version's directory when it lived under the old one (the installer renders
-it into `versions/<v>/references/`; a reference map elsewhere is the
-site's and is kept as it is), keeps the previous file as `config.json.<old version>`,
-migrates the state database and records a `project.upgraded` event. The
-driver reads `VERSION` from `code_dir` on every command, so after the move
-every subject is "not done" at the new version and `submit` starts from the
-first stage (or takes the old results with `--any-version`, below).
+it into `versions/<v>/references/`; a reference map elsewhere is the site's
+and is kept as it is), keeps the previous file as `config.json.<old
+version>`, migrates the state database and records a `project.upgraded`
+event. The driver reads `VERSION` from `code_dir` on every command, so after
+the move every subject is "not done" at the new version and `submit` starts
+from the first stage (or takes the old results with `--any-version`, below).
 
 The driver refuses a project whose engine paths are not its own version's,
 before it opens anything: `this driver is ugc-wgw 0.15.0 … but the
@@ -195,6 +195,37 @@ ugc-wgw submit --mode assembly --stage assembly_call --any-version
 
 The run's manifest records which `assembly` run, and of which version, the
 stage read (`cohort_members` in `run_manifest.json`).
+
+0.24.0 is such a release for a second reason: it follows upstream v4.1.0,
+which changed the text of every upstream task, among them the one that
+turns the reads into FASTA for hifiasm. The hifiasm command is the same and
+earlier assemblies stay valid, but an `assembly` submitted again at 0.24.0
+or later does not replay: it assembles again. So after that upgrade, never
+submit the `assembly` stage for samples that have one; name the stage that
+follows, with `--any-version`, as above.
+
+## Upstream v4.1.0 (0.24.0) and earlier per-sample results
+
+Per-sample results of earlier versions stay valid and are read with
+`--any-version`. A sample submitted again at 0.24.0 or later recomputes its
+whole per-sample stage, because every upstream task has a new cache key,
+and comes out with sawfish 2.3.1 and Paraphase 4.1.0. Paraphase 4.1.0
+assigns haplotypes to genes differently in TNXB, OTOA, CHRNA7 and CATSPER2
+and adds CLCNKB and TPSAB1, so a cohort that mixes members of both versions
+mixes two schemes in those regions; the cohort page's tool table shows the
+mixture. Keep an existing cohort on the results it has unless there is a
+reason to redo all of its members.
+
+Two things on the site, once:
+
+- Delete `<prefix>/profiles/eval-sawfish23.json` (profiles are never
+  overwritten by an install). A project that was initialised with it has
+  `sawfish_image` keys under `stage_inputs` in its `config.json`; remove
+  them, the input no longer exists.
+- `<prefix>/resources.tsv`: the `sawfish_discover` row. The task's own
+  request is now 32 threads and 32 GB; sawfish 2.3 peaks near 4 GB, and
+  `sawfish_discover	16	16G	3:00:00	-	-` lets three run on a 48-core
+  node.
 
 ## When to re-initialise instead
 

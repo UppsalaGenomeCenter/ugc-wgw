@@ -5,7 +5,7 @@ from pathlib import Path
 from ugc_wgw import cohorts, config, inputs, samples
 from ugc_wgw.db import DB
 from ugc_wgw.log import Events
-from ugc_wgw.outputs import MissingOutputError
+from ugc_wgw.outputs import MissingOutputError, Outputs
 from ugc_wgw.stages import declared_inputs, wdl_path
 from ugc_wgw.util import UgcError
 
@@ -383,7 +383,8 @@ class InputsTest(unittest.TestCase):
     def test_joint_chain(self):
         for sid in ("S1", "S2", "S3"):
             seed_success(self.cfg, self.db, "upstream", "sample", sid,
-                         {"sample_id": sid, "inferred_sex": "" if sid == "S2" else "MALE", "fail_reads": ["/x"] if sid == "S1" else None},
+                         {"sample_id": sid, "inferred_sex": "" if sid == "S2" else "MALE", "fail_reads": ["/x"] if sid == "S1" else None,
+                          "run_fibertools": sid == "S3"},
                          mode="joint")
         doc, _ = inputs.generate(self.ctx("cohort", "C1", "joint"), "cohort_call")
         d = self.check_doc("cohort_call", doc)
@@ -393,6 +394,14 @@ class InputsTest(unittest.TestCase):
         d = self.check_doc("cohort_call", inputs.generate(self.ctx("cohort", "C1", "joint"), "cohort_call")[0])
         self.assertEqual(len(d["discover_tars"]), 3)
         self.assertTrue(d["run_sawfish_joint_call"])
+        # the joint sawfish call gets the BAM each member's discover read: S3 ran fibertools (upstream v4.1.0), so its
+        # aligned_hifi_reads is the tagged copy and the untagged one is discover_aligned_bam; the others have one BAM
+        self.assertEqual([Path(p).name for p in d["aligned_bams"]],
+                         [f"{s}.GRCh38_GIABv3.hifi_reads.bam" for s in d["sample_ids"]])
+        self.assertEqual([Path(p).name for p in d["aligned_bam_indices"]],
+                         [f"{s}.GRCh38_GIABv3.hifi_reads.bam.bai" for s in d["sample_ids"]])
+        up3 = Outputs.load(self.db.latest_success("sample", "S3", "upstream", None))
+        self.assertTrue(str(up3.req("aligned_hifi_reads")).endswith(".ft.nucleosomes.bam"))
         self.cfg.stage_inputs = {}
         seed_success(self.cfg, self.db, "cohort_call", "cohort", "C1",
                      {"cohort_id": "C1", "sample_ids": ["S2", "S1", "S3"]}, mode="joint")

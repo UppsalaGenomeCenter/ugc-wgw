@@ -294,16 +294,17 @@ then), no `asm_*` flag.
 An evaluation profile runs the production entrypoints with one tool
 swapped, so that a second project over the same members can be compared
 with a production one before anything changes for everyone. The first is
-`eval-sawfish23` (`backends/hpc/profiles/eval-sawfish23.json`): it set the
-`sawfish_image` input of the sawfish tasks (`workflows/overrides/sawfish.wdl`,
-upstream's task file with the image as an input) to PacBio's published
-2.3.0_build1 for `singleton`, `upstream` and `cohort_call` while the
-default was upstream's 2.2.1_build2; every other task is unchanged, the
-call cache replays everything up to sawfish, and sawfish onward
-recomputes. The bundle ships both images. Since 0.17.0 the default is
-2.3.0_build1 and the profile changes nothing (kept as the record of how
-the evaluation was run). On the dev machine `tests/smoke/run.sh eval
-sawfish23` initialises `project-sawfish23/` with the profile, runs the
+`eval-sawfish23`, shipped from 0.15.0 to 0.23.4: it set a `sawfish_image`
+input of the sawfish tasks (our copy of upstream's task file with the
+image as an input) to PacBio's published 2.3.0_build1 for `singleton`,
+`upstream` and `cohort_call` while the default was upstream's
+2.2.1_build2; every other task was unchanged, the call cache replayed
+everything up to sawfish, and sawfish onward recomputed. From 0.17.0 the
+default was 2.3.0_build1. 0.24.0 follows upstream v4.1.0, whose own task
+pins 2.3.1 (2.3.0 with one fix): the copy, the input and the profile are
+gone, and a site that still has `profiles/eval-sawfish23.json` deletes
+it. How the evaluation ran: on the dev machine `tests/smoke/run.sh eval
+sawfish23` initialised `project-sawfish23/` with the profile, ran the
 standalone phase, then compares each member's phased SV VCF with the
 production project's with truvari (`--sizemin 50 --pctseq 0`: recall,
 precision, F1, genotype concordance) and prints the sawfish tasks' wall

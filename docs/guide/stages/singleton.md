@@ -41,7 +41,7 @@ flowchart TD
 
 | Driver fills | You may override |
 |---|---|
-| `sample_id`, `hifi_reads`, `fail_reads` | `use_alignment_chunking` (true), `use_gpu` (false), `use_parabricks_deepvariant` (false), `use_pbdv` (false), `aligner` (pbmm2); the last four through the project's `deepvariant` and `aligner` keys (chapter 05) |
+| `sample_id`, `hifi_reads`, `fail_reads` | `use_alignment_chunking` (true), `pbsamoa_merge_mem_gb` (32), `run_fibertools` (false; the `upstream` page says what it does), `use_gpu` (false), `use_parabricks_deepvariant` (false), `use_pbdv` (false), `aligner` (pbmm2); the last four through the project's `deepvariant` and `aligner` keys (chapter 05) |
 
 Outputs: the 96 upstream outputs by name plus the two ugc-wgw ones (chapter 07).
 Task set: catalog preparation, pbmm2 per BAM (16 chunks) against the

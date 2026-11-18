@@ -51,3 +51,21 @@ scorers.
 The last row is the fourth combination, pbweave with DeepVariant (`eval
 pbweave`): the same scores as pbweave with pbdv, so the small shift from
 the default route is the aligner's.
+
+The smoke of 0.24.0 (rows at 0.23.4, as above), the first on upstream
+v4.1.0: every per-sample task recomputed (upstream changed the text of
+all of them), sawfish is 2.3.1.
+
+| date | ugc-wgw | upstream | run | small-variant caller | SV caller | SNV R / P / F1 | indel R / P / F1 | SV bench R / P / F1 | SV refine R / P / F1 | SV GT concordance (bench) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2026-11-18 | 0.23.4 | v4.1.0 | HG002 singleton (chr20) | DeepVariant 1.10.0 | sawfish 2.3.1 | 0.9983 / 0.9988 / 0.9985 | 0.9503 / 0.9495 / 0.9499 | 0.8092 / 0.8671 / 0.8372 | 0.9252 / 0.9314 / 0.9283 | 0.9077 |
+| 2026-11-18 | 0.23.4 | v4.1.0 | HG002 downstream (chr20) | GLnexus v1.4.3-0-gcecf42e | sawfish 2.3.1 | 0.9964 / 0.9990 / 0.9977 | 0.9288 / 0.9497 / 0.9391 | 0.8092 / 0.8671 / 0.8372 | 0.9252 / 0.9314 / 0.9283 | 0.9077 |
+
+Every score equals the default route's of 0.17.0 and 0.18.0 to the fourth
+decimal. The call sets are not byte-identical to the earlier run's: the
+alignments are (read placements checked), but DeepVariant, unchanged in
+image and command, differs in 78 to 89 PASS records of 155,567 for HG002
+(upstream's new `docs/determinism.md` is about this), and sawfish 2.3.1
+differs from 2.3.0 in one breakend pair and one insertion's length at
+chr20:28.56 Mb in two of the four members.
+

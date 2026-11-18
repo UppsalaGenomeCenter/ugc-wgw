@@ -70,6 +70,8 @@ METRICS = [
     ("MethBat methylated", lambda d: dig(d, "methylation", "methbat", "methylated"), 0),
     ("MethBat unmethylated", lambda d: dig(d, "methylation", "methbat", "unmethylated"), 0),
     ("MethBat ASM", lambda d: dig(d, "methylation", "methbat", "asm"), 0),
+    ("Paraphase regions", lambda d: dig(d, "targeted", "paraphase", "n_regions"), 0),     # the target list of the release
+    ("Paraphase regions failed", lambda d: dig(d, "targeted", "paraphase", "n_failed"), 0),
     ("Paraphase regions with CN", lambda d: dig(d, "targeted", "paraphase", "n_with_cn"), 0),
     ("StarPhase diplotypes", starphase, None),
     ("mt haplogroup", lambda d: dig(d, "targeted", "mitorsaw", "haplogroup"), None),

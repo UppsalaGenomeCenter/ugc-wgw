@@ -1,7 +1,7 @@
 version 1.0
 
 # ugc-pacbio-wgw — pbmm2 alignment subworkflow with an optional prebuilt reference index (override of upstream subworkflow: create_pbmm2_index only when no index is given; the tasks are upstream's, imported, not copied)
-# origin: vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl @ v4.0.0 (workflow block only)
+# origin: vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl @ v4.1.0 (workflow block only)
 # see docs/DESIGN.md §18 (2026-10-15), DERIVED_FILES.md
 
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/structs.wdl"
@@ -74,10 +74,7 @@ workflow pbmm2 {
 
   scatter (chunk_index in if (index_input_bam.num_chunks > 0)
     then range(index_input_bam.num_chunks)
-    else [
-      -1
-    ]
-  ) {
+    else [-1]) {
     call Tasks.pbmm2_align_wgs { input:
       sample_id = sample_id,
       bam = bam,

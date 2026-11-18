@@ -5,7 +5,7 @@ version 1.0
 # see docs/DESIGN.md §5, §7.2; docs/ENTRYPOINTS.md §6
 
 import "../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/bcftools.wdl" as Bcftools
-import "overrides/sawfish.wdl" as Sawfish
+import "../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/sawfish.wdl" as Sawfish
 import "../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/backend_configuration/backend_configuration.wdl" as BackendConfiguration
 import "ugc_wgw/cohort/glnexus_scatter.wdl" as GlnexusScatter
 import "ugc_wgw/cohort/regions.wdl" as Regions
@@ -111,7 +111,7 @@ workflow ugc_wgw_cohort_call {
       description: "Per-sample sawfish discover tarballs (discover_tar from ugc_wgw_upstream)"
     }
     aligned_bams: {
-      description: "Per-sample aligned BAMs (aligned_hifi_reads from ugc_wgw_upstream)"
+      description: "Per-sample aligned BAMs: the BAM each member's sawfish discover read (aligned_hifi_reads from ugc_wgw_upstream, or its discover_aligned_bam when fibertools tagged the reads)"
     }
     aligned_bam_indices: {
       description: "Per-sample aligned BAM indices"

@@ -1,17 +1,18 @@
 version 1.0
 
 # ugc-pacbio-wgw — upstream subworkflow with a prebuilt pbmm2 reference index and the sex resolved before sawfish (override of upstream subworkflow: imports overrides/pbmm2.wdl, pbmm2_index input passed to the HiFi and fail-reads alignments; somalier extract, one-sample relate and ugc_wgw_resolve_sex after mosdepth, sawfish_discover gets the resolved sex; mitorsaw's chrM genotypes collapsed to diploid and haplogrouped after mitorsaw; since 0.19.0 pblab's pbweave and pbdv as project choices: aligner, use_pbdv)
-# origin: vendor/hifi-human-wgs-wdl/workflows/upstream/upstream.wdl @ v4.0.0
-# see docs/DESIGN.md §18 (2026-10-15, 2026-11-05 ×3, 2026-11-11 pblab), DERIVED_FILES.md
+# origin: vendor/hifi-human-wgs-wdl/workflows/upstream/upstream.wdl @ v4.1.0
+# see docs/DESIGN.md §18 (2026-10-15, 2026-11-05 ×3, 2026-11-11 pblab, 2026-11-18 v4.1.0), DERIVED_FILES.md
 
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/structs.wdl"
+import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/fibertools.wdl" as Fibertools
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/kivvi.wdl" as Kivvi
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/mitorsaw.wdl" as Mitorsaw
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/mosdepth.wdl" as Mosdepth
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/paraphase.wdl" as Paraphase
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/pbsamoa.wdl" as Pbsamoa
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/samtools.wdl" as Samtools
-import "sawfish.wdl" as Sawfish  # ugc-wgw override: the image is a task input (the eval-sawfish23 profile)
+import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/sawfish.wdl" as Sawfish
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl" as DeepVariant
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/parabricks/parabricks_deepvariant.wdl" as ParabricksDeepVariant
 import "pbmm2.wdl" as Pbmm2  # ugc-wgw override of the alignment subworkflow: prebuilt reference index
@@ -32,6 +33,12 @@ workflow upstream {
       },
       aligned_hifi_reads_index: {
         description: "Index for aligned HiFi reads"
+      },
+      discover_aligned_bam: {
+        description: "Aligned BAM sawfish_discover was run against, prior to any fibertools nucleosome tagging"
+      },
+      discover_aligned_bam_index: {
+        description: "Index for the aligned BAM sawfish_discover was run against"
       },
       aligned_fail_reads: {
         description: "Aligned fail reads"
@@ -268,6 +275,9 @@ workflow upstream {
     require_methylation_tags: {
       description: "ugc-wgw: with aligned_bam_in, fail when its first reads carry no MM/ML tags (true); false notes it"
     }
+    pbsamoa_merge_mem_gb: {
+      description: "pbsamoa merge memory (GB)"
+    }
     single_sample: {
       description: "Single sample workflow",
       group: "Common"
@@ -308,6 +318,9 @@ workflow upstream {
     use_parabricks_deepvariant: {
       description: "Use Parabricks DeepVariant"
     }
+    run_fibertools: {
+      description: "Run fibertools to add nucleosome and MSP annotations to the aligned BAM (ugc-wgw: also to a BAM given as aligned_bam_in or aligned with pbweave; the reads need m6A calls, which the input checks do not look for)"
+    }
     default_runtime_attributes: {
       description: "Default runtime attribute structure"
     }
@@ -333,9 +346,11 @@ workflow upstream {
     File sawfish_expected_bed_male
     File sawfish_expected_bed_female
     Boolean use_alignment_chunking
+    Int pbsamoa_merge_mem_gb
     Boolean single_sample = false
     Boolean use_gpu
     Boolean use_parabricks_deepvariant
+    Boolean run_fibertools
     String aligner = "pbmm2"
     Boolean use_pbdv = false
     String? declared_sex
@@ -393,31 +408,29 @@ workflow upstream {
       call Pbsamoa.pbsamoa_merge as merge_hifi_reads { input:
         bams = flatten(pbmm2.aligned_bams),
         out_prefix = "~{sample_id}.~{ref_name}.hifi_reads",
+        mem_gb = pbsamoa_merge_mem_gb,
         runtime_attributes = default_runtime_attributes
       }
     }
 
     # select the merged bam if it exists, otherwise select the first (only) aligned bam
-    File aligned_from_reads = select_first([
-      merge_hifi_reads.merged_bam,
-      flatten(pbmm2.aligned_bams)[0]
-    ])
-    File aligned_from_reads_index = select_first([
-      merge_hifi_reads.merged_bam_index,
-      flatten(pbmm2.aligned_bam_indices)[0]
-    ])
+    File aligned_from_reads = select_first([merge_hifi_reads.merged_bam, flatten(pbmm2.aligned_bams)[0]])
+    File aligned_from_reads_index = select_first([merge_hifi_reads.merged_bam_index, flatten(pbmm2.aligned_bam_indices)[0]])
   }
 
-  File aligned_bam_data = select_first([
-    aligned_bam_in,
-    ugc_wgw_pbweave_align.aligned_bam,
-    aligned_from_reads
-  ])
-  File aligned_bam_index = select_first([
-    aligned_bam_in_index,
-    ugc_wgw_pbweave_align.aligned_bam_index,
-    aligned_from_reads_index
-  ])
+  File aligned_bam_data = select_first([aligned_bam_in, ugc_wgw_pbweave_align.aligned_bam, aligned_from_reads])
+  File aligned_bam_index = select_first([aligned_bam_in_index, ugc_wgw_pbweave_align.aligned_bam_index, aligned_from_reads_index])
+
+  # upstream's optional step (v4.1.0), after our choice of the aligned BAM so that it covers pbmm2, pbweave and a
+  # given BAM alike. Everything before HiPhase keeps reading the untagged BAM (aligned_bam_data): sawfish joint-call
+  # finds a sample's BAM by the name its discover step stored.
+  if (run_fibertools) {
+    call Fibertools.fibertools_add_nucleosomes { input:
+      m6a_bam = aligned_bam_data,
+      out_prefix = "~{sample_id}.~{ref_name}.ft",
+      runtime_attributes = default_runtime_attributes
+    }
+  }
 
   call Mosdepth.mosdepth { input:
     sample_id = sample_id,
@@ -506,12 +519,8 @@ workflow upstream {
   if (!use_pbdv && (!use_parabricks_deepvariant || (!use_gpu && use_parabricks_deepvariant))) {
     call DeepVariant.deepvariant { input:
       sample_id = sample_id,
-      aligned_bams = [
-        aligned_bam_data
-      ],
-      aligned_bam_indices = [
-        aligned_bam_index
-      ],
+      aligned_bams = [aligned_bam_data],
+      aligned_bam_indices = [aligned_bam_index],
       ref_fasta = ref_fasta,
       ref_index = ref_index,
       ref_name = ref_name,
@@ -520,30 +529,10 @@ workflow upstream {
     }
   }
 
-  File deepvariant_vcf = select_first([
-    ugc_wgw_pbdv_call_gpu.vcf,
-    ugc_wgw_pbdv_call_cpu.vcf,
-    parabricks_deepvariant.vcf,
-    deepvariant.vcf
-  ])
-  File deepvariant_vcf_index = select_first([
-    ugc_wgw_pbdv_call_gpu.vcf_index,
-    ugc_wgw_pbdv_call_cpu.vcf_index,
-    parabricks_deepvariant.vcf_index,
-    deepvariant.vcf_index
-  ])
-  File deepvariant_gvcf = select_first([
-    ugc_wgw_pbdv_call_gpu.gvcf,
-    ugc_wgw_pbdv_call_cpu.gvcf,
-    parabricks_deepvariant.gvcf,
-    deepvariant.gvcf
-  ])
-  File deepvariant_gvcf_index = select_first([
-    ugc_wgw_pbdv_call_gpu.gvcf_index,
-    ugc_wgw_pbdv_call_cpu.gvcf_index,
-    parabricks_deepvariant.gvcf_index,
-    deepvariant.gvcf_index
-  ])
+  File deepvariant_vcf = select_first([ugc_wgw_pbdv_call_gpu.vcf, ugc_wgw_pbdv_call_cpu.vcf, parabricks_deepvariant.vcf, deepvariant.vcf])
+  File deepvariant_vcf_index = select_first([ugc_wgw_pbdv_call_gpu.vcf_index, ugc_wgw_pbdv_call_cpu.vcf_index, parabricks_deepvariant.vcf_index, deepvariant.vcf_index])
+  File deepvariant_gvcf = select_first([ugc_wgw_pbdv_call_gpu.gvcf, ugc_wgw_pbdv_call_cpu.gvcf, parabricks_deepvariant.gvcf, deepvariant.gvcf])
+  File deepvariant_gvcf_index = select_first([ugc_wgw_pbdv_call_gpu.gvcf_index, ugc_wgw_pbdv_call_cpu.gvcf_index, parabricks_deepvariant.gvcf_index, deepvariant.gvcf_index])
 
   call Sawfish.sawfish_discover { input:
     sample_id = sample_id,
@@ -560,18 +549,12 @@ workflow upstream {
     runtime_attributes = default_runtime_attributes
   }
 
-  if (defined(fail_reads) && length(select_first([
-    fail_reads
-  ])) > 0 && defined(fail_reads_bed) && defined(fail_reads_bait_index)) {
-    scatter (fail_read_bam in select_first([
-      fail_reads
-    ])) {
+  if (defined(fail_reads) && length(select_first([fail_reads])) > 0 && defined(fail_reads_bed) && defined(fail_reads_bait_index)) {
+    scatter (fail_read_bam in select_first([fail_reads])) {
       call Pbmm2Tasks.pbmm2_align_wgs as bait_fail_reads { input:
         sample_id = sample_id,
         bam = fail_read_bam,
-        pbmm2_index = select_first([
-          fail_reads_bait_index
-        ]),
+        pbmm2_index = select_first([fail_reads_bait_index]),
         ref_name = "bait_ref",
         keep_unmapped = false,
         min_length = 1000,
@@ -599,9 +582,7 @@ workflow upstream {
       }
 
       call Samtools.subset_bam { input:
-        bed = select_first([
-          fail_reads_bed
-        ]),
+        bed = select_first([fail_reads_bed]),
         aligned_bam = align_captured_fail_reads.aligned_bam,
         aligned_bam_index = align_captured_fail_reads.aligned_bam_index,
         ref_index = ref_index,
@@ -615,24 +596,17 @@ workflow upstream {
       call Pbsamoa.pbsamoa_merge as merge_fail_reads { input:
         bams = subset_bam.bam,
         out_prefix = "~{sample_id}.~{ref_name}.fail_reads",
+        mem_gb = pbsamoa_merge_mem_gb,
         runtime_attributes = default_runtime_attributes
       }
     }
 
     # select the merged bam if it exists, otherwise select the first (only) aligned bam
-    File aligned_fail_bam_data = select_first([
-      merge_fail_reads.merged_bam,
-      subset_bam.bam[0]
-    ])
-    File aligned_fail_bam_index = select_first([
-      merge_fail_reads.merged_bam_index,
-      subset_bam.bam_index[0]
-    ])
+    File aligned_fail_bam_data = select_first([merge_fail_reads.merged_bam, subset_bam.bam[0]])
+    File aligned_fail_bam_index = select_first([merge_fail_reads.merged_bam_index, subset_bam.bam_index[0]])
   }
 
-  String include_fail_reads = if (defined(aligned_fail_bam_data))
-    then "Including fail_reads for TRGT genotyping for regions specified in the TRGT catalog."
-    else ""
+  String include_fail_reads = if (defined(aligned_fail_bam_data)) then "Including fail_reads for TRGT genotyping for regions specified in the TRGT catalog." else ""
 
   call Paraphase.paraphase { input:
     aligned_bam = aligned_bam_data,
@@ -697,33 +671,17 @@ workflow upstream {
     String copynum_summary_name = "~{sample_id}.~{ref_name}.structural_variants.copynum.summary.json"
 
     call Sawfish.sawfish_call { input:
-      sample_ids = [
-        sample_id
-      ],
-      discover_tars = [
-        sawfish_discover.discover_tar
-      ],
-      aligned_bams = [
-        aligned_bam_data
-      ],
-      aligned_bam_indices = [
-        aligned_bam_index
-      ],
+      sample_ids = [sample_id],
+      discover_tars = [sawfish_discover.discover_tar],
+      aligned_bams = [aligned_bam_data],
+      aligned_bam_indices = [aligned_bam_index],
       ref_fasta = ref_fasta,
       ref_index = ref_index,
       out_prefix = "~{sample_id}.~{ref_name}.structural_variants",
-      copynum_bedgraph_names = [
-        copynum_bedgraph_name
-      ],
-      depth_bw_names = [
-        depth_bw_name
-      ],
-      gc_bias_corrected_depth_bw_names = [
-        gc_bias_corrected_depth_bw_name
-      ],
-      copynum_summary_names = [
-        copynum_summary_name
-      ],
+      copynum_bedgraph_names = [copynum_bedgraph_name],
+      depth_bw_names = [depth_bw_name],
+      gc_bias_corrected_depth_bw_names = [gc_bias_corrected_depth_bw_name],
+      copynum_summary_names = [copynum_summary_name],
       runtime_attributes = default_runtime_attributes
     }
 
@@ -735,8 +693,10 @@ workflow upstream {
 
   output {
     # alignments
-    File aligned_hifi_reads = aligned_bam_data
-    File aligned_hifi_reads_index = aligned_bam_index
+    File aligned_hifi_reads = select_first([fibertools_add_nucleosomes.nucleosome_bam, aligned_bam_data])
+    File aligned_hifi_reads_index = select_first([fibertools_add_nucleosomes.nucleosome_bam_index, aligned_bam_index])
+    File discover_aligned_bam = aligned_bam_data
+    File discover_aligned_bam_index = aligned_bam_index
     File? aligned_fail_reads = aligned_fail_bam_data
     File? aligned_fail_reads_index = aligned_fail_bam_index
 
@@ -819,9 +779,7 @@ workflow upstream {
       flatten(select_first([pbmm2.msg, []])),
       select_first([ugc_wgw_pbweave_align.msg, []]),
       select_first([bam_in_checks.msg, []]),
-      [
-        include_fail_reads
-      ],
+      [include_fail_reads],
       kivvi_kiv2.msg,
       kivvi_d4z4.msg,
       sawfish_discover.msg,

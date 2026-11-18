@@ -32,17 +32,17 @@ Reading the tables:
 | `pbmm2_align_wgs` | 32 | 64G | singleton, upstream | cpu from input default; memory from input default; command uses threads |
 | `ugc_wgw_flagger_align` | 32 | 64G | assembly | cpu from workflow input default; cpu input: flagger_align_threads; memory from workflow input default; memory input: flagger_align_mem_gb; command uses threads |
 | `ugc_wgw_pbdv_call_cpu` | 32 | 64G | singleton, upstream | cpu from input default; memory from input default; command uses threads |
-| `pbsamoa_merge` | 32 | 32G | singleton, upstream | cpu from input default; memory from input default; command uses threads; command uses mem |
+| `sawfish_call` | 32 | 32G | singleton, upstream, cohort_call | cpu from input default; memory from input default; command uses threads |
+| `sawfish_discover` | 32 | 32G | singleton, upstream | cpu from input default; memory from input default; command uses threads |
 | `glnexus` | 32 | - | cohort_call, cohort_merge | cpu from workflow input default; cpu input: glnexus_threads; memory: "~{mem_gb} GiB" where mem_gb = glnexus_mem_gb = glnexus_mem = select_first([glnexus_mem_gb, 32 + ceil(n_samples * 0.1)]); memory scales with N; command uses threads; command uses mem |
+| `pbsamoa_merge` | 32 | - | singleton, upstream | cpu from input default; memory: "~{mem_gb} GiB" where mem_gb = pbsamoa_merge_mem_gb = pbsamoa_merge_mem_gb = 32; command uses threads; command uses mem |
 | `ugc_wgw_pbweave_align` | 24 | 96G | singleton, upstream | cpu from input default; memory from input default; command uses threads; command uses mem |
 | `ugc_wgw_yak_count` | 24 | - | assembly | cpu from workflow input default; cpu input: yak_threads; memory: "~{mem_gb} GiB" where mem_gb = yak_mem_gb_used = select_first([yak_mem_gb, if low_depth then 70 else 50]); command uses threads |
-| `sawfish_discover` | 16 | 128G | singleton, upstream | cpu from input default; memory from input default; command uses threads |
 | `hiphase` | 16 | 96G | singleton, downstream | cpu from input default; memory from input default; command uses threads |
 | `ugc_wgw_cactus_split` | 16 | 64G | cohort_pangenome | cpu from workflow input default; cpu input: split_cpu; memory from workflow input default; memory input: split_mem_gb; command uses threads; command uses mem |
 | `ugc_wgw_pbdv_call_gpu` | 16 | 64G | singleton, upstream | cpu from input default; memory from input default; command uses threads; gpu |
 | `ugc_wgw_dipcall` | 16 | 48G | assembly_call | cpu from workflow input default; cpu input: dipcall_threads; memory from workflow input default; memory input: dipcall_mem_gb |
 | `index_input_bam` | 16 | 32G | singleton, upstream | cpu from input default; memory from input default; command uses threads |
-| `sawfish_call` | 16 | 32G | singleton, upstream, cohort_call | cpu from input default; memory from input default; command uses threads |
 | `trgt_genotype` | 16 | 32G | singleton, downstream | cpu from input default; memory from input default; command uses threads; command uses mem |
 | `ugc_wgw_flagger_hmm` | 16 | 32G | assembly | cpu from workflow input default; cpu input: flagger_threads; memory from workflow input default; memory input: flagger_mem_gb; command uses threads |
 | `ugc_wgw_minimap2_align_asm` | 16 | 32G | assembly_call | cpu from workflow input default; cpu input: align_threads; memory from workflow input default; memory input: align_mem_gb; command uses threads |
@@ -52,17 +52,18 @@ Reading the tables:
 
 ## ugc_wgw_singleton
 
-38 tasks, in first-call order.
+39 tasks, in first-call order.
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
-| `filter_trgt_catalog` | 4 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/process_trgt_catalog/process_trgt_catalog.wdl:74` |
-| `create_pbmm2_index` | 8 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:88` |
+| `filter_trgt_catalog` | 4 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/process_trgt_catalog/process_trgt_catalog.wdl:72` |
+| `create_pbmm2_index` | 8 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:85` |
 | `ugc_wgw_input_checks` | 1 | 2G | - | `workflows/ugc_wgw/intake/checks.wdl:9` |
 | `ugc_wgw_pbweave_align` | 24 | 96G | cpu from input default; memory from input default; command uses threads; command uses mem | `workflows/ugc_wgw/pblab/pblab.wdl:9` |
-| `index_input_bam` | 16 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:154` |
-| `pbmm2_align_wgs` | 32 | 64G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:269` |
-| `pbsamoa_merge` | 32 | 32G | cpu from input default; memory from input default; command uses threads; command uses mem | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/pbsamoa.wdl:5` |
+| `index_input_bam` | 16 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:151` |
+| `pbmm2_align_wgs` | 32 | 64G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:266` |
+| `pbsamoa_merge` | 32 | - | cpu from input default; memory: "~{mem_gb} GiB" where mem_gb = pbsamoa_merge_mem_gb = pbsamoa_merge_mem_gb = 32; command uses threads; command uses mem | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/pbsamoa.wdl:5` |
+| `fibertools_add_nucleosomes` | 8 | 16G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/fibertools.wdl:5` |
 | `mosdepth` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/mosdepth.wdl:5` |
 | `ugc_wgw_somalier_extract` | 1 | 2G | memory from input default; memory from workflow input default; memory input: extract_mem_gb | `workflows/ugc_wgw/qc/somalier.wdl:9` |
 | `ugc_wgw_somalier_relate_one` | 1 | 1G | - | `workflows/ugc_wgw/qc/somalier.wdl:100` |
@@ -70,26 +71,26 @@ Reading the tables:
 | `ugc_wgw_pbdv_call_gpu` | 16 | 64G | cpu from input default; memory from input default; command uses threads; gpu | `workflows/ugc_wgw/pblab/pblab.wdl:154` |
 | `ugc_wgw_pbdv_call_cpu` | 32 | 64G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/pblab/pblab.wdl:282` |
 | `run_parabricks_deepvariant` | 48 | 192G | cpu from input default; memory from input default; command uses threads; gpu | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/parabricks/parabricks_deepvariant.wdl:94` |
-| `deepvariant_make_examples` | 8 | 32G | cpu from call site; cpu from input default; memory from call site; memory from input default; command uses threads; command uses mem | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:160` |
-| `deepvariant_call_variants_cpu` | 64 | 28G | cpu from workflow input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:330` |
-| `deepvariant_call_variants_gpu` | 8 | 44G | cpu from input default; memory from input default; gpu | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:419` |
-| `deepvariant_postprocess_variants` | 8 | 48G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:512` |
-| `sawfish_discover` | 16 | 128G | cpu from input default; memory from input default; command uses threads | `workflows/overrides/sawfish.wdl:9` |
-| `subset_bam` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/samtools.wdl:255` |
+| `deepvariant_make_examples` | 8 | 32G | cpu from call site; cpu from input default; memory from call site; memory from input default; command uses threads; command uses mem | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:154` |
+| `deepvariant_call_variants_cpu` | 64 | 28G | cpu from workflow input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:307` |
+| `deepvariant_call_variants_gpu` | 8 | 44G | cpu from input default; memory from input default; gpu | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:396` |
+| `deepvariant_postprocess_variants` | 8 | 48G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:489` |
+| `sawfish_discover` | 32 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/sawfish.wdl:5` |
+| `subset_bam` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/samtools.wdl:246` |
 | `paraphase` | 8 | 16G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/paraphase.wdl:5` |
 | `mitorsaw` | 4 | 32G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/mitorsaw.wdl:5` |
 | `ugc_wgw_mito_collapse` | 1 | 1G | - | `workflows/ugc_wgw/mito/collapse.wdl:9` |
 | `ugc_wgw_haplogrep` | 1 | 2G | - | `workflows/ugc_wgw/mito/collapse.wdl:238` |
 | `kivvi_kiv2` | 2 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/kivvi.wdl:5` |
-| `kivvi_d4z4` | 2 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/kivvi.wdl:119` |
-| `sawfish_call` | 16 | 32G | cpu from input default; memory from input default; command uses threads | `workflows/overrides/sawfish.wdl:147` |
+| `kivvi_d4z4` | 2 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/kivvi.wdl:116` |
+| `sawfish_call` | 32 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/sawfish.wdl:136` |
 | `hiphase` | 16 | 96G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/hiphase.wdl:5` |
 | `trgt_genotype` | 16 | 32G | cpu from input default; memory from input default; command uses threads; command uses mem | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/trgt.wdl:5` |
 | `pbjam_bam_stats` | 8 | 8G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/pbjam.wdl:5` |
 | `bcftools_stats_roh_small_variants` | 2 | 4G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/bcftools.wdl:5` |
-| `sv_stats` | 2 | 4G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/bcftools.wdl:415` |
+| `sv_stats` | 2 | 4G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/bcftools.wdl:406` |
 | `methbat_pileup` | 8 | 16G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/methbat.wdl:5` |
-| `methbat_profile` | 2 | 4G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/methbat.wdl:182` |
+| `methbat_profile` | 2 | 4G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/methbat.wdl:170` |
 | `pbstarphase_diplotype` | 2 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/pbstarphase.wdl:5` |
 | `ugc_wgw_methbat_report` | 1 | 4G | memory from input default | `workflows/ugc_wgw/methyl/report.wdl:9` |
 | `consolidate_stats` | 2 | 4G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/utilities.wdl:71` |
@@ -97,17 +98,18 @@ Reading the tables:
 
 ## ugc_wgw_upstream
 
-28 tasks, in first-call order.
+29 tasks, in first-call order.
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
-| `filter_trgt_catalog` | 4 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/process_trgt_catalog/process_trgt_catalog.wdl:74` |
-| `create_pbmm2_index` | 8 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:88` |
+| `filter_trgt_catalog` | 4 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/process_trgt_catalog/process_trgt_catalog.wdl:72` |
+| `create_pbmm2_index` | 8 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:85` |
 | `ugc_wgw_input_checks` | 1 | 2G | - | `workflows/ugc_wgw/intake/checks.wdl:9` |
 | `ugc_wgw_pbweave_align` | 24 | 96G | cpu from input default; memory from input default; command uses threads; command uses mem | `workflows/ugc_wgw/pblab/pblab.wdl:9` |
-| `index_input_bam` | 16 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:154` |
-| `pbmm2_align_wgs` | 32 | 64G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:269` |
-| `pbsamoa_merge` | 32 | 32G | cpu from input default; memory from input default; command uses threads; command uses mem | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/pbsamoa.wdl:5` |
+| `index_input_bam` | 16 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:151` |
+| `pbmm2_align_wgs` | 32 | 64G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/pbmm2/pbmm2.wdl:266` |
+| `pbsamoa_merge` | 32 | - | cpu from input default; memory: "~{mem_gb} GiB" where mem_gb = pbsamoa_merge_mem_gb = pbsamoa_merge_mem_gb = 32; command uses threads; command uses mem | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/pbsamoa.wdl:5` |
+| `fibertools_add_nucleosomes` | 8 | 16G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/fibertools.wdl:5` |
 | `mosdepth` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/mosdepth.wdl:5` |
 | `ugc_wgw_somalier_extract` | 1 | 2G | memory from input default; memory from workflow input default; memory input: extract_mem_gb | `workflows/ugc_wgw/qc/somalier.wdl:9` |
 | `ugc_wgw_somalier_relate_one` | 1 | 1G | - | `workflows/ugc_wgw/qc/somalier.wdl:100` |
@@ -115,19 +117,19 @@ Reading the tables:
 | `ugc_wgw_pbdv_call_gpu` | 16 | 64G | cpu from input default; memory from input default; command uses threads; gpu | `workflows/ugc_wgw/pblab/pblab.wdl:154` |
 | `ugc_wgw_pbdv_call_cpu` | 32 | 64G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/pblab/pblab.wdl:282` |
 | `run_parabricks_deepvariant` | 48 | 192G | cpu from input default; memory from input default; command uses threads; gpu | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/parabricks/parabricks_deepvariant.wdl:94` |
-| `deepvariant_make_examples` | 8 | 32G | cpu from call site; cpu from input default; memory from call site; memory from input default; command uses threads; command uses mem | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:160` |
-| `deepvariant_call_variants_cpu` | 64 | 28G | cpu from workflow input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:330` |
-| `deepvariant_call_variants_gpu` | 8 | 44G | cpu from input default; memory from input default; gpu | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:419` |
-| `deepvariant_postprocess_variants` | 8 | 48G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:512` |
-| `sawfish_discover` | 16 | 128G | cpu from input default; memory from input default; command uses threads | `workflows/overrides/sawfish.wdl:9` |
-| `subset_bam` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/samtools.wdl:255` |
+| `deepvariant_make_examples` | 8 | 32G | cpu from call site; cpu from input default; memory from call site; memory from input default; command uses threads; command uses mem | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:154` |
+| `deepvariant_call_variants_cpu` | 64 | 28G | cpu from workflow input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:307` |
+| `deepvariant_call_variants_gpu` | 8 | 44G | cpu from input default; memory from input default; gpu | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:396` |
+| `deepvariant_postprocess_variants` | 8 | 48G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/workflows/deepvariant/deepvariant.wdl:489` |
+| `sawfish_discover` | 32 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/sawfish.wdl:5` |
+| `subset_bam` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/samtools.wdl:246` |
 | `paraphase` | 8 | 16G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/paraphase.wdl:5` |
 | `mitorsaw` | 4 | 32G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/mitorsaw.wdl:5` |
 | `ugc_wgw_mito_collapse` | 1 | 1G | - | `workflows/ugc_wgw/mito/collapse.wdl:9` |
 | `ugc_wgw_haplogrep` | 1 | 2G | - | `workflows/ugc_wgw/mito/collapse.wdl:238` |
 | `kivvi_kiv2` | 2 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/kivvi.wdl:5` |
-| `kivvi_d4z4` | 2 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/kivvi.wdl:119` |
-| `sawfish_call` | 16 | 32G | cpu from input default; memory from input default; command uses threads | `workflows/overrides/sawfish.wdl:147` |
+| `kivvi_d4z4` | 2 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/kivvi.wdl:116` |
+| `sawfish_call` | 32 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/sawfish.wdl:136` |
 | `ugc_wgw_manifest_write` | 1 | 1G | - | `workflows/ugc_wgw/provenance.wdl:9` |
 
 ## ugc_wgw_cohort_qc
@@ -149,14 +151,14 @@ Reading the tables:
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
-| `sawfish_call` | 16 | 32G | cpu from input default; memory from input default; command uses threads | `workflows/overrides/sawfish.wdl:147` |
+| `sawfish_call` | 32 | 32G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/sawfish.wdl:136` |
 | `ugc_wgw_manifest_write` | 1 | 1G | - | `workflows/ugc_wgw/provenance.wdl:9` |
 | `ugc_wgw_regions_prepare` | 1 | 1G | - | `workflows/ugc_wgw/cohort/regions.wdl:9` |
 | `ugc_wgw_bcftools_slice` | 2 | 4G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/cohort/gvcf_slice.wdl:9` |
 | `glnexus` | 32 | - | cpu from workflow input default; cpu input: glnexus_threads; memory: "~{mem_gb} GiB" where mem_gb = glnexus_mem_gb = glnexus_mem = select_first([glnexus_mem_gb, 32 + ceil(n_samples * 0.1)]); memory scales with N; command uses threads; command uses mem | `workflows/overrides/glnexus.wdl:9` |
 | `ugc_wgw_bcftools_concat` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/cohort/concat.wdl:9` |
 | `ugc_wgw_bcftools_split` | 16 | - | cpu from workflow input default; cpu input: split_threads; memory: "~{mem_gb} GiB" where mem_gb = split_mem = select_first([split_mem_gb, 8 + ceil(n_samples * 0.005 * split_threads)]); memory scales with N; command uses threads | `workflows/ugc_wgw/cohort/split_by_sample.wdl:9` |
-| `split_vcf_by_sample` | 2 | 4G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/bcftools.wdl:224` |
+| `split_vcf_by_sample` | 2 | 4G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/bcftools.wdl:221` |
 
 ## ugc_wgw_intake
 
@@ -178,14 +180,14 @@ Reading the tables:
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
-| `filter_trgt_catalog` | 4 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/process_trgt_catalog/process_trgt_catalog.wdl:74` |
+| `filter_trgt_catalog` | 4 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/process_trgt_catalog/process_trgt_catalog.wdl:72` |
 | `hiphase` | 16 | 96G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/hiphase.wdl:5` |
 | `trgt_genotype` | 16 | 32G | cpu from input default; memory from input default; command uses threads; command uses mem | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/trgt.wdl:5` |
 | `pbjam_bam_stats` | 8 | 8G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/pbjam.wdl:5` |
 | `bcftools_stats_roh_small_variants` | 2 | 4G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/bcftools.wdl:5` |
-| `sv_stats` | 2 | 4G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/bcftools.wdl:415` |
+| `sv_stats` | 2 | 4G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/bcftools.wdl:406` |
 | `methbat_pileup` | 8 | 16G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/methbat.wdl:5` |
-| `methbat_profile` | 2 | 4G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/methbat.wdl:182` |
+| `methbat_profile` | 2 | 4G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/methbat.wdl:170` |
 | `pbstarphase_diplotype` | 2 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/pbstarphase.wdl:5` |
 | `ugc_wgw_methbat_report` | 1 | 4G | memory from input default | `workflows/ugc_wgw/methyl/report.wdl:9` |
 | `consolidate_stats` | 2 | 4G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/utilities.wdl:71` |
@@ -197,7 +199,7 @@ Reading the tables:
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
-| `filter_trgt_catalog` | 4 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/process_trgt_catalog/process_trgt_catalog.wdl:74` |
+| `filter_trgt_catalog` | 4 | 8G | cpu from input default; memory from input default | `vendor/hifi-human-wgs-wdl/workflows/process_trgt_catalog/process_trgt_catalog.wdl:72` |
 | `ugc_wgw_mito_collapse` | 1 | 1G | - | `workflows/ugc_wgw/mito/collapse.wdl:9` |
 | `ugc_wgw_haplogrep` | 1 | 2G | - | `workflows/ugc_wgw/mito/collapse.wdl:238` |
 | `ugc_wgw_manifest_write` | 1 | 1G | - | `workflows/ugc_wgw/provenance.wdl:9` |
@@ -273,7 +275,7 @@ Reading the tables:
 |---|---|---|---|---|
 | `methbat_pileup` | 8 | 16G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/methbat.wdl:5` |
 | `ugc_wgw_manifest_write` | 1 | 1G | - | `workflows/ugc_wgw/provenance.wdl:9` |
-| `samtools_fasta` | 16 | 16G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/samtools.wdl:86` |
+| `samtools_fasta` | 16 | 16G | cpu from input default; memory from input default; command uses threads | `vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/samtools.wdl:83` |
 | `ugc_wgw_yak_count` | 24 | - | cpu from workflow input default; cpu input: yak_threads; memory: "~{mem_gb} GiB" where mem_gb = yak_mem_gb_used = select_first([yak_mem_gb, if low_depth then 70 else 50]); command uses threads | `workflows/ugc_wgw/assembly/yak.wdl:9` |
 | `ugc_wgw_fail` | 1 | 1G | - | `workflows/ugc_wgw/fail.wdl:7` |
 | `ugc_wgw_hifiasm_assemble` | 48 | 288G | cpu from workflow input default; cpu input: hifiasm_threads; memory from workflow input default; memory input: hifiasm_mem_gb; command uses threads | `workflows/ugc_wgw/assembly/hifiasm.wdl:9` |

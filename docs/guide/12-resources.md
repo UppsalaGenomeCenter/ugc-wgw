@@ -335,11 +335,15 @@ per task). What it does and why:
   instead, `"singleton": {"upstream.pbmm2.pbmm2_align_wgs.threads": 24}`
   under `stage_inputs` (chapter 05): it sizes both and needs no row.
   DeepVariant's `call_variants` takes the whole node through the cap.
-- **Memory near the observed peak.** `sawfish discover` peaked at 46 GB
-  against a 128 GB request, so only two fit a node by memory while three
-  fit by cores; HiPhase peaked at 5 GB against 96; minimap2 at 32 against
-  128. Rows at 64, 32 and 64 GB let the scheduler pack them. `pbsamoa_merge`
-  goes the other way: 25 of 32 GB at 21x, so 64 GB before deeper samples.
+- **Memory near the observed peak.** HiPhase peaked at 5 GB against 96;
+  minimap2 at 32 against 128. Rows at 32 and 64 GB let the scheduler pack
+  them. `sawfish discover` needs about 4 GB since sawfish 2.3 (it peaked
+  at 46 to 68 GB with 2.2.1, when its request was 128 GB); upstream's own
+  default since v4.1.0 is 32 threads and 32 GB, and a row at 16 threads
+  and 16 GB lets three run on a 48-core node. `pbsamoa_merge` goes the
+  other way: 59 of 64 GB at 20x on the 864-member cohort, so 64 GB at
+  least (upstream's input `pbsamoa_merge_mem_gb` defaults to 32; the
+  policy row decides here).
 - **Time limits that let backfill work.** The site default is three days
   for every job. SLURM's backfill scheduler fills gaps with jobs whose
   limit fits, so a two-minute task declared as three days waits behind

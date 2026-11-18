@@ -32,7 +32,7 @@ class ProfileTest(unittest.TestCase):
 
     def test_shipped_profiles_apply_and_their_keys_are_real_inputs(self):
         shipped = sorted(p.stem for p in (REPO / "backends" / "hpc" / "profiles").glob("*.json"))
-        self.assertEqual(shipped, ["assembly", "cpu", "eval-sawfish23", "parabricks", "pblab"])
+        self.assertEqual(shipped, ["assembly", "cpu", "parabricks", "pblab"])
         for name in shipped:
             code, err, cfg = self.init("--profile", name)
             self.assertEqual(code, 0, err)
@@ -57,9 +57,9 @@ class ProfileTest(unittest.TestCase):
             self.assertIn(f"profile {name} (", err)
             # every key the profile sets is an input submit would accept: the listing has nothing to warn about
             first_input = next(iter(inputs))
-            if "." in first_input:
-                # a call-qualified key (eval-sawfish23's sawfish_image): the test project's engine is the fake, so the nested
-                # listing is checked against miniwdl's available inputs of the entrypoint with the repository's venv
+            if any("." in key for keys in doc["stage_inputs"].values() for key in keys):
+                # a call-qualified key (upstream.pbmm2.pbmm2_align_wgs.threads): the test project's engine is the fake, so
+                # the nested listing is checked against miniwdl's available inputs of the entrypoint with the repository's venv
                 venv_python = REPO / ".venv" / "bin" / "python"
                 if not venv_python.exists():
                     continue

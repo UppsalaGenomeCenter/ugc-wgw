@@ -1,7 +1,7 @@
 version 1.0
 
 # ugc-pacbio-wgw — GLnexus over one scatter region (override of upstream task: --bed required, --list input, ulimit, scratch dir, sized per shard)
-# origin: vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/glnexus.wdl @ v4.0.0
+# origin: vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/tasks/glnexus.wdl @ v4.0.0 (reconciled at v4.1.0, whose changes to the task are formatting and `disks` HDD -> SSD: not ported, so that the task keeps its call-cache digest and the GLnexus shards of existing cohorts replay)
 # see docs/DESIGN.md §7.2, DERIVED_FILES.md
 
 import "../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/structs.wdl"

@@ -5,6 +5,59 @@ offline bundle. An entry opens with the upstream tag it is built on and a
 short summary, with anything an existing project has to do; the rest is
 under Details.
 
+## 0.24.0
+
+Built on PacBio HiFi-human-WGS-WDL **v4.1.0** (`89c813a1`) and its
+reference data container `GRCh38_GIABv3`, unchanged from v4.0.0; the
+miniwdl plugin (0.6.0) and the reference entries unchanged. Images: sawfish
+2.3.1, paraphase 4.1.0 and fibertools 0.13.0 are new; the bundle ships
+them.
+
+This release follows upstream's v4.1.0. Nothing changes for results that
+exist; a sample processed with it gets the new tool versions.
+
+**Upgrading**
+
+- Results of earlier versions stay valid and are read with
+  `--any-version`. Every upstream task has a new call-cache key, so a
+  sample submitted again recomputes its whole per-sample stage.
+- **Do not submit the `assembly` stage again for samples that have an
+  assembly**: it would assemble again. Submit what follows by its stage
+  name with `--any-version`.
+- Paraphase 4.1.0 assigns haplotypes to genes differently in TNXB, OTOA,
+  CHRNA7 and CATSPER2 and adds two targets. A cohort that mixes members
+  of 0.23 and 0.24 mixes two schemes in those regions.
+- Delete `<prefix>/profiles/eval-sawfish23.json`, and `sawfish_image`
+  keys in a project that used it: the input no longer exists.
+- `sawfish_discover` now asks for 32 threads and 32 GB by itself (16 and
+  128 before). A site policy row written for the old request should be
+  lowered: sawfish 2.3 peaks near 4 GB.
+
+<details>
+<summary>Details</summary>
+
+- **Upstream v4.1.0** reformatted every workflow file, bumped sawfish
+  (2.3.1) and paraphase (4.1.0), added an optional fibertools step, memory
+  inputs for the BAM merge and the joint sawfish call, and a new Google
+  Cloud backend name. Its reference data is that of v4.0.0.
+- **Fibertools** (`run_fibertools`, default false; for Fiber-seq data, the
+  reads must carry m6A calls) is mirrored as upstream wires it: the tagged
+  BAM is `aligned_hifi_reads` and feeds HiPhase and what follows; the
+  callers before it keep the untagged BAM, which the `upstream` stage then
+  also writes as `discover_aligned_bam`, and which a joint sawfish call is
+  given. It works on a BAM given instead of reads and with pbweave too.
+  Not verified on data with m6A calls; on reads without them the step
+  succeeds and adds nothing, and nothing checks for them.
+- **`pbsamoa_merge_mem_gb`** (32) is upstream's new input for the BAM
+  merge; a site policy row for `pbsamoa_merge` still decides on the HPC.
+- **The sawfish override is gone.** Our copy of the sawfish tasks made the
+  image an input (2.3.0 by default since 0.17.0); upstream's own task now
+  pins 2.3.1. A sample page's tool table names the sawfish that ran (it
+  showed 2.2.1 since 0.17.0).
+- `ugc_wgw_singleton` records `humanwgs_singleton` 4.1.0.
+
+</details>
+
 ## 0.23.4
 
 Built on PacBio HiFi-human-WGS-WDL v4.0.0 (`15e82cb9`) and its reference

@@ -1,7 +1,7 @@
 version 1.0
 
 # ugc-pacbio-wgw — stage `singleton`: humanwgs_singleton call for call, reference data from the installed map instead of the data container, plus ugc_wgw_manifest.json
-# origin: none (mirrors vendor/hifi-human-wgs-wdl/workflows/singleton.wdl @ v4.0.0; re-derive on every sync, docs/ENTRYPOINTS.md §3)
+# origin: none (mirrors vendor/hifi-human-wgs-wdl/workflows/singleton.wdl @ v4.1.0; re-derive on every sync, docs/ENTRYPOINTS.md §3)
 # see docs/DESIGN.md §5, docs/ENTRYPOINTS.md §3
 
 import "../vendor/hifi-human-wgs-wdl/workflows/downstream/downstream.wdl" as Downstream
@@ -15,7 +15,7 @@ import "ugc_wgw/methyl/report.wdl" as MethylReport
 
 workflow ugc_wgw_singleton {
   meta {
-    description: "ugc-pacbio-wgw stage singleton: the PacBio HiFi human WGS singleton pipeline (humanwgs_singleton 4.0.0) with unchanged semantics, its reference data read from the installed reference map rather than unpacked from the workflow data container in every run, plus the ugc provenance record"
+    description: "ugc-pacbio-wgw stage singleton: the PacBio HiFi human WGS singleton pipeline (humanwgs_singleton 4.1.0) with unchanged semantics, its reference data read from the installed reference map rather than unpacked from the workflow data container in every run, plus the ugc provenance record"
   }
 
   parameter_meta {
@@ -36,6 +36,12 @@ workflow ugc_wgw_singleton {
     }
     use_alignment_chunking: {
       description: "Whether to chunk BAM files for alignment. If false, all reads will be aligned in a single chunk."
+    }
+    pbsamoa_merge_mem_gb: {
+      description: "Override the pbsamoa merge memory request (GB); upstream's input since v4.1.0. A site policy row for pbsamoa_merge still decides on the HPC"
+    }
+    run_fibertools: {
+      description: "Run fibertools to add nucleosome and MSP annotations to the aligned BAM (upstream v4.1.0; the reads must carry m6A calls). HiPhase and what follows it read the tagged BAM; sawfish, the small-variant callers, mosdepth, Paraphase, mitorsaw and kivvi keep the untagged one"
     }
     use_gpu: {
       description: "Use GPU when possible"
@@ -73,6 +79,7 @@ workflow ugc_wgw_singleton {
     backend: {
       description: "Backend where the workflow will be executed",
       choices: [
+        "GCP-Batch",
         "GCP",
         "Azure",
         "AWS-HealthOmics",
@@ -106,6 +113,8 @@ workflow ugc_wgw_singleton {
     Array[File]? fail_reads
     File ref_map_file
     Boolean use_alignment_chunking = true
+    Int pbsamoa_merge_mem_gb = 32
+    Boolean run_fibertools = false
     Boolean use_gpu = false
     Boolean use_parabricks_deepvariant = false
     String aligner = "pbmm2"
@@ -185,6 +194,8 @@ workflow ugc_wgw_singleton {
     sawfish_expected_bed_male = sawfish_expected_bed_male,
     sawfish_expected_bed_female = sawfish_expected_bed_female,
     use_alignment_chunking = use_alignment_chunking,
+    pbsamoa_merge_mem_gb = pbsamoa_merge_mem_gb,
+    run_fibertools = run_fibertools,
     single_sample = true,
     use_gpu = use_gpu,
     use_parabricks_deepvariant = use_parabricks_deepvariant,
@@ -396,7 +407,7 @@ workflow ugc_wgw_singleton {
     subject_type = "sample",
     subject_id = sample_id,
     upstream_workflow_name = "humanwgs_singleton",
-    upstream_workflow_version = "4.0.0",
+    upstream_workflow_version = "4.1.0",
     runtime_attributes = default_runtime_attributes
   }
 

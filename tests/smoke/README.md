@@ -49,16 +49,17 @@ kept), or the stages that read the new keys fail at their first task with
 
 ## Evaluation profiles
 
-`run.sh eval sawfish23` initialises a second project on the same data,
-references, call cache and SIF cache (`project-sawfish23/`,
-`results-sawfish23/`; `UGC_WGW_SMOKE_VARIANT` names it) with the
-`eval-sawfish23` profile, runs the standalone phase there (the cache
-replays everything up to sawfish), and writes to `logs/eval-sawfish23-<stamp>/`
-a per-member truvari comparison of the phased SV VCFs against the
-production project's (`sv.tsv`: TP, FP, FN, precision, recall, F1,
-genotype concordance) and the sawfish tasks' resources of both projects
-(`sawfish.tsv`). Paste both tables into the run entry below; `eval
-sawfish23 compare` repeats the comparison alone on the finished runs.
+`run.sh eval <name>` (`pblab`, `pblab-cpu`, `pbdv`, `pbdv-cpu`, `pbweave`)
+initialises a second project on the same data, references, call cache
+and SIF cache (`project-<name>/`, `results-<name>/`;
+`UGC_WGW_SMOKE_VARIANT` names it) with the evaluation's tools, runs the
+standalone phase there and `validate`, and writes to
+`logs/eval-<name>-<stamp>/` the per-member comparisons with the
+production project (`compare_runs.py`) and the changed tasks' resources
+of both projects. `eval <name> compare` repeats the comparison alone on
+the finished runs. The first evaluation, `sawfish23` (sawfish 2.3.0
+against 2.2.1 through a profile, entries below), left the harness with
+0.24.0: upstream v4.1.0 pins 2.3.1.
 `init --profile NAME` applies any shipped profile to the smoke project.
 
 ## Validation against GIAB

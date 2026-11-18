@@ -21,7 +21,8 @@ deepvariant_call_variants_cpu	48	-	3:00:00	-	-
 deepvariant_postprocess_variants	-	-	2:00:00	-	-
 # memory asked far above the observed peak: three sawfish per node instead of two, HiPhase no
 # longer blocks 96 GB for a 5 GB peak
-sawfish_discover	-	64G	3:00:00	-	-
+# sawfish 2.3 peaks near 4 GB; upstream v4.1.0 asks for 32 threads and 32 GB, and three fit a 48-core node this way
+sawfish_discover	16	16G	3:00:00	-	-
 hiphase	-	32G	3:00:00	-	-
 trgt_genotype	-	-	2:00:00	-	-
 paraphase	-	-	2:00:00	-	-

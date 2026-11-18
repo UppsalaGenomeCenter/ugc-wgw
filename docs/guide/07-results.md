@@ -75,7 +75,8 @@ name comes from the map (`name`). Cohort files are named
 
 | Output | What it is |
 |---|---|
-| `aligned_hifi_reads`, `_index` | pbmm2 alignments, merged over uBAMs; not haplotagged yet. |
+| `aligned_hifi_reads`, `_index` | pbmm2 alignments, merged over uBAMs; not haplotagged yet. With `run_fibertools`, the copy with nucleosome tags. |
+| `discover_aligned_bam`, `_index` | Only with `run_fibertools`: the untagged alignments, which sawfish and the other callers before HiPhase read. |
 | `aligned_fail_reads`, `_index` | Baited fail reads for TRGT, when fail reads were given. |
 | `small_variant_vcf`, `small_variant_gvcf` (+ indices) | DeepVariant per-sample calls and gVCF. |
 | `sv_vcf`, `sv_supporting_reads`, `sv_copynum_*`, `sv_depth_bw`, `sv_gc_bias_corrected_depth_bw` | Per-sample sawfish call and CNV tracks (with `run_sawfish_call`). |
@@ -292,7 +293,7 @@ The embedded workflow manifest, `<subject>.<stage>.ugc_wgw_manifest.json`, is
 written by the `ugc_wgw_manifest_write` task inside the run: `schema`,
 `ugc_wgw_version`, `stage`, `subject`, `cohort_members` (plain ID list),
 `upstream` (`workflow_name`, `workflow_version`, for example
-`humanwgs_singleton` `4.0.0`), `written_at`, `host`.
+`humanwgs_singleton` `4.1.0`), `written_at`, `host`.
 
 ```mermaid
 flowchart LR

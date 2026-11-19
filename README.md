@@ -75,8 +75,8 @@ python3 -m venv .venv && .venv/bin/pip install -r bundle/requirements.txt
 scripts/make-bundle.sh --version vX.Y.Z --out bundle/out --python-version 3.12
 ```
 
-The six images this repository builds itself (haplogrep3, hifiasm, minimap2,
-somalier, svx, trgt-lps) are published on GHCR under `ghcr.io/uppsalagenomecenter/`;
+The eight images this repository builds itself (haplogrep3, hifiasm, kanpig,
+minimap2, pblab, somalier, svx, trgt-lps) are published on GHCR under `ghcr.io/uppsalagenomecenter/`;
 `image_manifest.ugc-wgw.txt` pins them by digest, together with the published
 images of the assembly stages (dipcall, HMM-Flagger, secphase, PAV 3,
 Minigraph-Cactus, Truvari), and `containers/` holds the Dockerfiles of ours.

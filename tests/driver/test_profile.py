@@ -135,7 +135,7 @@ class ProfileTest(unittest.TestCase):
         (until 0.19.1); a key added to PROFILE_KEYS has to be added here."""
         values: dict[str, object] = {
             "max_inflight": 7, "poll_interval": 11, "assembly_use_parents": False, "pangenome_sv_cohort": "ROUND1",
-            "methyl_label_columns": ["batch"], "methyl_genes_of_interest": ["FMR1"], "deepvariant": "pbdv", "aligner": "pbweave",
+            "graph_gt_cohort": "P200", "methyl_label_columns": ["batch"], "methyl_genes_of_interest": ["FMR1"], "deepvariant": "pbdv", "aligner": "pbweave",
             "gpu_type": "l40s", "parabricks_gpus": 2, "stage_inputs": {"ugc_wgw_cohort_merge": {"sv_merge_method": "bcftools"}},
             "prices": {"cpu_hour": 0.14, "currency": "SEK"}, "summary_thresholds": {"depth_mean_min": 18},
             "input_thresholds": {"file_reads_min": 500, "sample_gbases_min": 0}, "resource_retry_max": 1, "resource_retry_factor": 1.5,

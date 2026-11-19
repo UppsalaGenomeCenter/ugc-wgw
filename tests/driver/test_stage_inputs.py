@@ -118,6 +118,11 @@ class SourcesTest(unittest.TestCase):
             self.seed("assembly", "sample", sid, "assembly", attempt=2)
             self.seed("assembly_call", "sample", sid, "assembly", attempt=2, hap_fastas=["/a", "/b"], haplotype_labels=["hap1", "hap2"], trio=False)
         self.gen("cohort_pangenome", "cohort", "C1", "assembly")   # C1 has a standalone cohort_merge above: truvari's sv_vcf travels
+        # cohort_graph_gt: the graph of the cohort config.json names (here the cohort's own), every member's haplotagged BAM
+        self.seed("cohort_pangenome", "cohort", "C1", "assembly")
+        self.cfg.graph_gt_cohort = "C1"
+        self.gen("cohort_graph_gt", "cohort", "C1")
+        self.cfg.graph_gt_cohort = ""
         for stage in STAGES:
             plain = {k for k in self.produced[stage] if "." not in k}
             dotted = {k for k in self.produced[stage] if "." in k}
@@ -189,7 +194,7 @@ class ListingTest(unittest.TestCase):
 
     def test_stage_and_mode_filters_and_the_table(self):
         rows, _ = self.rows("--mode", "standalone")
-        self.assertEqual(sorted(set(r["stage"] for r in rows)), ["cohort_freq", "cohort_merge", "cohort_methyl", "cohort_mqtl", "cohort_qc", "cohort_tr", "singleton"])
+        self.assertEqual(sorted(set(r["stage"] for r in rows)), ["cohort_freq", "cohort_graph_gt", "cohort_merge", "cohort_methyl", "cohort_mqtl", "cohort_qc", "cohort_tr", "singleton"])
         rows, _ = self.rows("--stage", "assembly")
         self.assertEqual(set(r["stage"] for r in rows), {"assembly"})
         self.assertIn("hifiasm_threads", [r["input"] for r in rows])

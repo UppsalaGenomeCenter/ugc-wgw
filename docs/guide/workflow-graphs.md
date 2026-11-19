@@ -3,7 +3,7 @@
 
 # Workflow call graphs
 
-Exact call graphs of the fourteen entrypoints, rendered from the miniwdl AST by
+Exact call graphs of the fifteen entrypoints, rendered from the miniwdl AST by
 `scripts/wdl-graph.py`. A workflow called directly by an entrypoint is inlined
 as a box; a workflow it calls in turn is one node. Simplified diagrams with
 the switches and resources explained are in `08-stages.md`.
@@ -753,6 +753,43 @@ flowchart TD
   classDef o fill:#2c6aa0,stroke:#2c6aa0,color:#fff
   classDef b fill:#1f7a70,fill-opacity:0.10,stroke:#1f7a70,stroke-opacity:0.45
   class s1 b
+```
+
+## ugc_wgw_cohort_graph_gt
+
+Source `workflows/ugc_wgw_cohort_graph_gt.wdl`, depth 1, Mermaid source 749 characters.
+
+Inlined workflows: none.
+
+Workflow nodes (not expanded here): none.
+
+```mermaid
+flowchart TD
+  n1["ugc_wgw_graph_gt_sites"]:::o
+  subgraph s1["scatter member_index in range(length(read_sample_ids))"]
+    n2["ugc_wgw_kanpig_plup"]:::o
+    n3["ugc_wgw_kanpig_gt"]:::o
+  end
+  n4["bundle_members"]:::o
+  n5["ugc_wgw_regions_prepare"]:::o
+  subgraph s2["scatter shard_index in range(length(ugc_wgw_regions_prepare.sh…"]
+    n6["ugc_wgw_graph_gt_join"]:::o
+  end
+  n7["ugc_wgw_graph_gt_gather"]:::o
+  n8["ugc_wgw_manifest_write"]:::o
+  n1 --> n3
+  n1 --> n6
+  n1 --> n7
+  n2 --> n3
+  n3 --> n4
+  n4 --> n6
+  n5 --> n6
+  n5 -.-> s2
+  n6 --> n7
+  classDef default fill:none,stroke:#8a8f95
+  classDef o fill:#2c6aa0,stroke:#2c6aa0,color:#fff
+  classDef b fill:#1f7a70,fill-opacity:0.10,stroke:#1f7a70,stroke-opacity:0.45
+  class s1,s2 b
 ```
 
 ## ugc_wgw_assembly

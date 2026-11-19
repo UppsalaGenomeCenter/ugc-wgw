@@ -5,6 +5,59 @@ offline bundle. An entry opens with the upstream tag it is built on and a
 short summary, with anything an existing project has to do; the rest is
 under Details.
 
+## 0.25.0
+
+Built on PacBio HiFi-human-WGS-WDL **v4.1.0** (`89c813a1`) and its
+reference data container `GRCh38_GIABv3`, as 0.24.0; the miniwdl plugin
+(0.6.0) and the reference entries unchanged. Images: kanpig 2.0.2 is new
+(ours, mirrored); the bundle ships it.
+
+**New: the structural variants of a pangenome graph genotyped in every
+member of a cohort** (stage `cohort_graph_gt`, optional). A graph is
+built from a subset of a cohort, so its variants have genotypes for the
+assembled members only. This stage takes the graph's sequence-resolved SV
+alleles (50 bp to 10 kb) as a fixed list of sites and genotypes every
+member at them from the alignment the read-based track already wrote,
+with kanpig. It writes one cohort VCF with a column per member and allele
+frequencies over the whole cohort, and, for the members that are in the
+graph, compares the genotype from the reads with the genotype from the
+assembly.
+
+- Nothing changes for a project until its `config.json` names
+  `graph_gt_cohort`, the cohort whose graph is genotyped. The stage then
+  runs like any other (`submit --stage cohort_graph_gt`) once that
+  cohort's `cohort_pangenome` has succeeded.
+- A member's pileup index is kept by the call cache: genotyping the same
+  cohort against a later graph reads no BAM again.
+- It is genotyping, not discovery, and a table with a measured error, not
+  a truth set. On the test data the reads and the assemblies agree at 92%
+  of the genotypes outside tandem repeats and excluded regions, and at
+  about 80% inside tandem repeats, where the two write the same allele
+  differently. The stage reports the comparison by context.
+- No per-sample task changed: nothing recomputes on upgrade.
+
+<details>
+<summary>Details</summary>
+
+- Outputs: `graph_gt_vcf`, `graph_gt_sites_vcf`, `graph_gt_members`,
+  `graph_gt_concordance`, `graph_gt_skipped`, `graph_gt_summary`,
+  `member_vcfs`, `plups`; a section on the cohort page; `ugc-wgw export
+  --domains graph_gt`.
+- Every site carries `IN_TR` (inside a tandem repeat of the TRGT
+  catalogue) and `IN_EXCL` (inside a region of the SV caller's exclusion
+  list). Alleles over 10 kb are listed with `SKIP=too_long` and not
+  genotyped.
+- The planner's first prerequisite outside a stage's own cohort; the
+  guide's chapter 01 describes how the read-based and the assembly track
+  relate.
+- A new summary threshold, `graph_gt_missing_excess_max` (0.05): the
+  cohort page lists members whose share of uncalled sites stands out.
+- Why kanpig and not an alignment to the graph: on the test data the two
+  were equally accurate on ordinary sites and the graph route cost about
+  340 times the CPU.
+
+</details>
+
 ## 0.24.0
 
 Built on PacBio HiFi-human-WGS-WDL **v4.1.0** (`89c813a1`) and its

@@ -356,6 +356,7 @@ def cmd_init(a: argparse.Namespace) -> int:
         poll_interval=float(pick(a.poll_interval, "poll_interval", 30.0)),  # type: ignore[arg-type]
         assembly_use_parents=False if a.no_assembly_parents else bool(profile.get("assembly_use_parents", True)),
         pangenome_sv_cohort=str(profile.get("pangenome_sv_cohort") or ""),
+        graph_gt_cohort=str(profile.get("graph_gt_cohort") or ""),
         methyl_label_columns=profile.get("methyl_label_columns"),  # type: ignore[arg-type]
         methyl_genes_of_interest=profile.get("methyl_genes_of_interest"),  # type: ignore[arg-type]
         resource_retry_max=int(profile.get("resource_retry_max", 2)),  # type: ignore[arg-type]

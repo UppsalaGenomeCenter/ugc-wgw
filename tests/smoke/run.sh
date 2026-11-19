@@ -14,9 +14,12 @@
 #                                                (the fat partition allocates whole 96-core nodes)
 #   run.sh <stage> [<subject>] [--mode M] [--retry [--max-attempts N]] [--any-version]   submit (or retry) one stage, then check
 #   run.sh check <stage> [<subject>]           check expected outputs of the current attempt
-#   run.sh all [standalone] [joint] [assembly]  the phases in that order (default: all three):
+#   run.sh all [standalone] [joint] [assembly] [graph_gt]  the phases in that order (default: all four):
 #                                              standalone (SMOKE) -> joint (SMOKEJ) -> assembly (all four
-#                                              samples, then the SMOKE cohort's chr20 pangenome)
+#                                              samples, then the SMOKE cohort's chr20 pangenome) -> graph_gt (a
+#                                              chr20 graph of the parents, cohort SMOKEP; its SV alleles genotyped
+#                                              in every member of SMOKE from the standalone phase's alignments;
+#                                              needs the standalone and the assembly phase)
 #   run.sh status                              ugc-wgw status for the three modes
 #   run.sh report                              ugc-wgw report (HTML) and the analysis summaries into $UGC_WGW_SMOKE_DIR/logs/
 #   run.sh summary                             ugc-wgw summary only (per-sample and cohort analysis pages)
@@ -66,14 +69,14 @@ usage() { sed -n '2,/^# Environment:/p' "$0" | sed '$d'; exit "${1:-0}"; }   # t
 
 mode_of_stage() {
   case "$1" in
-    singleton|cohort_qc|cohort_merge|cohort_freq|cohort_tr|cohort_methyl|cohort_mqtl|intake) echo standalone ;;   # the cohort stages exist in joint too: --mode joint; intake: run.sh entry
+    singleton|cohort_qc|cohort_merge|cohort_freq|cohort_tr|cohort_methyl|cohort_mqtl|cohort_graph_gt|intake) echo standalone ;;   # the cohort stages exist in joint too: --mode joint; intake: run.sh entry
     upstream|cohort_call|downstream) echo joint ;;
     assembly|assembly_call|cohort_pangenome) echo assembly ;;
     *) die "unknown stage $1" ;;
   esac
 }
 cohort_of_mode() { case "$1" in joint) echo SMOKEJ ;; *) echo SMOKE ;; esac; }
-is_cohort_stage() { case "$1" in cohort_qc|cohort_call|cohort_merge|cohort_freq|cohort_tr|cohort_methyl|cohort_mqtl|cohort_pangenome) return 0 ;; *) return 1 ;; esac; }
+is_cohort_stage() { case "$1" in cohort_qc|cohort_call|cohort_merge|cohort_freq|cohort_tr|cohort_methyl|cohort_mqtl|cohort_graph_gt|cohort_pangenome) return 0 ;; *) return 1 ;; esac; }
 
 sheet=${UGC_WGW_SMOKE_SHEET:-$smoke/data/samples.tsv}     # run.sh entry registers another sheet in its variant project
 cohort_file=${UGC_WGW_SMOKE_COHORT:-$smoke/data/cohort.txt}
@@ -335,11 +338,80 @@ phase() {  # phase <name> <ugc-wgw submit args...>
   log "phase $name finished in $(( $(date +%s) - t0 )) s, exit $rc"
 }
 
-cmd_all() {  # cmd_all [standalone] [joint] [assembly]: the named phases in the fixed order (default all)
+GRAPH_COHORT=SMOKEP   # the graph_gt phase's graph: the trio's parents, so that HG002 is genotyped at alleles it only inherited
+
+graph_gt_setup() {  # the parents' cohort (frozen once) and the project's graph_gt_cohort
+  local parents=$project/graph_cohort.txt m
+  for m in HG003 HG004; do
+    members | grep -qx "$m" || die "graph_gt: the smoke cohort has no $m (the phase builds a graph of HG003 and HG004)"
+  done
+  printf 'HG003\nHG004\n' > "$parents"
+  "${ugc[@]}" cohort freeze "$GRAPH_COHORT" --samples "$parents" > /dev/null 2>&1 \
+    || log "graph_gt: cohort $GRAPH_COHORT is frozen already"
+  python3 - "$project/.ugc-wgw/config.json" "$GRAPH_COHORT" <<'EOF'
+import json, sys
+path, cohort = sys.argv[1:3]
+doc = json.load(open(path))
+if doc.get("graph_gt_cohort") != cohort:
+    doc["graph_gt_cohort"] = cohort
+    with open(path, "w") as fh:
+        json.dump(doc, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+EOF
+}
+
+graph_gt_numbers() {  # the stage's own numbers on the chr20 smoke: the list, the call rate, reads against the parents' assemblies
+  local version cur summary
+  version=$(cat "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["code_dir"])' "$project/.ugc-wgw/config.json")/VERSION")
+  cur=$results/cohorts/SMOKE/$version/cohort_graph_gt/current
+  summary=$(find "$cur/out/graph_gt_summary" -name '*.summary.tsv' 2>/dev/null | head -1)
+  [ -s "$summary" ] || { log "graph_gt: no summary under $cur"; return 1; }
+  python3 - "$summary" "$(members | wc -l)" <<'EOF'
+import sys
+path, n_members = sys.argv[1], int(sys.argv[2])
+s = {}
+for line in open(path):
+    f = line.rstrip("\n").split("\t")
+    if len(f) == 4 and f[0] == "graph_gt":
+        s[(f[1], f[2])] = f[3]
+
+
+def num(metric, key):
+    try:
+        return float(s[(metric, key)])
+    except (KeyError, ValueError):
+        return float("nan")
+
+
+shares = {c: s.get(("concordance_" + c, "share"), "") for c in ("other", "tandem_repeat", "excluded_region")}
+print(f"[smoke] graph_gt: graph {s.get(('graph', 'cohort'))} of {s.get(('graph', 'members'))}; {s.get(('sites', 'listed'))} SV alleles listed, "
+      f"{s.get(('sites_genotyped', 'ALL:ALL'))} genotyped; call rate {s.get(('genotypes', 'call_rate'))}; reads against assemblies: "
+      f"elsewhere {shares['other']} of {s.get(('concordance_other', 'compared'))}, tandem repeats {shares['tandem_repeat']}, "
+      f"excluded regions {shares['excluded_region']}", file=sys.stderr)
+bad = []
+if not num("sites", "listed") >= 500:
+    bad.append("fewer than 500 SV alleles in the list")
+if num("sites", "outside_region_shards") != 0:
+    bad.append("listed alleles outside the region shards")
+if num("members", "with_reads") != n_members:
+    bad.append("not every member was genotyped")
+if num("members", "in_graph_with_reads") != 2:
+    bad.append("the two parents are not both compared with their assemblies")
+if not num("genotypes", "call_rate") >= 0.9:
+    bad.append("call rate below 0.9")
+if not num("concordance_other", "share") >= 0.85:
+    bad.append("reads and assemblies agree at fewer than 0.85 of the genotypes outside repeats and excluded regions")
+for b in bad:
+    print(f"[smoke] graph_gt: {b}", file=sys.stderr)
+sys.exit(1 if bad else 0)
+EOF
+}
+
+cmd_all() {  # cmd_all [standalone] [joint] [assembly] [graph_gt]: the named phases in the fixed order (default all)
   set_ugc
   local t0 fails=0 m p want=" $* "
-  [ $# -gt 0 ] || want=" standalone joint assembly "
-  for p in "$@"; do case "$p" in standalone|joint|assembly) ;; *) die "all: unknown phase $p (standalone, joint, assembly)" ;; esac; done
+  [ $# -gt 0 ] || want=" standalone joint assembly graph_gt "
+  for p in "$@"; do case "$p" in standalone|joint|assembly|graph_gt) ;; *) die "all: unknown phase $p (standalone, joint, assembly, graph_gt)" ;; esac; done
   t0=$(date +%s)
   if [[ "$want" == *" standalone "* ]]; then
     phase standalone --mode standalone --cohort SMOKE
@@ -375,6 +447,17 @@ cmd_all() {  # cmd_all [standalone] [joint] [assembly]: the named phases in the 
     for m in $(members); do cmd_check assembly "$m" || fails=$((fails + 1)); done
     for m in $(members); do cmd_check assembly_call "$m" || fails=$((fails + 1)); done
     cmd_check cohort_pangenome SMOKE || fails=$((fails + 1))
+  fi
+  if [[ "$want" == *" graph_gt "* ]]; then
+    # the one read-based stage that needs the assembly track: a chr20 graph of the parents (their mappings replay
+    # from the assembly phase's SMOKE graph, the split and the chromosome task run), then every member of SMOKE
+    # genotyped at its SV alleles from the standalone phase's haplotagged BAMs
+    graph_gt_setup
+    phase graph_gt-graph --mode assembly --cohort "$GRAPH_COHORT" --stage cohort_pangenome
+    cmd_check cohort_pangenome "$GRAPH_COHORT" || fails=$((fails + 1))
+    phase graph_gt --mode standalone --cohort SMOKE --stage cohort_graph_gt
+    cmd_check cohort_graph_gt SMOKE || fails=$((fails + 1))
+    graph_gt_numbers || fails=$((fails + 1))
   fi
   log "phases [${want# }] done in $(( $(date +%s) - t0 )) s; $fails check(s) failed"
   cmd_report || true
@@ -877,6 +960,6 @@ case "$1" in
   entry) cmd_entry ;;
   validate) shift; cmd_validate "$@" ;;
   -h|--help) usage ;;
-  singleton|upstream|intake|cohort_qc|cohort_call|downstream|cohort_merge|cohort_freq|cohort_tr|cohort_methyl|cohort_mqtl|assembly|assembly_call|cohort_pangenome) cmd_stage "$@" ;;
+  singleton|upstream|intake|cohort_qc|cohort_call|downstream|cohort_merge|cohort_freq|cohort_tr|cohort_methyl|cohort_mqtl|cohort_graph_gt|assembly|assembly_call|cohort_pangenome) cmd_stage "$@" ;;
   *) die "unknown command $1" ;;
 esac

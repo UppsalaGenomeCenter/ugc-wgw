@@ -39,20 +39,24 @@ One page per stage, in the order the modes run them:
 | [`cohort_tr`](stages/cohort_tr.md) | cohort, optional | standalone, joint | Tandem repeats across the cohort: the disease-locus screen, expansion outliers, the allele-length resource. |
 | [`cohort_methyl`](stages/cohort_methyl.md) | cohort | standalone, joint | Methylation across the cohort: the background, each member's events, comparisons, imprinting, cell-type composition. |
 | [`cohort_mqtl`](stages/cohort_mqtl.md) | cohort, optional | standalone, joint | Structural variants and tandem repeats tested against the methylation of nearby CpG islands; the island-by-member methylation matrix. |
+| [`cohort_graph_gt`](stages/cohort_graph_gt.md) | cohort, optional | standalone, joint | The structural variants of a pangenome graph genotyped in every member from its reads; only for a project that names a graph cohort. |
 | [`assembly`](stages/assembly.md) | per sample | assembly | A phased de novo assembly with hifiasm and its quality control. |
 | [`assembly_call`](stages/assembly_call.md) | per sample | assembly | Variants from the assembly against the reference with dipcall and PAV. |
 | [`cohort_pangenome`](stages/cohort_pangenome.md) | cohort | assembly | A Minigraph-Cactus pangenome graph of the members' assemblies and its variants. |
 
 ```
-standalone:  singleton -> cohort_qc -> cohort_merge -> cohort_freq -> cohort_tr -> cohort_methyl -> cohort_mqtl
-joint:       upstream -> cohort_qc -> cohort_call -> downstream -> cohort_merge -> cohort_freq -> cohort_tr -> cohort_methyl -> cohort_mqtl
+standalone:  singleton -> cohort_qc -> cohort_merge -> cohort_freq -> cohort_tr -> cohort_methyl -> cohort_mqtl -> cohort_graph_gt
+joint:       upstream -> cohort_qc -> cohort_call -> downstream -> cohort_merge -> cohort_freq -> cohort_tr -> cohort_methyl -> cohort_mqtl -> cohort_graph_gt
 assembly:    assembly -> assembly_call -> cohort_pangenome
 ```
 
-`cohort_qc`, `cohort_tr` and `cohort_mqtl` are optional: no stage waits
-for them. A sample that enters as an aligned BAM starts at `upstream`
-without alignment; one that enters with its calls runs `intake` in the
-place of `singleton` or `upstream` (chapter 05).
+`cohort_qc`, `cohort_tr`, `cohort_mqtl` and `cohort_graph_gt` are optional:
+no stage waits for them. `cohort_graph_gt` is planned only when
+`config.json` names a `graph_gt_cohort`; it waits for that cohort's
+`cohort_pangenome`, the one prerequisite outside a stage's own cohort. A
+sample that enters as an aligned BAM starts at `upstream` without alignment;
+one that enters with its calls runs `intake` in the place of `singleton` or
+`upstream` (chapter 05).
 
 Each page has the same parts: what the stage runs (a simplified diagram
 and its text version), the inputs the driver fills and the ones you may

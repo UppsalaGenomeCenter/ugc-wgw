@@ -31,3 +31,6 @@ quay.io/biocontainers/aardvark@sha256:931f07ac6f645c465eb214880e05b0a9290bae697c
 # pblab 20261021 (PacBio's preview tools, BSD-3-Clause-Clear) on upstream's pb_wdl_base: pbweave and pbdv, run only by projects
 # that choose them (config.json aligner: pbweave, deepvariant: pbdv | pbdv-cpu; docs/DESIGN.md §17, §18 2026-11-11):
 ghcr.io/uppsalagenomecenter/pblab@sha256:01eb8964524fae161f10568ddfc0551843883e50ba1fd38d19ca20b817c8ba5b
+# kanpig 2.0.2 (ACEnglish/kanpig, MIT) on upstream's pb_wdl_base, pushed 2026-11-19: the long-read SV genotyper of cohort_graph_gt
+# (a pileup index and the genotypes per member; docs/DESIGN.md §13, §18 2026-11-19):
+ghcr.io/uppsalagenomecenter/kanpig@sha256:59504c7d557c97bba4e17fcd4cdfbd2b98445c1e6d6c286e81ab122ca4fad92d

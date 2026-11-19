@@ -60,6 +60,8 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "tr_outlier_count_mad_max": 3.0,      # a member's expansion outliers at ordinary loci (cohort_tr) beyond median + this many scaled MADs across the cohort warns `tr_outlier_count_high`
     "cell_composition_mad_max": 4.0,      # a member's distance from the cohort's median cell-type composition (cohort_methyl's deconvolution)
                                           # beyond median + this many scaled MADs warns `cell_composition_outlier` ...
+    "graph_gt_missing_excess_max": 0.05,  # cohort_graph_gt: a member whose share of uncalled sites is more than this above the cohort's
+                                          # median warns `graph_gt_missing_rate` on the cohort page (advisory)
     "cell_composition_distance_min": 0.25,  # ... and at least this far (total variation distance, 0 to 1): ordinary blood differs by 0.1 to 0.2
     "methyl_events_mad_max": 3.0,         # a member's methylation events (cohort_methyl) beyond median + this many MADs across the cohort warns `methyl_outlier`
     "sex_unknown_fails": 1,               # 1: a sample no source could sex fails `sex_not_inferred`; 0: it warns

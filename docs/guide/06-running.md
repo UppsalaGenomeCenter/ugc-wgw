@@ -345,7 +345,16 @@ list.
 A graph does not need every member to hold the cohort's common variation,
 and a graph of everyone is not always buildable. `cohort rank` orders the
 members by what each adds, from results the read-based cohort already has,
-before a single genome is assembled:
+before a single genome is assembled.
+
+This is the one place where the assembly track needs the read-based one: the
+command reads the cohort's `cohort_merge` (the merged SV calls) and
+`cohort_qc` (related pairs, contaminated samples, ancestry) of a read-based
+mode, and stops with a message when `cohort_merge` has not run (without
+`cohort_qc` it ranks, but holds no relative back and leaves no contaminated
+sample out). A project without read-based results has no ranking; it freezes
+its graph cohorts from a list of its own (the `cohort_pangenome` page), and
+chapter 01 says what it gives up.
 
 ```bash
 ugc-wgw cohort rank C1 --mode joint            # reads C1's cohort_merge SV VCF and cohort_qc pairs
@@ -503,7 +512,8 @@ reproduced. The rules:
   the outputs of the attempt being replaced until they are rerun too, in
   this order: cohort_freq (cohort C1), cohort_tr (cohort C1), ...`.
   Rerun the ones that should see the new outputs, in that order. An
-  optional stage (`cohort_qc`, `cohort_tr`, `cohort_mqtl`) holds no
+  optional stage (`cohort_qc`, `cohort_tr`, `cohort_mqtl`,
+  `cohort_graph_gt`) holds no
   stage up, and `summary` and `export` read its new attempt on their
   next run. One optional stage is read by another: `cohort_mqtl` takes
   the ancestry components of `cohort_qc`, so a rerun of `cohort_qc`

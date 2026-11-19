@@ -697,6 +697,49 @@ def build_cohort_mqtl(ctx: BuildContext) -> dict[str, object]:
     return doc
 
 
+def build_cohort_graph_gt(ctx: BuildContext) -> dict[str, object]:
+    """The graph's structural variants genotyped in every member: the vcfwave VCF of the cohort_pangenome run of the
+    cohort config.json graph_gt_cohort names (another cohort and another mode, at any version; the planner has
+    checked that it exists), and per member with reads the haplotagged alignment of its per-sample run and its sex
+    group. A member without an alignment (entry kind vcf) is left out of the genotyping and uncalled in the cohort
+    VCF."""
+    doc = common_inputs(ctx)
+    members = ctx.members()
+    graph_cohort = ctx.cfg.graph_gt_cohort
+    if not graph_cohort:
+        raise UgcError(f"cohort_graph_gt {ctx.subject_id}: config.json names no graph_gt_cohort")
+    graph = ctx.optional_prior("cohort_pangenome", "cohort", graph_cohort)
+    if graph is None:
+        raise MissingOutputError("cohort", graph_cohort, "cohort_pangenome", None, "*")
+    doc["ugc_wgw_container_registry"] = ctx.cfg.ugc_wgw_container_registry
+    doc["cohort_id"] = ctx.subject_id
+    doc["sample_ids"] = members
+    doc["graph_cohort_id"] = graph_cohort
+    doc["graph_vcf"] = graph.req("pangenome_wave_vcf")
+    doc["graph_vcf_index"] = graph.req("pangenome_wave_vcf_index")
+    sexes = [_sex_group(ctx, sid, "")[0] for sid in members]
+    doc["sample_sexes"] = sexes
+    read_ids, read_sexes, bams, indices = [], [], [], []
+    for sid, sex in zip(members, sexes):
+        outs = ctx.sample_outputs(sid)
+        bam, index = outs.opt("merged_haplotagged_bam"), outs.opt("merged_haplotagged_bam_index")
+        if not bam or not index:
+            LOGGER.info("cohort_graph_gt %s: %s has no haplotagged alignment (entry kind %s); uncalled at every site",
+                        ctx.subject_id, sid, ctx.kind(sid))
+            continue
+        read_ids.append(sid)
+        read_sexes.append(sex)
+        bams.append(bam)
+        indices.append(index)
+    if not read_ids:
+        raise UgcError(f"cohort_graph_gt {ctx.subject_id}: no member has an alignment to genotype from")
+    doc["read_sample_ids"] = read_ids
+    doc["read_sample_sexes"] = read_sexes
+    doc["aligned_bams"] = bams
+    doc["aligned_bam_indices"] = indices
+    return doc
+
+
 def _trio_parents(ctx: BuildContext, rec: SampleRecord) -> tuple[SampleRecord, SampleRecord] | None:
     """Both parents registered with reads and distinct from each other and the child -> (father, mother); else None."""
     if not rec.father_id and not rec.mother_id:
@@ -811,6 +854,7 @@ BUILDERS = {
     "cohort_tr": build_cohort_tr,
     "cohort_methyl": build_cohort_methyl,
     "cohort_mqtl": build_cohort_mqtl,
+    "cohort_graph_gt": build_cohort_graph_gt,
     "assembly": build_assembly,
     "assembly_call": build_assembly_call,
     "cohort_pangenome": build_cohort_pangenome,

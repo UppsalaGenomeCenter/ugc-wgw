@@ -110,6 +110,27 @@ graph. `ugc-wgw cohort rank` (chapter 06) chooses which members and how
 many: it orders them by the structural variants each adds and shows where
 the cohort's common variation is covered.
 
+**The ranking is recommended, not required.** The stage builds a graph of
+any frozen cohort whose members are assembled:
+
+```bash
+ugc-wgw summary --mode assembly --pass-list asm-pass.txt     # the members whose assemblies pass QC
+ugc-wgw cohort freeze G1 --samples asm-pass.txt              # or any list of yours
+ugc-wgw submit --mode assembly --stage cohort_pangenome --cohort G1
+```
+
+The ranking needs the read-based track (the cohort's `cohort_merge` and
+`cohort_qc`), and that is the route to prefer: it is also where a
+contaminated sample and a pair of relatives are found, which nothing in
+the assembly track notices. Without it the choice of members is yours,
+and the only thing this stage reads from the read-based results, the SV
+merge it compares the graph with, is skipped with a note when the cohort
+has none. Chapter 01, "How the tracks relate", has the whole picture.
+
+A graph of a subset has genotypes for its own members only.
+[`cohort_graph_gt`](cohort_graph_gt.md) takes the graph's structural
+variants and genotypes them in every member of a read-based cohort.
+
 ## One mapping per member, and the ladder
 
 A haplotype's alignment to the reference-only graph depends on that

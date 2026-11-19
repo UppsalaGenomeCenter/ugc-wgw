@@ -111,6 +111,23 @@ starting with its events in the Methylation section and the carriers'
 own pages. [`cohort_mqtl`'s page](stages/cohort_mqtl.md) has "Reading
 the result".
 
+### Structural variants of the graph in every member (`cohort_graph_gt`)
+
+Only when the project names a graph cohort and the stage ran. Which
+graph, how many of its SV alleles are in the list and how many were
+genotyped, in how many members, and the share of genotypes called. Then
+the stage's own measure of its error: for the members that are in the
+graph, the genotype from the reads against the genotype from the
+assembly, by where the allele starts. Read the first row (outside tandem
+repeats and excluded regions) as the genotyper's error; inside a tandem
+repeat the two often write the same allele differently, and in the
+excluded regions neither is to be trusted. The sites by type and length
+say how many are variable in this cohort and how many only the graph's
+members carry. The member table lists call rate and carried alleles;
+`graph_gt_missing_rate` names the members whose share of uncalled sites
+stands out. [`cohort_graph_gt`'s page](stages/cohort_graph_gt.md) has
+"Reading the result".
+
 ### Targeted callers
 
 Across the cohort: Paraphase copy-number histograms of the regions with

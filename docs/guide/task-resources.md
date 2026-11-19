@@ -267,6 +267,21 @@ Reading the tables:
 | `ugc_wgw_mqtl_shard` | 1 | 8G | memory from workflow input default; memory input: shard_mem_gb | `workflows/ugc_wgw/mqtl/cohort.wdl:204` |
 | `ugc_wgw_mqtl_gather` | 1 | 8G | memory from workflow input default; memory input: gather_mem_gb | `workflows/ugc_wgw/mqtl/cohort.wdl:753` |
 
+## ugc_wgw_cohort_graph_gt
+
+8 tasks, in first-call order.
+
+| task | cpu | memory | notes | source |
+|---|---|---|---|---|
+| `ugc_wgw_manifest_write` | 1 | 1G | - | `workflows/ugc_wgw/provenance.wdl:9` |
+| `ugc_wgw_regions_prepare` | 1 | 1G | - | `workflows/ugc_wgw/cohort/regions.wdl:9` |
+| `ugc_wgw_files_bundle` | 1 | 2G | - | `workflows/ugc_wgw/cohort/bundle.wdl:9` |
+| `ugc_wgw_graph_gt_sites` | 2 | 4G | memory from input default | `workflows/ugc_wgw/graph_gt/cohort.wdl:7` |
+| `ugc_wgw_kanpig_plup` | 8 | 16G | cpu from workflow input default; cpu input: plup_threads; memory from workflow input default; memory input: plup_mem_gb; command uses threads | `workflows/ugc_wgw/graph_gt/cohort.wdl:288` |
+| `ugc_wgw_kanpig_gt` | 4 | 8G | cpu from workflow input default; cpu input: gt_threads; memory from workflow input default; memory input: gt_mem_gb; command uses threads | `workflows/ugc_wgw/graph_gt/cohort.wdl:387` |
+| `ugc_wgw_graph_gt_join` | 1 | 8G | memory from workflow input default; memory input: join_mem_gb | `workflows/ugc_wgw/graph_gt/cohort.wdl:530` |
+| `ugc_wgw_graph_gt_gather` | 1 | 4G | memory from input default | `workflows/ugc_wgw/graph_gt/cohort.wdl:843` |
+
 ## ugc_wgw_assembly
 
 12 tasks, in first-call order.

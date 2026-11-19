@@ -1,0 +1,31 @@
+{
+  "ugc_wgw_cohort_graph_gt.ugc_wgw_version": "<ugc_wgw_version>",
+  "ugc_wgw_cohort_graph_gt.cohort_id": "String",
+  "ugc_wgw_cohort_graph_gt.sample_ids": [
+    "String"
+  ],
+  "ugc_wgw_cohort_graph_gt.sample_sexes": [
+    "String (XX, XY or empty per member, aligned with sample_ids)"
+  ],
+  "ugc_wgw_cohort_graph_gt.read_sample_ids": [
+    "String (the members with an alignment, in cohort order)"
+  ],
+  "ugc_wgw_cohort_graph_gt.read_sample_sexes": [
+    "String (XX, XY or empty, aligned with read_sample_ids)"
+  ],
+  "ugc_wgw_cohort_graph_gt.aligned_bams": [
+    "File (merged_haplotagged_bam of singleton or downstream, aligned with read_sample_ids)"
+  ],
+  "ugc_wgw_cohort_graph_gt.aligned_bam_indices": [
+    "File (merged_haplotagged_bam_index, same order)"
+  ],
+  "ugc_wgw_cohort_graph_gt.graph_cohort_id": "String (the cohort whose graph gives the sites)",
+  "ugc_wgw_cohort_graph_gt.graph_vcf": "File (pangenome_wave_vcf of that cohort's cohort_pangenome)",
+  "ugc_wgw_cohort_graph_gt.graph_vcf_index": "File (pangenome_wave_vcf_index)",
+  "ugc_wgw_cohort_graph_gt.size_min": 50,
+  "ugc_wgw_cohort_graph_gt.size_max": 10000,
+  "ugc_wgw_cohort_graph_gt.ref_map_file": "<local_path_prefix>/ugc_wgw_ref_map.GRCh38_GIABv3.tsv",
+  "ugc_wgw_cohort_graph_gt.ugc_wgw_container_registry": "<ugc_wgw_container_registry>",
+  "ugc_wgw_cohort_graph_gt.backend": "HPC",
+  "ugc_wgw_cohort_graph_gt.preemptible": true
+}

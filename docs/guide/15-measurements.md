@@ -95,6 +95,15 @@ minutes on a whole-genome BAM: the checks read the header and the first
 | `ugc_wgw_mqtl_shard` | 26 | 1 | 1.1 GB | 3 min |
 | `ugc_wgw_mqtl_gather` | 1 | 1 | 3.2 GB | 1 min |
 
+`cohort_graph_gt` has no cluster measurement yet. On the dev machine
+(2026-11-19; four members, chr20 reads at 19 to 38x, the 1,694 SV alleles
+of a two-genome chr20 graph): a member's pileup index took 23
+CPU-seconds and 0.1 GB (1.7 MB for a 1.5 GB BAM), its genotypes 2
+CPU-seconds, the whole stage 23 seconds of wall time. The same reads
+mapped to the graph with vg Giraffe and genotyped with `vg call` took
+2.4 CPU-hours for one member, with the same accuracy on ordinary sites;
+that comparison is why the stage genotypes from the alignment it has.
+
 ## The pangenome's sizes
 
 `cohort_pangenome` has two tasks whose rows the chr20 scaling pilot sets

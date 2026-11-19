@@ -83,6 +83,12 @@ another.
 | `cell_composition_outlier` | warn | The member's cell-type composition is far from the cohort's median composition (`cohort_methyl`'s deconvolution). | `cell_composition_mad_max` (4 scaled MADs) and `cell_composition_distance_min` (0.25) | Another tissue or sample type, a cell line, contamination, or an unusual blood picture. |
 | `tr_outlier_count_high` | warn | The member has many more expansion outliers at ordinary tandem-repeat loci than the others (`cohort_tr`). | `tr_outlier_count_mad_max` (3 scaled MADs above the median) | An ancestry that is rare in the cohort, or a lower depth than the others; only then a sample problem. |
 
+`graph_gt_missing_rate` is a list on the cohort page, not a flag of the
+member (no status changes, no pass list reads it): a member whose share
+of uncalled sites in `cohort_graph_gt` is more than
+`graph_gt_missing_excess_max` (0.05) above the cohort's median. Low
+depth, another kind of sample, or a genome far from the graph's members.
+
 No flag is raised for a class of the disease-locus screen of `cohort_tr`:
 it is a research screen, and a QC status must not carry a finding. For
 the same reason `cohort_mqtl` raises none; its inflation factor is shown

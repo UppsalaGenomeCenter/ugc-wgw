@@ -1,0 +1,14 @@
+# Expected outputs of ugc_wgw_cohort_graph_gt, one glob per line relative to out/.
+graph_gt_vcf/*.graph_gt.*.vcf.gz
+graph_gt_vcf_index/*.graph_gt.*.vcf.gz.tbi
+graph_gt_sites_vcf/*.graph_gt.*.sites.vcf.gz
+graph_gt_sites_vcf_index/*.graph_gt.*.sites.vcf.gz.tbi
+graph_gt_members/*.graph_gt.*.members.tsv
+graph_gt_concordance/*.graph_gt.*.concordance.tsv
+graph_gt_skipped/*.graph_gt.*.skipped.tsv
+graph_gt_summary/*.graph_gt.*.summary.tsv
+member_vcfs/*/*.graph_gt.*.vcf.gz
+member_vcf_indices/*/*.graph_gt.*.vcf.gz.tbi
+plups/*/*.plup.gz
+plup_indices/*/*.plup.gz.tbi
+ugc_wgw_manifest/*.cohort_graph_gt.ugc_wgw_manifest.json

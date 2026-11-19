@@ -23,7 +23,7 @@ GPU_MODES = ("gpu", "parabricks", "pbdv")            # the flavours whose callin
 ALIGNERS = ("pbmm2", "pbweave")                      # aligner of the HiFi reads; pbweave is pblab's (preview)
 PREVIEW_TOOLS = ("pbweave", "pbdv")                  # named as preview wherever a run's tools are shown
 # the project keys a site profile may set (`ugc-wgw init --profile`, guide chapter 05); `description` is allowed and ignored
-PROFILE_KEYS = ("max_inflight", "poll_interval", "assembly_use_parents", "pangenome_sv_cohort", "methyl_label_columns", "methyl_genes_of_interest", "deepvariant", "aligner", "gpu_type",
+PROFILE_KEYS = ("max_inflight", "poll_interval", "assembly_use_parents", "pangenome_sv_cohort", "graph_gt_cohort", "methyl_label_columns", "methyl_genes_of_interest", "deepvariant", "aligner", "gpu_type",
                 "parabricks_gpus", "stage_inputs", "prices", "summary_thresholds", "input_thresholds",
                 "resource_retry_max", "resource_retry_factor", "learn_resources")
 
@@ -53,6 +53,7 @@ class Config:
     poll_interval: float = 30.0
     assembly_use_parents: bool = True
     pangenome_sv_cohort: str = ""   # cohort whose cohort_merge SV VCF cohort_pangenome compares the graph with (empty: the same cohort)
+    graph_gt_cohort: str = ""       # cohort whose cohort_pangenome graph cohort_graph_gt genotypes (empty: the stage is not planned)
     methyl_label_columns: list[str] = field(default_factory=list)      # sample-sheet columns whose values label members in cohort_methyl's background (besides the sex group)
     methyl_genes_of_interest: list[str] = field(default_factory=list)  # HGNC ids or symbols the cohort page lists methylation events for first
     auto_retry_max: int = 2
@@ -127,6 +128,7 @@ class Config:
             "poll_interval": self.poll_interval,
             "assembly_use_parents": self.assembly_use_parents,
             "pangenome_sv_cohort": self.pangenome_sv_cohort,
+            "graph_gt_cohort": self.graph_gt_cohort,
             "methyl_label_columns": self.methyl_label_columns,
             "methyl_genes_of_interest": self.methyl_genes_of_interest,
             "auto_retry_max": self.auto_retry_max,
@@ -181,6 +183,7 @@ class Config:
             poll_interval=float(doc.get("poll_interval", 30.0)),
             assembly_use_parents=bool(doc.get("assembly_use_parents", True)),
             pangenome_sv_cohort=str(doc.get("pangenome_sv_cohort") or "").strip(),
+            graph_gt_cohort=str(doc.get("graph_gt_cohort") or "").strip(),
             methyl_label_columns=_str_list(doc.get("methyl_label_columns"), "methyl_label_columns"),
             methyl_genes_of_interest=_str_list(doc.get("methyl_genes_of_interest"), "methyl_genes_of_interest"),
             auto_retry_max=int(doc.get("auto_retry_max", 2)),
@@ -295,10 +298,11 @@ def load_profile(path: Path) -> dict[str, object]:
     if "resource_retry_factor" in out and (not isinstance(out["resource_retry_factor"], (int, float))
                                           or out["resource_retry_factor"] <= 1):
         raise UgcError(f"profile {path}: resource_retry_factor must be a number above 1")
-    if "pangenome_sv_cohort" in out:
-        if not isinstance(out["pangenome_sv_cohort"], str):
-            raise UgcError(f"profile {path}: pangenome_sv_cohort must be a cohort ID (string)")
-        out["pangenome_sv_cohort"] = out["pangenome_sv_cohort"].strip()
+    for key in ("pangenome_sv_cohort", "graph_gt_cohort"):
+        if key in out:
+            if not isinstance(out[key], str):
+                raise UgcError(f"profile {path}: {key} must be a cohort ID (string)")
+            out[key] = out[key].strip()
     for key in ("methyl_label_columns", "methyl_genes_of_interest"):
         if key in out:
             out[key] = _str_list(out[key], f"profile {path}: {key}")
@@ -467,6 +471,7 @@ def init_project(
     poll_interval: float = 30.0,
     assembly_use_parents: bool = True,
     pangenome_sv_cohort: str = "",
+    graph_gt_cohort: str = "",
     methyl_label_columns: list[str] | None = None,
     methyl_genes_of_interest: list[str] | None = None,
     resource_retry_max: int = 2,
@@ -501,6 +506,7 @@ def init_project(
         poll_interval=poll_interval,
         assembly_use_parents=assembly_use_parents,
         pangenome_sv_cohort=pangenome_sv_cohort.strip(),
+        graph_gt_cohort=graph_gt_cohort.strip(),
         methyl_label_columns=_str_list(methyl_label_columns, "methyl_label_columns"),
         methyl_genes_of_interest=_str_list(methyl_genes_of_interest, "methyl_genes_of_interest"),
         resource_retry_max=resource_retry_max, resource_retry_factor=resource_retry_factor, learn_resources=learn_resources,

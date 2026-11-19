@@ -161,6 +161,17 @@ SOURCES: dict[str, dict[str, Source]] = {
         "trgt_vcf_index": (DRIVER, "cohort_merge outputs (cohort_trgt_vcf_index)"),
         "ancestry": (DRIVER, "cohort_qc outputs (qc_ancestry) of the cohort, any version or mode, when a run has one"),
     },
+    "cohort_graph_gt": {
+        **_COMMON, **_COHORT, **_REGISTRY,
+        "sample_sexes": (DRIVER, "the resolved sex of each member's run (declared, else coverage, else somalier), as XX/XY"),
+        "read_sample_ids": (DRIVER, "the members whose per-sample run has a haplotagged alignment, in cohort order"),
+        "read_sample_sexes": (DRIVER, "their sexes, in the same order"),
+        "aligned_bams": (DRIVER, "singleton or downstream outputs (merged_haplotagged_bam) of those members"),
+        "aligned_bam_indices": (DRIVER, "singleton or downstream outputs (merged_haplotagged_bam_index) of those members"),
+        "graph_cohort_id": (DRIVER, "config.json graph_gt_cohort"),
+        "graph_vcf": (DRIVER, "cohort_pangenome outputs (pangenome_wave_vcf) of config.json graph_gt_cohort, any version"),
+        "graph_vcf_index": (DRIVER, "cohort_pangenome outputs (pangenome_wave_vcf_index) of config.json graph_gt_cohort, any version"),
+    },
     "cohort_methyl": {
         **_COMMON, **_COHORT,
         "sample_labels": (DRIVER, "per member: the resolved sex group (XX/XY) and the values of the project's methyl_label_columns as column=value, ';'-joined"),

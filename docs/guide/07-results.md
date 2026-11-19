@@ -189,6 +189,24 @@ page says how to read it.
 per bp` for a repeat (0.23.0: `points per 100 bp`).
 `ugc-wgw export --domains mqtl` copies the six.
 
+### `cohort_graph_gt`
+
+Prefix `<cohort_id>.graph_gt.<graph cohort>.GRCh38_GIABv3`. Only for a
+project that names a graph cohort; the stage's page says how to read it.
+
+| Output | Content |
+|---|---|
+| `graph_gt_vcf`, `_index` | `.vcf.gz`: one record per SV allele of the graph (50 bp and longer), one column per cohort member in cohort order: `GT` (unphased), `GQ`, `DP`, `AD`. INFO: `SVTYPE`, `SVLEN`, `AC`, `AN`, `AF`, `NS` and the `_XX`/`_XY` strata over the cohort; `GRAPH_AC`, `GRAPH_AN`, `GRAPH_NS` of the graph's own members; `IN_TR`, `IN_EXCL`; `SKIP=too_long` on an allele that was not genotyped. |
+| `graph_gt_sites_vcf`, `_index` | `.sites.vcf.gz`: the same without the member columns. |
+| `graph_gt_members` | `.members.tsv`: one row per cohort member: `sex`, `reads`, `in_graph`, `sites`, `called`, `missing`, `call_rate`, `hom_ref`, `het`, `hom_alt`, `ins_carried`, `del_carried`, `mean_dp`. |
+| `graph_gt_concordance` | `.concordance.tsv`: the read genotype against the assembly genotype for members of the graph: `sample_id`, `svtype`, `size_class` (`50-999`, `1k-9.9k`), `context` (`other`, `tandem_repeat`, `excluded_region`), `compared`, `concordant`, `carrier_missed`, `carrier_added`, `zygosity`, `read_missing`, `not_comparable`, `concordance`; totals as `ALL`. |
+| `graph_gt_skipped` | `.skipped.tsv`: `id`, `chrom`, `pos`, `svtype`, `length`, `reason` (`too_long`, `no_length_change`, `symbolic`). |
+| `graph_gt_summary` | `.summary.tsv`: long format: the graph and its members, the cohort's members, the site list's counts, sites by type and size class (listed, genotyped, variable, in the graph's members only, called in nobody, in a tandem repeat, in an excluded region), the call rate, the comparison's totals and its share per context, the parameters. |
+| `member_vcfs`, `member_vcf_indices` | One VCF per genotyped member with every field kanpig writes. |
+| `plups`, `plup_indices` | One pileup index per genotyped member (`<sample>.<ref>.plup.gz`). |
+
+`ugc-wgw export --domains graph_gt` copies the four tables.
+
 ### `intake`
 
 | Output | What it is |
@@ -495,6 +513,7 @@ appended.
 | `C1.tr.screen.tsv`, `.screen_loci.tsv`, `.loci.tsv.gz`, `.spectrum.tsv.gz`, `.outliers.tsv.gz`, `.outliers_top.tsv`, `.samples.tsv`, `.summary.tsv` | copies | `cohort_tr`'s tables (above); `C1.tr.screen.tsv` is the one to filter by gene or class, `C1.tr.spectrum.tsv.gz` the allele-length resource |
 | `C1.methyl.background.tsv`, `.summary.tsv`, `.regions.tsv`, `.imprinting.tsv`, `.samples.tsv`, `.events.tsv`, `.compare.<baseline>_vs_<compare>.tsv` | copies | `cohort_methyl`'s tables (chapter 07 above); `C1.methyl.events.tsv` is the one to filter by a gene list |
 | `C1.mqtl.matrix.tsv.gz`, `.covariates.tsv`, `.pairs.tsv.gz`, `.top.tsv`, `.islands.tsv`, `.summary.tsv` | copies | `cohort_mqtl`'s tables (above), when the stage has run; the matrix and the pairs stay gzipped |
+| `C1.graph_gt.members.tsv`, `.concordance.tsv`, `.skipped.tsv`, `.summary.tsv` | copies | `cohort_graph_gt`'s tables (above), when the stage has run. The VCFs stay in the results tree. |
 | `export_manifest.json` | | ugc-wgw version, the cohort's freeze, the mode, the digest schema and thresholds, the strata used, the run ids read per member and per cohort stage, the domains written or skipped, every file with its rows, bytes and sha256 |
 
 Frequencies are computed over the members with a call: `n_called` is the

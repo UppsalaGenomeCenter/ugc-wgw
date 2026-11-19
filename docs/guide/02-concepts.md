@@ -15,6 +15,7 @@ arrays of files from every member of a cohort.
 | `downstream` | sample | Upstream's post-phasing half: HiPhase, TRGT, pbjam and variant stats, MethBat methylation, StarPhase. |
 | `cohort_merge` | cohort | svx or bcftools SV merge, `trgt merge` and trgt-lps, optional phased small-variant merge, optional GLnexus. |
 | `cohort_freq` | cohort | Allele counts and frequencies of the cohort's joint small-variant VCF and merged SV VCF, overall and per sex, as sites-only VCFs with a summary. |
+| `cohort_graph_gt` | cohort | Optional, and only for a project whose `config.json` names a `graph_gt_cohort`: the structural variants of that cohort's pangenome graph genotyped in every member from its reads (kanpig), with frequencies over the whole cohort. |
 | `assembly` | sample | hifiasm (trio-binned when both parents are registered) and gfatools per haplotype, behind an output contract: `hap_fastas`, `haplotype_labels`, `assembler_version`, and the QC outputs `flagger_bed` and `flagger_summary` (HMM-Flagger) and `trio_eval` (yak trioeval, trio-binned samples only). |
 | `assembly_call` | sample | The haplotypes aligned to the decoy-free GRCh38 (minimap2 2.31), assembled bases per chromosome and the inferred karyotype, dipcall and PAV 3 calls. |
 | `cohort_pangenome` | cohort | A Minigraph-Cactus graph of the members' haplotype assemblies on the decoy-free GRCh38, built per chromosome; its cohort VCFs (raw and vcfwave) with allele frequencies; truvari against the `cohort_merge` SV VCF of the cohort that `pangenome_sv_cohort` names in `config.json`, else this cohort's own, when one exists. |
@@ -26,15 +27,15 @@ of the next, by reading the earlier run's `outputs.json`.
 
 A **mode** is the stage sequence the driver walks: `standalone` is
 `singleton → cohort_qc → cohort_merge → cohort_freq → cohort_tr →
-cohort_methyl → cohort_mqtl`, `joint` is `upstream → cohort_qc →
-cohort_call → downstream → cohort_merge → cohort_freq → cohort_tr →
-cohort_methyl → cohort_mqtl`, `assembly` is `assembly → assembly_call →
-cohort_pangenome`. A sample that enters as an aligned BAM or with its VCFs
-runs its own per-sample stages inside either cohort mode (chapter 05,
-entry kinds). Every `submit`, `retry`,
-`status` and `inputs` command takes `--mode`, default `standalone`, because
-the same stage can sit in different modes with different wiring: `downstream`
-in joint mode takes the cohort-called VCF, `cohort_merge` in standalone mode
+cohort_methyl → cohort_mqtl → cohort_graph_gt`, `joint` is `upstream →
+cohort_qc → cohort_call → downstream → cohort_merge → cohort_freq →
+cohort_tr → cohort_methyl → cohort_mqtl → cohort_graph_gt`, `assembly` is
+`assembly → assembly_call → cohort_pangenome`. A sample that enters as an
+aligned BAM or with its VCFs runs its own per-sample stages inside either
+cohort mode (chapter 05, entry kinds). Every `submit`, `retry`, `status` and
+`inputs` command takes `--mode`, default `standalone`, because the same
+stage can sit in different modes with different wiring: `downstream` in
+joint mode takes the cohort-called VCF, `cohort_merge` in standalone mode
 takes files from `singleton` runs.
 
 One caveat travels with the assembly mode's cohort stage. For a member that

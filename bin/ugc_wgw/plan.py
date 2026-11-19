@@ -125,8 +125,26 @@ def _elsewhere(db: DB, version: str | None, subject_type: str, subject_id: str, 
     return version is not None and db.latest_success(subject_type, subject_id, stage, None) is not None
 
 
+NO_GRAPH_COHORT = ("no graph_gt_cohort in the project's config.json: name the cohort whose cohort_pangenome graph is genotyped "
+                   "(guide chapter 05)")
+
+
+def graph_blocker(db: DB, graph_cohort: str, *, built: bool = True) -> str | None:
+    """Why the graph a `needs_graph` stage reads is not there, None when it is: the cohort config.json
+    graph_gt_cohort names must exist (a mistake in the configuration, said before anything else) and, with `built`,
+    have a successful cohort_pangenome at any ugc-wgw version."""
+    if not graph_cohort:
+        return NO_GRAPH_COHORT
+    if db.get_cohort(graph_cohort) is None:
+        return f"graph_gt_cohort {graph_cohort} is not a frozen cohort of this project"
+    if built and db.latest_success("cohort", graph_cohort, "cohort_pangenome", None) is None:
+        return f"waiting for cohort_pangenome of cohort {graph_cohort} (config.json graph_gt_cohort)"
+    return None
+
+
 def prerequisites(db: DB, mode: str, stage: str, subject_type: str, subject_id: str,
-                  cohort: Cohort | None, version: str | None, *, allow_standalone: bool = False) -> str | None:
+                  cohort: Cohort | None, version: str | None, *, allow_standalone: bool = False,
+                  graph_cohort: str = "") -> str | None:
     """None when every earlier stage is satisfied, else the reason it is not. A sample's earlier stages are those of
     its own sequence (its entry kind's per-sample stages, the mode's cohort stages); a cohort stage waits for every
     member's per-sample stages before it and for the cohort stages before it (the optional ones, cohort_qc and
@@ -161,6 +179,11 @@ def prerequisites(db: DB, mode: str, stage: str, subject_type: str, subject_id: 
             shown = ", ".join(blockers[:5]) + (f" (+{len(blockers) - 5} more)" if len(blockers) > 5 else "")
             return (f"joint mode needs a gVCF from every member; vcf member(s) without one: {shown} (register the gvcf column, "
                     "or submit with --allow-standalone-members to phase them from their own VCFs outside the joint call)")
+    spec = stage_spec(stage)
+    if spec.needs_graph:
+        misnamed = graph_blocker(db, graph_cohort, built=False)
+        if misnamed:
+            return misnamed
     missing: list[str] = []
     elsewhere = 0
     for sid in cohort.members:
@@ -187,9 +210,13 @@ def prerequisites(db: DB, mode: str, stage: str, subject_type: str, subject_id: 
         espec = stage_spec(earlier)
         if espec.subject_type != "cohort" or espec.optional:
             continue
+        if spec.cohort_needs is not None and earlier not in spec.cohort_needs:
+            continue
         if db.latest_success("cohort", cohort.cohort_id, earlier, version) is None:
             hint = f" ({OTHER_VERSION_HINT})" if _elsewhere(db, version, "cohort", cohort.cohort_id, earlier) else ""
             return f"waiting for {earlier} of cohort {cohort.cohort_id}{hint}"
+    if spec.needs_graph:
+        return graph_blocker(db, graph_cohort)
     return None
 
 
@@ -267,6 +294,8 @@ def compute(db: DB, cfg: Config, sel: Selection, ugc_wgw_version: str, *, any_ve
                     kind, _ = _kind(db, s_id)
                     plan.blocked.append(Blocked(Candidate(stage, "sample", s_id, cohort.cohort_id if cohort else None),
                                                 f"not a stage of a {kind} sample in {sel.mode} mode"))
+        elif spec.needs_graph and not cfg.graph_gt_cohort and not sel.stage:
+            continue   # a project that names no graph cohort has no such stage; asked for by name, it says why
         elif cohort is None:
             plan.blocked.append(Blocked(Candidate(stage, "cohort", "?", None), f"{stage} needs --cohort <id>"))
             continue
@@ -280,7 +309,8 @@ def compute(db: DB, cfg: Config, sel: Selection, ugc_wgw_version: str, *, any_ve
                     continue
                 cand.rerun_of = latest.attempt
                 cand.note = f"rerun of the successful attempt {latest.attempt}"
-                reason = prerequisites(db, sel.mode, stage, cand.subject_type, cand.subject_id, cohort, lookup_version, allow_standalone=allow)
+                reason = prerequisites(db, sel.mode, stage, cand.subject_type, cand.subject_id, cohort, lookup_version, allow_standalone=allow,
+                                       graph_cohort=cfg.graph_gt_cohort)
                 if reason:
                     plan.blocked.append(Blocked(cand, reason))
                 else:
@@ -300,7 +330,8 @@ def compute(db: DB, cfg: Config, sel: Selection, ugc_wgw_version: str, *, any_ve
                         # the task ran out of time or memory and failures/escalate planned a bigger request: no backoff
                         cand.note = (f"escalation: {esc['task']} {esc['resource']} ×{float(esc['factor']):g} "
                                      f"(escalation {esc['n']} of {esc['max']})")
-                        reason = prerequisites(db, sel.mode, stage, cand.subject_type, cand.subject_id, cohort, lookup_version, allow_standalone=allow)
+                        reason = prerequisites(db, sel.mode, stage, cand.subject_type, cand.subject_id, cohort, lookup_version, allow_standalone=allow,
+                                       graph_cohort=cfg.graph_gt_cohort)
                         if reason:
                             plan.blocked.append(Blocked(cand, reason))
                         else:
@@ -320,7 +351,8 @@ def compute(db: DB, cfg: Config, sel: Selection, ugc_wgw_version: str, *, any_ve
                         continue
                     cand.note = (f"auto-retry after transient {latest.error_class} "
                                  f"(attempt {latest.attempt} of {cfg.auto_retry_max + 1})")
-            reason = prerequisites(db, sel.mode, stage, cand.subject_type, cand.subject_id, cohort, lookup_version, allow_standalone=allow)
+            reason = prerequisites(db, sel.mode, stage, cand.subject_type, cand.subject_id, cohort, lookup_version, allow_standalone=allow,
+                                       graph_cohort=cfg.graph_gt_cohort)
             if reason:
                 plan.blocked.append(Blocked(cand, reason))
             else:

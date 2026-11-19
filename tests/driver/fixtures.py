@@ -574,7 +574,8 @@ def _methyl_summary(members: list[str], legacy: list[str], labels: list[str]) ->
 def fixture_bytes(name: str, sid: str, stage: str, inferred_sex: str = "", index: int = 0,
                   members: list[str] | None = None, pedigree: dict[str, set[str]] | None = None,
                   sex: dict[str, str] | None = None, legacy: list[str] | None = None, mt: bool = False,
-                  haplogroup: str = "H5a7", imprinting: str = "", labels: list[str] | None = None) -> bytes | None:
+                  haplogroup: str = "H5a7", imprinting: str = "", labels: list[str] | None = None,
+                  readers: list[str] | None = None, graph_cohort: str = "") -> bytes | None:
     """The content of output `name` for sample/cohort `sid`, or None for outputs that stay placeholders. `pedigree`
     (child -> parents in the cohort) shapes cohort_qc's expectations; `sex` (declared, coverage, somalier, resolved,
     source) the sex resolution table of a per-sample run."""
@@ -802,6 +803,71 @@ def fixture_bytes(name: str, sid: str, stage: str, inferred_sex: str = "", index
         text = GENOME_BP_HEADER + f"GRCh38#0\t1\t{60_000_000 + index * 1_000_000}\n" + "".join(f"{m}#{h}\t{3 + i}\t{61_000_000 + i * 100_000 - h * 50_000}\n" for i, m in enumerate(ms) for h in (1, 2))
     elif name == "chrom_degree_stats":
         text = DEGREE
+    elif name == "graph_gt_summary":
+        # 1,000 listed alleles, 10 of them too long; every member with reads genotyped; the first two members are in the graph
+        ms, rd = members or [], readers or []
+        both = [m for m in ms[:2] if m in rd]
+        rows = [("graph", "cohort", graph_cohort), ("graph", "members", 2), ("members", "cohort", len(ms)), ("members", "with_reads", len(rd)),
+                ("members", "without_reads", len(ms) - len(rd)), ("members", "in_graph_with_reads", len(both)),
+                ("site_list_records", "read", 150000), ("site_list_sites", "INS:50-999", 600), ("site_list_sites", "DEL:50-999", 300),
+                ("site_list_sites", "INS:1k-9.9k", 60), ("site_list_sites", "DEL:1k-9.9k", 30), ("site_list_sites", "INS:10k+", 6),
+                ("site_list_sites", "DEL:10k+", 4), ("site_list_not_genotyped", "too_long", 10), ("site_list_left_out", "below_size_min", 148000),
+                ("site_list_left_out", "no_length_change", 3), ("sites", "listed", 1000), ("sites", "in_region_shards", 1000),
+                ("sites", "outside_region_shards", 0)]
+        per = {"INS:50-999": (600, 600, 420, 12, 3, 400, 30), "DEL:50-999": (300, 300, 200, 8, 2, 180, 20), "INS:1k-9.9k": (60, 60, 40, 3, 1, 20, 6),
+               "DEL:1k-9.9k": (30, 30, 20, 2, 0, 5, 4), "INS:10k+": (6, 0, 0, 0, 0, 0, 3), "DEL:10k+": (4, 0, 0, 0, 0, 0, 2)}
+        per["INS:ALL"] = tuple(sum(v[i] for k, v in per.items() if k.startswith("INS:")) for i in range(7))
+        per["DEL:ALL"] = tuple(sum(v[i] for k, v in per.items() if k.startswith("DEL:") and not k.endswith("ALL")) for i in range(7))
+        per["ALL:ALL"] = tuple(per["INS:ALL"][i] + per["DEL:ALL"][i] for i in range(7))
+        for i, field in enumerate(("sites", "genotyped", "variable", "graph_only", "no_call", "in_tandem_repeat", "in_excluded_region")):
+            rows += [("sites_" + field, key, vals[i]) for key, vals in per.items()]
+        rows += [("genotypes", "called", 960 * len(rd)), ("genotypes", "possible", 990 * len(rd)), ("genotypes", "call_rate", "0.9697"),
+                 ("concordance", "compared", 950 * len(both)), ("concordance", "concordant", 890 * len(both)),
+                 ("concordance", "carrier_missed", 30 * len(both)), ("concordance", "carrier_added", 10 * len(both)),
+                 ("concordance", "zygosity", 20 * len(both)), ("concordance", "read_missing", 25 * len(both)),
+                 ("concordance", "not_comparable", 15 * len(both)), ("concordance", "share", "0.9368" if both else "")]
+        if both:
+            rows += [("concordance_other", "compared", 300 * len(both)), ("concordance_other", "share", "0.9700"),
+                     ("concordance_tandem_repeat", "compared", 590 * len(both)), ("concordance_tandem_repeat", "share", "0.9339"),
+                     ("concordance_excluded_region", "compared", 60 * len(both)), ("concordance_excluded_region", "share", "0.8000")]
+        rows += [
+                 ("parameter", "size_min", 50), ("parameter", "size_max", 10000), ("parameter", "genotyper", "kanpig")]
+        text = "resource\tmetric\tkey\tvalue\n" + "".join(f"graph_gt\t{m}\t{k}\t{v}\n" for m, k, v in rows)
+    elif name == "graph_gt_members":
+        # a member whose ID ends in 3 has a fifth of its sites uncalled: the page's graph_gt_missing_rate
+        ms, rd = members or [], readers or []
+        text = "sample_id\tsex\treads\tin_graph\tsites\tcalled\tmissing\tcall_rate\thom_ref\thet\thom_alt\tins_carried\tdel_carried\tmean_dp\n"
+        for i, m in enumerate(ms):
+            if m not in rd:
+                text += f"{m}\t\tno\t{'yes' if i < 2 else 'no'}\t990\t0\t990\t\t0\t0\t0\t0\t0\t\n"
+                continue
+            called = 792 if m.endswith("3") else 960
+            text += (f"{m}\tXY\tyes\t{'yes' if i < 2 else 'no'}\t990\t{called}\t{990 - called}\t{called / 990:.4f}\t{called - 340}\t220\t120\t"
+                     f"230\t110\t{12.0 if m.endswith('3') else 29.5:.1f}\n")
+    elif name == "graph_gt_concordance":
+        ms, rd = members or [], readers or []
+        both = [m for m in ms[:2] if m in rd]
+        head = ["sample_id", "svtype", "size_class", "context", "compared", "concordant", "carrier_missed", "carrier_added", "zygosity", "read_missing",
+                "not_comparable", "concordance"]
+        rows3 = []
+        if both:
+            k = len(both)
+            rows3 = [["ALL", "ALL", "ALL", "ALL", 950 * k, 890 * k, 30 * k, 10 * k, 20 * k, 25 * k, 15 * k, "0.9368"],
+                     ["ALL", "ALL", "ALL", "excluded_region", 60 * k, 48 * k, 8 * k, 1 * k, 3 * k, 9 * k, 5 * k, "0.8000"],
+                     ["ALL", "ALL", "ALL", "other", 300 * k, 291 * k, 4 * k, 2 * k, 3 * k, 4 * k, 3 * k, "0.9700"],
+                     ["ALL", "ALL", "ALL", "tandem_repeat", 590 * k, 551 * k, 18 * k, 7 * k, 14 * k, 12 * k, 7 * k, "0.9339"],
+                     ["ALL", "ALL", "50-999", "ALL", 860 * k, 812 * k, 24 * k, 8 * k, 16 * k, 20 * k, 12 * k, "0.9442"],
+                     ["ALL", "DEL", "ALL", "ALL", 320 * k, 304 * k, 8 * k, 3 * k, 5 * k, 8 * k, 5 * k, "0.9500"],
+                     ["ALL", "DEL", "50-999", "ALL", 290 * k, 277 * k, 6 * k, 3 * k, 4 * k, 7 * k, 4 * k, "0.9552"],
+                     ["ALL", "INS", "ALL", "ALL", 630 * k, 586 * k, 22 * k, 7 * k, 15 * k, 17 * k, 10 * k, "0.9302"],
+                     ["ALL", "INS", "50-999", "ALL", 570 * k, 535 * k, 18 * k, 5 * k, 12 * k, 13 * k, 8 * k, "0.9386"]]
+            rows3 += [[m, "ALL", "ALL", "ALL", 950, 890, 30, 10, 20, 25, 15, "0.9368"] for m in both]
+            rows3 += [[m, "ALL", "ALL", "other", 300, 291, 4, 2, 3, 4, 3, "0.9700"] for m in both]
+            rows3 += [[m, "INS", "50-999", "other", 190, 185, 2, 1, 2, 2, 1, "0.9737"] for m in both]
+        text = "\t".join(head) + "\n" + "".join("\t".join(str(x) for x in r) + "\n" for r in rows3)
+    elif name == "graph_gt_skipped":
+        text = ("id\tchrom\tpos\tsvtype\tlength\treason\n" "chr1-1000000-INS-12000-0a1b2c3d\tchr1\t1000000\tINS\t12000\ttoo_long\n"
+                ".\tchr2\t2000000\tCOMPLEX\t800\tno_length_change\n")
     elif name == "mqtl_summary":
         n = len(members or [])
         rows = [("members", "used", n), ("members", "cohort", n), ("covariate", "intercept", 1), ("covariate", "sex", 1), ("covariate", "granulocyte", 1),

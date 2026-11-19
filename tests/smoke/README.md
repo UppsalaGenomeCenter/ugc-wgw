@@ -22,7 +22,7 @@ export UGC_WGW_SMOKE_DIR=/data/ugc-smoke
 tests/smoke/prepare.sh --threads 8                        # once; see PREPARE.md
 tests/smoke/run.sh init --inflight 2                      # dev machine: repo .venv miniwdl, bundle/out/sif-cache
 tests/smoke/run.sh init --install /proj/ugc/current       # HPC: the installed engine, config and maps
-tests/smoke/run.sh all                                    # standalone, joint, assembly; checks after each
+tests/smoke/run.sh all                                    # standalone, joint, assembly, graph_gt; checks after each
 tests/smoke/run.sh singleton HG002                        # one stage; subject defaults to HG002 / the mode's cohort
 tests/smoke/run.sh status
 ```

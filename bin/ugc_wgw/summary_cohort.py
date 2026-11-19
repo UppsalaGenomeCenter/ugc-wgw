@@ -326,6 +326,137 @@ def mqtl_islands(top_rows: list[dict[str, str]]) -> list[dict[str, str]]:
     return list(lead.values())
 
 
+GRAPH_GT_CONTEXTS = {"other": "elsewhere", "tandem_repeat": "in a tandem repeat (TRGT catalogue)",
+                     "excluded_region": "in a region of the SV caller's exclusion list"}
+
+
+def _pct(v: float) -> str:
+    return f"{v:.1f}%"
+
+
+def graph_gt_members(rows: list[dict[str, str]], thr: dict[str, float]) -> dict[str, object]:
+    """cohort_graph_gt's member table for the digest: every member's row, the cohort's median call rate, and the
+    members whose share of uncalled sites is more than `graph_gt_missing_excess_max` above the median's
+    (`graph_gt_missing_rate`, advisory: low depth, another sample type, or a member far from the graph's members)."""
+    excess = float(thr.get("graph_gt_missing_excess_max", 0.05))
+    kept: list[dict[str, object]] = []
+    rates: list[float] = []
+    for r in rows:
+        rate = sp._num(r.get("call_rate"))
+        row: dict[str, object] = {"sample_id": r.get("sample_id"), "sex": r.get("sex") or "", "reads": r.get("reads") == "yes",
+                                  "in_graph": r.get("in_graph") == "yes", "sites": sp._num(r.get("sites")),
+                                  "call_rate": rate if isinstance(rate, (int, float)) else None, "het": sp._num(r.get("het")),
+                                  "hom_alt": sp._num(r.get("hom_alt")), "mean_dp": sp._num(r.get("mean_dp"))}
+        kept.append(row)
+        if row["reads"] and isinstance(rate, (int, float)):
+            rates.append(float(rate))
+    median = statistics.median(rates) if rates else None
+    flagged = [str(r["sample_id"]) for r in kept
+               if median is not None and r["reads"] and isinstance(r["call_rate"], (int, float)) and (1 - float(r["call_rate"])) > (1 - median) + excess]  # type: ignore[arg-type]
+    return {"rows": kept, "median_call_rate": median, "flagged": flagged}
+
+
+def _graph_gt_html(entry: dict[str, object], thr: dict[str, float], link) -> str:  # type: ignore[no-untyped-def]
+    """The cohort page's cohort_graph_gt section: which graph, how many of its SV alleles were genotyped and in how
+    many members, how the genotypes from the reads agree with the assemblies of the graph's own members, the sites by
+    type and size, and the members."""
+    s: dict[str, dict[str, object]] = entry.get("summary") or {}  # type: ignore[assignment]
+
+    def g(metric: str, key: str) -> object:
+        return (s.get(metric) or {}).get(key)
+
+    def n(v: object) -> float:
+        return float(v) if isinstance(v, (int, float)) else 0.0
+
+    members: dict[str, object] = entry.get("members") or {}  # type: ignore[assignment]
+    flagged: list[str] = list(members.get("flagged") or [])  # type: ignore[call-overload]
+    listed, in_shards = g("sites", "listed"), g("sites", "in_region_shards")
+    genotyped = (s.get("sites_genotyped") or {}).get("ALL:ALL")
+    too_long = (s.get("site_list_not_genotyped") or {}).get("too_long", 0)
+    share = g("concordance", "share")
+    body = ("<p class='small muted'>The structural variants of the graph of cohort <strong>" + _esc(g("graph", "cohort")) + "</strong> ("
+            + _esc(sv.fmt(g("graph", "members"))) + " assembled members) as a fixed list of sites, genotyped in every member of this cohort "
+            "from its reads' alignment to the reference (kanpig). Genotyping, not discovery: a variant no assembly of the graph carries is "
+            "not here. A genotype table with a measured error, not a truth set.</p>")
+    body += _cards([("SV alleles in the list", sv.fmt(listed)), ("genotyped", sv.fmt(genotyped)),
+                    (f"not genotyped: longer than {sv.fmt_bp(g('parameter', 'size_max'))}", sv.fmt(too_long)),
+                    ("members genotyped", f"{sv.fmt(g('members', 'with_reads'))} of {sv.fmt(g('members', 'cohort'))}"),
+                    ("genotypes called", _pct(n(g("genotypes", "call_rate")) * 100) if g("genotypes", "call_rate") not in (None, "") else "–"),
+                    ("variable in this cohort", sv.fmt((s.get("sites_variable") or {}).get("ALL:ALL"))),
+                    ("carried by the graph's members only", sv.fmt((s.get("sites_graph_only") or {}).get("ALL:ALL"))),
+                    ("reads agree with the assembly, outside repeats and excluded regions",
+                     (_pct(n(g("concordance_other", "share")) * 100) + f" of {sv.fmt(g('concordance_other', 'compared'))} genotypes")
+                     if isinstance(g("concordance_other", "share"), (int, float)) else
+                     ((_pct(n(share) * 100) + f" of {sv.fmt(g('concordance', 'compared'))} genotypes, everywhere") if isinstance(share, (int, float))
+                      else "no member of the graph in this cohort")),
+                    ("members flagged graph_gt_missing_rate", len(flagged))])
+    if n(g("members", "without_reads")):
+        body += (f"<p class='small'>{_esc(sv.fmt(g('members', 'without_reads')))} member(s) have no alignment (entry kind vcf) and are "
+                 "uncalled at every site.</p>")
+    if n(g("sites", "outside_region_shards")):
+        body += (f"<p class='warn'>{_esc(sv.fmt(g('sites', 'outside_region_shards')))} listed allele(s) lie outside the reference map's "
+                 "scatter regions and are not in the cohort VCF.</p>")
+    classes: list[list[object]] = []
+    for key in sorted(k for k in (s.get("sites_sites") or {}) if not k.endswith(":ALL")):
+        svtype, cls = key.split(":", 1)
+        classes.append([svtype, cls] + [sv.fmt((s.get("sites_" + f) or {}).get(key))
+                                        for f in ("sites", "genotyped", "variable", "graph_only", "no_call", "in_tandem_repeat", "in_excluded_region")])
+    if classes:
+        body += ("<h3>Sites by type and length</h3>"
+                 + _table(["type", "length (bp)", "alleles", "genotyped", "variable in this cohort", "in the graph's members only", "called in nobody",
+                           "in a tandem repeat", "in an excluded region"],
+                          classes, cls="")
+                 + "<p class='small muted'>Variable: at least one member of this cohort carries the allele by its reads. In the graph's members "
+                 "only: an assembly carries it and no member's reads do, which is either a rare allele of a member outside this cohort or a "
+                 "genotype the reads miss.</p>")
+    conc: list[dict[str, str]] = entry.get("concordance") or []  # type: ignore[assignment]
+    by_class = [r for r in conc if r.get("sample_id") == "ALL" and r.get("svtype") != "ALL"]
+    by_context = {r.get("context"): r for r in conc if r.get("sample_id") == "ALL" and r.get("svtype") == "ALL" and r.get("size_class") == "ALL"
+                  and r.get("context") not in (None, "ALL")}
+    if by_class:
+        def crow(r: dict[str, str], first: list[object]) -> list[object]:
+            return first + [sv.fmt(sp._num(r.get(k))) for k in ("compared", "concordant", "carrier_missed", "carrier_added", "zygosity", "read_missing")] + [
+                _pct(float(r["concordance"]) * 100) if r.get("concordance") else "–"]
+
+        heads = ["compared", "same genotype", "carrier missed by the reads", "carrier added by the reads", "other zygosity", "uncalled from the reads", "agreement"]
+        body += ("<h3>Reads against assemblies</h3><p class='small muted'>For the members that are in the graph: the genotype from the reads "
+                 "against the genotype from the member's own assembly, at the genotyped sites where both are called with the same ploidy. "
+                 "It flatters: these members' own alleles are in the list. A member outside the graph has no such check.</p>")
+        if by_context:
+            body += (_table(["where the allele starts"] + heads,
+                            [crow(by_context[c], [GRAPH_GT_CONTEXTS[c]]) for c in ("other", "tandem_repeat", "excluded_region") if c in by_context], cls="")
+                     + "<p class='small muted'>Read the first row as the genotyper's error. Inside a tandem repeat an assembly and a read "
+                     "alignment often write the same allele differently, so the two disagree without either being wrong: those loci are "
+                     "TRGT's. In the regions of the SV caller's exclusion list (gaps, centromeres, common copy-number regions) neither the "
+                     "assembly nor the alignment is to be trusted.</p>")
+        body += ("<details><summary>by type and length</summary>"
+                 + _table(["type", "length (bp)"] + heads, [crow(r, [r.get("svtype"), r.get("size_class")]) for r in by_class], cls="") + "</details>")
+        per_member = [r for r in conc if r.get("sample_id") != "ALL" and r.get("svtype") == "ALL" and r.get("context") in (None, "ALL")]
+        if per_member:
+            body += ("<details><summary>per member of the graph</summary>"
+                     + big_table(["member"] + heads, [crow(r, [link(str(r.get("sample_id")))]) for r in per_member], what="members") + "</details>")
+    rows: list[dict[str, object]] = list(members.get("rows") or [])  # type: ignore[call-overload]
+    if rows:
+        med = members.get("median_call_rate")
+        if flagged:
+            body += ("<p class='warn'><code>graph_gt_missing_rate</code>: " + ", ".join(link(sid) for sid in flagged[:30])
+                     + (f" and {len(flagged) - 30} more" if len(flagged) > 30 else "") + ". Their share of uncalled sites is more than "
+                     + _esc(sv.fmt(float(thr.get('graph_gt_missing_excess_max', 0.05)) * 100, 0)) + " points above the cohort's median: low depth, "
+                     "another kind of sample, or a genome far from the graph's members. Advisory; no pass list reads it.</p>")
+        trows = [[link(str(r.get("sample_id"))), r.get("sex") or "–", "yes" if r.get("reads") else "no", "yes" if r.get("in_graph") else "no",
+                  _pct(float(r["call_rate"]) * 100) if isinstance(r.get("call_rate"), (int, float)) else "–",  # type: ignore[arg-type]
+                  sv.fmt(r.get("het")), sv.fmt(r.get("hom_alt")), sv.fmt(r.get("mean_dp"), 1),
+                  "graph_gt_missing_rate" if r.get("sample_id") in flagged else ""] for r in rows]
+        body += ("<h3>Members</h3><p class='small muted'>Median call rate "
+                 + (_pct(float(med) * 100) if isinstance(med, (int, float)) else "–") + ".</p>"
+                 + big_table(["member", "sex", "reads", "in the graph", "sites called", "heterozygous", "homozygous or hemizygous alternate",
+                              "mean reads per site", "flag"], trows, what="members"))  # type: ignore[arg-type]
+    body += ("<p class='small muted'>Genotypes are in the cohort VCF of the stage (unphased; per member GQ, DP, AD), allele frequencies over "
+             "the whole cohort and per sex group beside the graph's own (GRAPH_AC, GRAPH_AN). kanpig reads pileups of the alignment to the "
+             "reference: alleles longer than the size limit, and alleles in sequence where the reads align badly, are where it is weakest.</p>")
+    return body
+
+
 def _mqtl_html(entry: dict[str, object]) -> str:
     """The cohort page's cohort_mqtl section: what was tested, how many pairs and islands stand at the false-discovery
     rate, the two inflation factors and how to read them, the covariates that are missing, and the islands with
@@ -855,6 +986,21 @@ def build_cohort_digest(cohort: Cohort, members: dict[str, dict[str, object]], c
                     entry["n_islands"] = len(rows_isl)
                     entry["islands"] = rows_isl[:MQTL_TOP_ROWS]
                 for name in ("mqtl_matrix", "mqtl_pairs"):
+                    p = outs.opt(name)
+                    if isinstance(p, str) and Path(p).exists():
+                        entry[name] = {"bytes": Path(p).stat().st_size}
+            elif stage == "cohort_graph_gt":
+                p = outs.opt("graph_gt_summary")
+                if isinstance(p, str) and Path(p).exists():
+                    entry["summary"] = sp.parse_tr_summary(sp.read_lines(Path(p))).get("graph_gt", {})   # the same long format
+                p = outs.opt("graph_gt_members")
+                if isinstance(p, str) and Path(p).exists():
+                    entry["members"] = graph_gt_members(sp.table(sp.read_lines(Path(p)))[1], thr)
+                p = outs.opt("graph_gt_concordance")
+                if isinstance(p, str) and Path(p).exists():   # the totals: per type and size class, and per member
+                    entry["concordance"] = [r for r in sp.table(sp.read_lines(Path(p)))[1]
+                                            if r.get("sample_id") == "ALL" or r.get("svtype") == "ALL"]
+                for name in ("graph_gt_vcf", "graph_gt_sites_vcf"):
                     p = outs.opt(name)
                     if isinstance(p, str) and Path(p).exists():
                         entry[name] = {"bytes": Path(p).stat().st_size}
@@ -1553,6 +1699,11 @@ def render_cohort(d: dict[str, object], tools: list[dict[str, object]], *, proje
     if d.get("mode") != "assembly":
         add("sec-mqtl", "Variants and methylation (cohort_mqtl)", _mqtl_html(cmq) if cmq.get("summary") else
             "<p class='muted'>cohort_mqtl has not run for this cohort (<code>ugc-wgw submit --cohort " + _esc(cid) + " --stage cohort_mqtl</code>).</p>")
+
+    # the graph's structural variants genotyped in every member (cohort_graph_gt, optional; only for a project that names a graph)
+    cgg: dict[str, object] = callsets.get("cohort_graph_gt", {}) or {}
+    if d.get("mode") != "assembly" and cgg.get("summary"):
+        add("sec-graph-gt", "Structural variants of the graph in every member (cohort_graph_gt)", _graph_gt_html(cgg, thr, link))
 
     # targeted callers across the cohort (export.targeted_summary: the same tables `ugc-wgw export` writes)
     tg: dict[str, object] = d.get("targeted", {}) or {}  # type: ignore[assignment]

@@ -354,6 +354,17 @@ def make_outputs(stage: str, inputs: dict[str, object], run_dir: pathlib.Path,
         for name, suffix in (("mqtl_matrix", "matrix.tsv.gz"), ("mqtl_covariates", "covariates.tsv"), ("mqtl_pairs", "pairs.tsv.gz"),
                              ("mqtl_top", "top.tsv"), ("mqtl_islands", "islands.tsv"), ("mqtl_summary", "summary.tsv")):
             files[name] = f"{sid}.mqtl.{REF}.{suffix}"
+    elif stage == "cohort_graph_gt":
+        pre = f"{sid}.graph_gt.{v.get('graph_cohort_id')}.{REF}"
+        readers = [str(m) for m in v.get("read_sample_ids", [])]  # type: ignore[union-attr]
+        f("graph_gt_vcf", f"{pre}.vcf.gz")
+        f("graph_gt_sites_vcf", f"{pre}.sites.vcf.gz")
+        for name in ("graph_gt_members", "graph_gt_concordance", "graph_gt_skipped", "graph_gt_summary"):
+            files[name] = f"{pre}.{name[9:]}.tsv"
+        files["member_vcfs"] = [f"{m}.graph_gt.{v.get('graph_cohort_id')}.{REF}.vcf.gz" for m in readers]
+        files["member_vcf_indices"] = [f"{m}.graph_gt.{v.get('graph_cohort_id')}.{REF}.vcf.gz.tbi" for m in readers]
+        files["plups"] = [f"{m}.{REF}.plup.gz" for m in readers]
+        files["plup_indices"] = [f"{m}.{REF}.plup.gz.tbi" for m in readers]
     elif stage == "cohort_tr":
         for name, suffix in (("tr_pathogenic_screen", "screen.tsv"), ("tr_screen_loci", "screen_loci.tsv"), ("tr_locus_summary", "loci.tsv.gz"),
                              ("tr_allele_spectrum", "spectrum.tsv.gz"), ("tr_outlier_pairs", "outliers.tsv.gz"), ("tr_outliers_top", "outliers_top.tsv"),
@@ -385,7 +396,8 @@ def make_outputs(stage: str, inputs: dict[str, object], run_dir: pathlib.Path,
     def write_fixture(p: pathlib.Path, name: str, index: int, placeholder: str) -> None:
         content = fixture_bytes(name, sid, stage, inferred_for_fixture, index=index, members=members_of, pedigree=pedigree, sex=sex_info,
                                 legacy=legacy_members, mt=has_mt, haplogroup=str(strings.get("mt_haplogroup") or "H5a7"),
-                                imprinting=str(v.get("imprinting") or ""), labels=[str(x) for x in (v.get("sample_labels") or [])])
+                                imprinting=str(v.get("imprinting") or ""), labels=[str(x) for x in (v.get("sample_labels") or [])],
+                                readers=[str(x) for x in (v.get("read_sample_ids") or [])], graph_cohort=str(v.get("graph_cohort_id") or ""))
         if content is None:
             p.write_text(placeholder)
         elif p.name.endswith(".gz"):

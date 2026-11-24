@@ -73,6 +73,71 @@ class EscalateTest(unittest.TestCase):
         esc4, _ = escalate.plan(self.cfg, run3, self.classification("time"))
         self.assertEqual((esc4["resource"], esc4["factor"], esc4["n"]), ("time", 2.0, 1))
 
+    def in_run(self, resource: str, old: int, new: int, run_factor: float, ts: float) -> dict:
+        key = {"time": "time_minutes", "memory": "memory_reservation"}[resource]
+        return {"message": escalate.ESCALATION_MESSAGE, "task": "ugc_wgw_pav", "summary": f"{resource} {old}→{new}",
+                "changes": {key: [old, new]}, "in_run": True, "resource": resource, "run_factor": run_factor,
+                "source": SRC, "timestamp": ts, "level": "NOTICE"}
+
+    def test_plan_counts_the_escalations_made_inside_the_run(self):
+        setup = {"message": "task setup", "name": "ugc_wgw_pav", "source": SRC, "timestamp": 1.0, "level": "NOTICE"}
+        stop = {"message": "ugc-wgw resource kill not resubmitted", "task": "ugc_wgw_pav", "resource": "time",
+                "code": "exhausted", "reason": "escalation exhausted (2 of 2)", "source": SRC, "timestamp": 9.0, "level": "WARNING"}
+        # killed at 2 h, 4 h and 8 h inside one run: nothing is left for the driver
+        run = run_record(self.tmp, 1)
+        write_log(run.run_path, [setup, self.in_run("time", 120, 240, 2.0, 2.0), self.in_run("time", 240, 480, 4.0, 3.0), stop])
+        esc, why = escalate.plan(self.cfg, run, self.classification("time"))
+        self.assertIsNone(esc)
+        self.assertIn("escalation exhausted: ugc_wgw_pav time already ×4 (2 of 2)", why)
+        # the task's memory ladder is untouched by that
+        esc, _ = escalate.plan(self.cfg, run, self.classification("memory"))
+        self.assertEqual((esc["resource"], esc["factor"], esc["n"]), ("memory", 2.0, 1))
+        # one step inside the run (miniwdl's retries ran out on something else): the driver takes the next
+        run2 = run_record(self.tmp, 2)
+        write_log(run2.run_path, [setup, self.in_run("time", 120, 240, 2.0, 2.0)])
+        esc, why = escalate.plan(self.cfg, run2, self.classification("time"))
+        self.assertEqual((esc["factor"], esc["n"], why), (4.0, 2, ""))
+        # launched with ×2 by the driver, one more inside: together the two that are allowed
+        run3 = run_record(self.tmp, 3, meta={"escalations": {"ugc_wgw_pav": {"time_factor": 2.0}}})
+        write_log(run3.run_path, [setup, self.in_run("time", 240, 480, 2.0, 2.0)])
+        esc, why = escalate.plan(self.cfg, run3, self.classification("time"))
+        self.assertIsNone(esc)
+        self.assertIn("already ×4 (2 of 2)", why)
+
+    def test_plan_names_the_cap_and_a_missing_request(self):
+        setup = {"message": "task setup", "name": "ugc_wgw_pav", "source": SRC, "timestamp": 1.0, "level": "NOTICE"}
+        for code, reason in (("capped", "memory is at the site's cap (375G)"), ("no_request", "the task has no wall time request to raise"),
+                             ("refused", "sbatch refused the request (Requested time limit is invalid)")):
+            run = run_record(self.tmp, 1)
+            write_log(run.run_path, [setup, {"message": "ugc-wgw resource kill not resubmitted", "task": "ugc_wgw_pav",
+                                             "code": code, "reason": reason, "source": SRC, "timestamp": 2.0, "level": "WARNING"}])
+            esc, why = escalate.plan(self.cfg, run, self.classification("memory" if code == "capped" else "time"))
+            self.assertIsNone(esc)
+            self.assertEqual(why, f"not escalated: ugc_wgw_pav {reason}; a policy row is needed (guide chapter 12)")
+
+    def test_learn_from_a_task_escalated_inside_the_run(self):
+        db = DB(self.cfg.db_path)
+        events = Events(db, self.cfg.logs_dir / "events.jsonl")
+        run = run_record(self.tmp, 1, status="success")   # launched with no escalation at all
+        write_log(run.run_path, [
+            {"message": "task setup", "name": "ugc_wgw_pav", "source": SRC, "timestamp": 1.0, "level": "NOTICE"},
+            {"message": "failed task will be retried", "source": SRC, "timestamp": 2.0, "level": "ERROR"},
+            self.in_run("time", 120, 240, 2.0, 2.1),
+            {"message": "failed task will be retried", "source": SRC, "timestamp": 3.0, "level": "ERROR"},
+            self.in_run("time", 240, 480, 4.0, 3.1),
+            self.in_run("memory", 40 * G, 80 * G, 2.0, 3.2),
+            {"message": "done", "source": SRC, "timestamp": 100.0, "level": "NOTICE"}])
+        from ugc_wgw import wdllog
+        from ugc_wgw.layout import run_files
+        (stat,), _ = wdllog.parse_workflow_log(run_files(run.run_path).workflow_log_json)
+        self.assertEqual((stat.retries, stat.failed, stat.in_run), (2, False, {"time": 4.0, "memory": 2.0}))
+        self.assertEqual(stat.escalation_changes, {"time_minutes": [120, 480], "memory_reservation": [40 * G, 80 * G]})
+        self.assertEqual(stat.escalation, "time 120→240 (in run), time 240→480 (in run), memory 42949672960→85899345920 (in run)")
+        self.assertEqual(sorted(escalate.learn(self.cfg, events, run)), ["ugc_wgw_pav memory 85899345920", "ugc_wgw_pav time_minutes 480"])
+        learned = escalate.load_learned(self.cfg)["ugc_wgw_pav"]
+        self.assertEqual((learned["time_minutes"], learned["memory"]), (480, 80 * G))
+        db.close()
+
     def test_plan_declines_without_a_resource_a_task_or_a_budget(self):
         run = run_record(self.tmp, 1)
         write_log(run.run_path, [{"message": "task setup", "name": "ugc_wgw_pav", "source": SRC, "timestamp": 1.0, "level": "NOTICE"}])
@@ -90,7 +155,13 @@ class EscalateTest(unittest.TestCase):
 
     def test_env_merges_learned_minimums_and_run_factors(self):
         run = run_record(self.tmp, 2, meta={"escalations": {"ugc_wgw_pav": {"memory_factor": 2.0}}})
-        self.assertEqual(escalate.env_for(self.cfg, run_record(self.tmp, 1)), {})
+        # the two settings of the escalation inside the run go with every run; the factors only when there are any
+        self.assertEqual(escalate.env_for(self.cfg, run_record(self.tmp, 1)),
+                         {escalate.RETRY_FACTOR_ENV: "2", escalate.RETRY_MAX_ENV: "2"})
+        self.cfg.resource_retry_factor, self.cfg.resource_retry_max = 1.5, 0
+        self.assertEqual(escalate.env_for(self.cfg, run_record(self.tmp, 1)),
+                         {escalate.RETRY_FACTOR_ENV: "1.5", escalate.RETRY_MAX_ENV: "0"})
+        self.cfg.resource_retry_factor, self.cfg.resource_retry_max = 2.0, 2
         env = escalate.env_for(self.cfg, run)
         self.assertEqual(json.loads(env[escalate.ESCALATION_ENV]), {"ugc_wgw_pav": {"memory_factor": 2.0}})
         escalate.save_learned(self.cfg, {"ugc_wgw_dipcall": {"memory": 64 * G, "time_minutes": 480, "run_id": "r"},

@@ -30,7 +30,10 @@ class TaskStat:
     gres: Optional[str] = None    # the plugin's `ugc-wgw gpu request`, e.g. `gpu:a100:4`
     cpu_policy: Optional[int] = None   # cpu after the policy row (`changes.cpu[1]`)
     escalation: str = ""          # the plugin's `ugc-wgw resource escalation applied` summary, e.g. "memory 40G→80G"
-    escalation_changes: dict = field(default_factory=dict)   # its changes: {time_minutes: [old, new], memory_reservation: [old, new]}
+    escalation_changes: dict = field(default_factory=dict)   # its changes: {time_minutes: [old, new], memory_reservation: [old, new]}; over several messages the first old and the last new
+    in_run: dict = field(default_factory=dict)   # resource -> the factor the plugin reached inside the run after kills (inrun.py)
+    kill_stop: str = ""           # why a killed try was not submitted again: "exhausted" | "capped" | "no_request" | "refused"
+    kill_stop_reason: str = ""    # the plugin's sentence for it
 
     @property
     def duration(self) -> Optional[float]:
@@ -95,10 +98,24 @@ def parse_workflow_log(path: Path) -> tuple[list[TaskStat], Counter]:
                     if isinstance(changes, dict) and isinstance(changes.get("cpu"), list) and len(changes["cpu"]) == 2:
                         t.cpu_policy = _int(changes["cpu"][1])
                 elif msg == "ugc-wgw resource escalation applied":
-                    t.escalation = str(d.get("summary") or "")
+                    # once at launch (the driver's factors and the learned minimums), then once per kill inside the run
+                    summary = str(d.get("summary") or "")
+                    if d.get("in_run"):
+                        summary += " (in run)"
+                        try:
+                            t.in_run[str(d.get("resource"))] = float(d.get("run_factor"))  # type: ignore[arg-type]
+                        except (TypeError, ValueError):
+                            pass
+                    t.escalation = ", ".join(s for s in (t.escalation, summary) if s)
                     changes = d.get("changes")
                     if isinstance(changes, dict):
-                        t.escalation_changes = {str(k): list(v) for k, v in changes.items() if isinstance(v, list) and len(v) == 2}
+                        for k, v in changes.items():
+                            if isinstance(v, list) and len(v) == 2:
+                                first = t.escalation_changes.get(str(k), v)[0]
+                                t.escalation_changes[str(k)] = [first, v[1]]
+                elif msg == "ugc-wgw resource kill not resubmitted":
+                    t.kill_stop = str(d.get("code") or "exhausted")
+                    t.kill_stop_reason = str(d.get("reason") or "")
                 elif msg == "ugc-wgw gpu request":
                     t.gres = str(d.get("gres") or "") or None
                 elif msg == "failed task will be retried":

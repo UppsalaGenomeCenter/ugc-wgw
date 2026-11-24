@@ -69,7 +69,8 @@ class DryRunTest(unittest.TestCase):
         inputs_doc = json.loads((run.run_path / "inputs.json").read_text())
         self.assertFalse(any(k.endswith(".gpuType") for k in inputs_doc), inputs_doc.keys())
         submitted = [json.loads(l) for l in (cfg.logs_dir / "events.jsonl").read_text().splitlines() if '"run.submitted"' in l][0]
-        self.assertEqual(submitted["detail"]["env"], {"MINIWDL__UGC_WGW__GPU_TYPE": "l40s"})
+        self.assertEqual(submitted["detail"]["env"], {"MINIWDL__UGC_WGW__GPU_TYPE": "l40s", "MINIWDL__UGC_WGW__RESOURCE_RETRY_FACTOR": "2",
+                                                      "MINIWDL__UGC_WGW__RESOURCE_RETRY_MAX": "2"})
         db.close()
         # the cpu flavour sets nothing: no environment line, no manifest type
         (tmp / "cpu").mkdir()

@@ -5,6 +5,54 @@ offline bundle. An entry opens with the upstream tag it is built on and a
 short summary, with anything an existing project has to do; the rest is
 under Details.
 
+## 0.25.1
+
+Built on PacBio HiFi-human-WGS-WDL **v4.1.0** (`89c813a1`) and its
+reference data container `GRCh38_GIABv3`, as 0.25.0; images and
+reference entries unchanged. The miniwdl plugin is 0.7.0.
+
+**Fix: a task killed for wall time or memory is no longer retried with
+the request that was killed.** miniwdl retries a failed task on its own,
+three times on the HPC backend, and asks SLURM for the same wall time and
+memory each time. A task that needed three hours under a two-hour limit
+therefore ran four times, eight hours in all, before the driver saw the
+failure and doubled the limit; on a cohort that is every sample in
+flight. Now the container backend looks at every failed try:
+
+- Killed for time or memory: the limit is multiplied (by 2) before
+  miniwdl's retry, so one run goes 2 h, 4 h, 8 h. At most
+  `resource_retry_max` (2) escalations per task, counting those of
+  earlier attempts.
+- Killed with no escalation left, or at the site's memory cap, or
+  refused by `sbatch`: no further job is submitted, and the failure
+  message says which (`escalation exhausted`, `memory is at the site's
+  cap`). Give the task a row in `resources.tsv`, then `ugc-wgw retry`.
+- Any other failure is retried by miniwdl as before.
+
+The request a task finished with is still learned for the project.
+Nothing to do on upgrade, and no workflow changed: nothing recomputes.
+Tested with miniwdl run through the backend against stand-ins for
+`sbatch` and `scontrol`, not yet on a cluster.
+
+<details>
+<summary>Details</summary>
+
+- A kill is recognised from the try's own job: its `slurm-<jobid>.out`
+  (`DUE TO TIME LIMIT`, `oom_kill`), its state from `scontrol show job`
+  (`TIMEOUT`, `OUT_OF_MEMORY`), `sbatch`'s exit status (253, 137).
+- Memory escalation now stops at `TASK_MEMORY_MAX`; under miniwdl-slurm
+  it had no limit and a doubling past the node was left for `sbatch` to
+  refuse. A request a policy row put above the cap is not capped.
+- `resource_retry_max` 0 also means a killed task runs once.
+- New keys `[ugc_wgw] resource_retry_factor`, `resource_retry_max` in
+  the rendered `miniwdl.cfg`; the driver passes the project's values per
+  run.
+- The run's `workflow.log` has `ugc-wgw resource escalation applied`
+  per escalation and `ugc-wgw resource kill not resubmitted` when one
+  was not possible; the run report marks such changes `(in run)`.
+
+</details>
+
 ## 0.25.0
 
 Built on PacBio HiFi-human-WGS-WDL **v4.1.0** (`89c813a1`) and its

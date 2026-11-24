@@ -20,6 +20,7 @@ Layout:
 | `ugc_wgw_miniwdl/policy.py` | The TSV format: parsing, units, matching, application. Stdlib only; the driver imports it too (`ugc-wgw resources`). |
 | `ugc_wgw_miniwdl/resources.py` | The coroutine miniwdl calls per task (`miniwdl.plugin.task` entry point `ugc_wgw_resources`). |
 | `ugc_wgw_miniwdl/scratch.py`, `ugc_wgw_miniwdl/scripts/exec_scratch.sh` | The `ugc_slurm_singularity` container backend (`miniwdl.plugin.container_backend`): miniwdl-slurm's `slurm_singularity` with the job's node-local scratch bound into every task's container and `TMPDIR` pointing at it, when `[ugc_wgw] scratch_env` names the job variable. |
+| `ugc_wgw_miniwdl/inrun.py` | Escalation inside a run: called by the backend after every failed try. A job killed for wall time or memory gets its request multiplied before miniwdl's own retry; a kill with no escalation left, and a request `sbatch` refused, are not submitted again (section below). |
 | `ugc_wgw_miniwdl/crossdev.py` | Hardlink, else symlink: wraps miniwdl's `symlink_force` so an output on another file system becomes a symlink instead of `Invalid cross-device link`. Imported by `resources.py` and by the `ugc_wgw_miniwdl.pth` the installer writes into the venv. |
 | `pyproject.toml` | Package metadata and the entry point. |
 
@@ -36,6 +37,38 @@ Development: `.venv/bin/pip install -e plugins/ugc_wgw_miniwdl`, then
 needed).
 
 Format, precedence and examples: `docs/guide/12-resources.md`.
+
+## A killed task is not retried with the same request
+
+miniwdl retries a failed command `runtime.maxRetries` times, and upstream's
+HPC backend sets that to 3 for every task. The retry asks for what the
+failed try asked for, so a task that hit its wall time ran four times at
+the same limit before the driver could raise it (the 864-sample cohort,
+2026-11-24). miniwdl reads `maxRetries` before any plugin sees the
+container, so the count cannot be changed from a plugin; the request can,
+because the backend rebuilds the `sbatch` line from `runtime_values` at
+every try.
+
+`scratch.SlurmSingularityScratch._run` therefore hands every failed try to
+`inrun.after_failure`. Evidence of a kill is the try's own: the job id on
+the first line of `slurm_singularity.log.txt`, that job's
+`slurm-<jobid>.out` in the task directory (`DUE TO TIME LIMIT`,
+`oom_kill`), the state `scontrol show job` gives (`TIMEOUT`,
+`OUT_OF_MEMORY`), exit status 253 or 137, and the pinned-memory message of
+the one tool that fails cleanly (Parabricks). A kill multiplies
+`time_minutes` or `memory_reservation` by `[ugc_wgw]
+resource_retry_factor`, at most `resource_retry_max` times counting the
+factors the driver launched the run with, and logs the driver's own
+message (`ugc-wgw resource escalation applied`, with `in_run`), so the
+request the task finishes with is learned. With nothing left it logs
+`ugc-wgw resource kill not resubmitted` and answers miniwdl's remaining
+tries with the same exit status, without a job. Everything else about a
+failed try is miniwdl's, unchanged.
+
+Tests: `tests/plugin/test_inrun.py`, the second half of which runs
+miniwdl itself through the backend against stand-ins for `sbatch`,
+`scontrol` and `singularity` (it needs the plugin installed in the
+interpreter, as under Development above).
 
 ## Outputs across file systems
 

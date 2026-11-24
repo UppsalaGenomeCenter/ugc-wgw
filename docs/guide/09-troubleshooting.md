@@ -36,14 +36,15 @@ wins. The kind decides whether the driver re-attempts on its own.
 | `version` | class `version_mismatch` | Blocked until fixed. |
 | `transient` | class `driver_lost`, `Interrupted`, `Terminated`, `launch_error`, `killed`, `NoResult`; or `DUE TO PREEMPTION`, `NODE_FAIL`, `Socket timed out`, `Unable to contact slurm controller` in the task's SLURM log | Re-attempted automatically after the backoff, up to `auto_retry_max` times. |
 | `input` | class `InputError` (also what the driver's own preflight of the raw read files reports: missing, empty, truncated or resized since registration, chapter 05), `DownloadFailed`; or a failed command whose logs say `No such file or directory`, `does not exist`, `Permission denied`, `EOF marker is absent`, `Invalid BGZF header` | Blocked until the file is fixed and `ugc-wgw retry`. |
-| `resource` | exit status 137 or 253; `oom_kill`, `OUT_OF_MEMORY`, `Out of memory`, `DUE TO TIME LIMIT`, `TIMEOUT`, or a CUDA host-memory failure (`cudaErrorMemoryAllocation`, `CUDA_ERROR_OUT_OF_MEMORY`) in the task's `slurm-<jobid>.out` (newest first), sbatch log, stderr or stdout (every try's: `stderr2.txt` is miniwdl's second try); or `sbatch` refused the request (`Requested node configuration is not available`, `CPU count per node can not be satisfied`) | Time and memory failures are re-attempted at once with the task's limit multiplied (`resource_retry_factor`, 2), up to `resource_retry_max` (2) times, and the working request is learned for the project (chapter 06, "Resource escalation"); a refused request, or a failure at the site's memory cap, is blocked: cap or change the request (chapter 12), then `ugc-wgw retry`. |
+| `resource` | exit status 137 or 253; `oom_kill`, `OUT_OF_MEMORY`, `Out of memory`, `DUE TO TIME LIMIT`, `TIMEOUT`, or a CUDA host-memory failure (`cudaErrorMemoryAllocation`, `CUDA_ERROR_OUT_OF_MEMORY`) in the task's `slurm-<jobid>.out` (newest first), sbatch log, stderr or stdout (every try's: `stderr2.txt` is miniwdl's second try); or `sbatch` refused the request (`Requested node configuration is not available`, `CPU count per node can not be satisfied`) | A task killed for time or memory has been retried inside the run with its limit multiplied (`resource_retry_factor`, 2), up to `resource_retry_max` (2) times, and a request that worked is learned for the project (chapter 06, "Resource escalation"). A run that failed all the same is re-attempted at once only when escalations are left; otherwise, and for a refused request or a kill at the site's memory cap, the subject is blocked: give the task a row in `resources.tsv` (chapter 12), then `ugc-wgw retry`. |
 | `tool` | any other `CommandFailed`, `OutputError` or class | Blocked until `ugc-wgw retry`. |
 | `cancelled` | the driver stopped the run | Blocked until `ugc-wgw retry`. |
 | `unknown` | no error class | Blocked until `ugc-wgw retry`. |
 
 A mislabelled kind costs a little compute at most: `transient` and
 `resource` trigger a re-attempt. `auto_retry_max = 0` in `config.json`
-disables the transient retries, `resource_retry_max = 0` the escalations.
+disables the transient retries, `resource_retry_max = 0` the escalations
+(a killed task is then run once and not again).
 
 ## Error classes
 

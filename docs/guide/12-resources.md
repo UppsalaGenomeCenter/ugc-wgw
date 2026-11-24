@@ -408,8 +408,9 @@ rendered `miniwdl.cfg`.
 
 ## Learned requests
 
-A task that ran out of wall time or memory is re-attempted with its limit
-multiplied (chapter 06, "Resource escalation"), and what it finished with
+A task that ran out of wall time or memory is retried with its limit
+multiplied, inside the run (chapter 06, "Resource escalation"), and what
+it finished with
 is remembered in the project's `.ugc-wgw/learned_resources.json`: every
 later run of the project starts that task at the learned value, applied by
 the plugin after the policy rows (never below them), so a request found on

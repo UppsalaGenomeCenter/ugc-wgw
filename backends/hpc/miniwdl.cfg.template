@@ -85,3 +85,9 @@ gpu_type =
 # task -> time_factor, memory_factor, time_minutes_min, memory_min) after a task ran out of wall time or memory
 # (docs/guide/06-running.md "Resource escalation"). Applied after the policy rows; never a workflow input.
 escalations =
+# What a task killed for wall time or memory is retried with inside a run: its limit times resource_retry_factor,
+# at most resource_retry_max times per task and resource, counting the escalations above. The backend raises the
+# request before miniwdl's own retry and never submits a killed request again. The driver passes the project's
+# values per run (MINIWDL__UGC_WGW__RESOURCE_RETRY_FACTOR, _MAX); these lines are for runs started by hand.
+resource_retry_factor = 2
+resource_retry_max = 2

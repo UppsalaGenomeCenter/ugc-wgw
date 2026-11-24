@@ -8,8 +8,10 @@ container is `scripts/exec_scratch.sh` instead of miniwdl-slurm's `exec "$@"`. O
 variable is known, that script binds the directory it names at `[ugc_wgw] scratch_mount` (default
 /mnt/scratch) and sets TMPDIR to it inside the container, so tools that honour TMPDIR keep their
 temporaries off the shared file system. Everything else (the sbatch arguments, the log file the driver
-reads, cancellation) is miniwdl-slurm's. With `scratch_env` empty the backend behaves exactly like
-`slurm_singularity`.
+reads, cancellation) is miniwdl-slurm's. With `scratch_env` empty the exec script is miniwdl-slurm's own.
+
+The backend is also where a try that was killed for wall time or memory gets a larger request before
+miniwdl retries it (inrun.py): `_run` is the one place that sees every try's exit status.
 
 Why here and not in the configuration: Apptainer's `--containall` (our run_options) clears the environment,
 so TMPDIR and SLURM_JOB_ID are unknown inside the container, and miniwdl-slurm passes the container command
@@ -18,9 +20,12 @@ script running on the node can resolve the per-job directory. See docs/guide/04-
 """
 from __future__ import annotations
 
+import logging
 import os
-from typing import Any, List, Tuple
+import time
+from typing import Any, Callable, List, Tuple
 
+from . import inrun
 from .resources import cfg_get
 
 CFG_SECTION = "ugc_wgw"
@@ -50,6 +55,23 @@ def with_exec_script(sbatch_args: List[str], env: str, mount: str) -> List[str]:
     return list(sbatch_args[:-1]) + [EXEC_SCRIPT, env, mount, "--"]
 
 
+def run_try(container: Any, logger: logging.Logger, terminating: Callable[[], bool], submit: Callable[[], int]) -> int:
+    """One try of a task: `submit` runs the job and returns its exit status. A try that follows a kill no
+    escalation was left for is answered without a job; a failed try is looked at before miniwdl decides about
+    the next one (inrun.after_failure), and nothing found there can change the try's own result."""
+    skipped = inrun.skip(container, logger)
+    if skipped is not None:
+        return skipped
+    since = time.time()
+    exit_code = submit()
+    if not terminating() and not container.success_exit_code(exit_code):
+        try:
+            inrun.after_failure(container, logger, exit_code, since)
+        except Exception as exc:  # the try failed either way; miniwdl's own retry goes ahead
+            logger.warning(f"ugc-wgw: the failed try could not be examined for a resource kill: {exc!r}")
+    return exit_code
+
+
 try:
     from miniwdl_slurm import SlurmSingularity  # type: ignore
 except ImportError:  # pragma: no cover - a venv without miniwdl-slurm never selects this backend
@@ -64,6 +86,9 @@ if SlurmSingularity is not None:
         def _slurm_invocation(self) -> List[str]:
             env, mount = scratch_settings(self.cfg)
             return with_exec_script(super()._slurm_invocation(), env, mount)
+
+        def _run(self, logger: logging.Logger, terminating: Callable[[], bool], command: str) -> int:
+            return run_try(self, logger, terminating, lambda: super(SlurmSingularityScratch, self)._run(logger, terminating, command))
 
 else:
 

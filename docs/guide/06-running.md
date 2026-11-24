@@ -235,30 +235,64 @@ line that decided it are stored with the run, written into the manifest and
 shown by `ugc-wgw status --failed`. Two kinds are re-attempted by the driver
 itself: `transient`, after `backoff_seconds` (300) doubling with every
 attempt while the attempt number is at most `auto_retry_max` (2); and
-`resource` when the evidence names what ran out, with the task's limit
-raised (below). Chapter 09 has the full rule table.
+`resource` when the evidence names what ran out and the run itself has not
+used the task's escalations up (below). Chapter 09 has the full rule table.
 
 ## Resource escalation
 
 A task killed for wall time (`DUE TO TIME LIMIT`) or memory (exit 137 or
-253, `oom_kill`) is re-attempted at once with that task's limit multiplied
-by `resource_retry_factor` (2), up to `resource_retry_max` (2) escalations
-per task and resource: 40 GiB, 80, 160, then blocked. The driver names the
-task from the run's `workflow.log.json` and hands the multiplier to the
-`ugc_wgw_resources` plugin through the environment
-(`MINIWDL__UGC_WGW__ESCALATIONS`), which applies it after the policy rows at
-launch; it is not a workflow input, so the task's call-cache key is
-unchanged and every other task of the run replays from the cache. Memory
-stops at the site cap (`TASK_MEMORY_MAX`): a task that fails at the cap is
-blocked with "escalation exhausted" and needs a policy row with a larger
-partition (chapter 12). A request that `sbatch` refused is never escalated.
-The failed run's message ends with what the next attempt carries (`next
-attempt: ugc_wgw_pav memory ×2 (escalation 1 of 2)`), `status --failed`
-shows it, the manifest records `escalation_next` and, on the attempt that
-carries it, `escalations`; the run report counts resource escalations and
-lists the applied changes under "Resource adjustments" with `by:
-escalation`. `ugc-wgw retry` keeps the escalations of the last attempt
-without doubling them again.
+253, `oom_kill`) is run again with that limit multiplied by
+`resource_retry_factor` (2), up to `resource_retry_max` (2) escalations
+per task and resource: 40 GiB, 80, 160, then blocked.
+
+Since 0.25.1 this happens inside the run. miniwdl retries a failed task
+on its own, three times on this backend (upstream's setting), and asks
+for the same request every time: before 0.25.1 a task that hit its two
+hours ran four times at two hours before the driver saw the failure and
+doubled the limit. Now the container backend looks at every failed try
+before miniwdl retries it:
+
+- **The job was killed for time or memory, and an escalation is left**:
+  the request is raised first. One run goes 2 h, 4 h, 8 h without the
+  driver in between, while the run's other tasks carry on.
+- **Killed, and nothing is left** (the two escalations are used, memory
+  is at the site cap, or `resource_retry_max` is 0): the tries miniwdl
+  still has are answered without a job, and the run fails. A request that
+  was killed is never submitted a second time.
+- **`sbatch` refused the request** (a wall time above the partition's
+  limit, a node shape that does not exist): not offered again either.
+- **Any other failure**: retried by miniwdl as before, same request.
+
+A kill is recognised from the try's own job: its `slurm-<jobid>.out` in
+the task directory, its state from `scontrol` (`TIMEOUT`,
+`OUT_OF_MEMORY`), and `sbatch`'s exit status. The request is not a
+workflow input, so the task's call-cache key is unchanged. Memory stops
+at the site cap (`TASK_MEMORY_MAX`); a task that a policy row put above
+the cap, on a partition of its own, is not capped.
+
+What is left for the driver is the end of the story. A run that still
+failed on a kill ends with one of these in its message, shown by `status
+--failed` and written to the manifest:
+
+| Message ends with | Meaning |
+|---|---|
+| `escalation exhausted: <task> time already ×4 (2 of 2); a policy row or a stage input is needed` | Both escalations were used, inside the run or before it. Blocked. |
+| `not escalated: <task> memory is at the site's cap (375G); a policy row is needed` | The cap, a refused request, or a task with no wall time to raise. Blocked. |
+| `next attempt: <task> memory ×2 (escalation 1 of 2)` | The run did not use them all (miniwdl's retries went to other failures first): the driver starts the next attempt at once with that multiplier, handed to the plugin through `MINIWDL__UGC_WGW__ESCALATIONS` and applied after the policy rows; every other task replays from the cache. |
+
+The run's `workflow.log` has a NOTICE per escalation (`ugc-wgw resource
+escalation applied`, with the evidence line and the job id) and a WARNING
+when a kill was not resubmitted; the run report lists the changes under
+"Resource adjustments" as `time 02:00:00→04:00:00 (in run)`, and the
+manifest records `escalation_next` and, on the attempt that carries it,
+`escalations`. `ugc-wgw retry` starts from what the last attempt was
+launched with: without a policy row it walks the same ladder again.
+
+A blocked task needs a row in `resources.tsv` (chapter 12) with a limit
+that fits, then `ugc-wgw retry`. Escalation finds a request that is a
+little too small; it is not a way to size a task whose need is unknown.
+Two doublings of two hours are eight, and a job that needs a day fails
+after fourteen hours of trying.
 
 What an escalated task needed is remembered: when a task that ran with an
 escalation finished, the request it finished with goes into the project's

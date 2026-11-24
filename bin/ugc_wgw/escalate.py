@@ -1,14 +1,18 @@
 """Resource escalation and learned resources (docs/DESIGN.md §8.1, decision log 2026-10-29; guide chapters 06
 and 12).
 
-A run that failed because one task ran out of wall time or memory (failures.classify: kind `resource`,
-resource `time` or `memory`) is re-attempted by the submit loop without backoff, with that task's limit
-multiplied by `resource_retry_factor` (2), up to `resource_retry_max` (2) escalations per task and resource.
-The multiplier is not a workflow input: the driver passes it to the ugc_wgw_resources plugin through miniwdl's
-environment override MINIWDL__UGC_WGW__ESCALATIONS, and the plugin applies it after the policy rows, so the
-task's call-cache key is unchanged and every other task of the run replays from the cache. Memory stops at the
-site cap (the plugin clamps to the backend's limit); a failure at the cap blocks the subject with a message
-that names the policy row it needs.
+A task killed for wall time or memory gets its limit multiplied by `resource_retry_factor` (2), up to
+`resource_retry_max` (2) escalations per task and resource. Since 0.25.1 the first place this happens is inside
+the run: the container backend (plugins/ugc_wgw_miniwdl, inrun.py) raises the request before miniwdl's own retry
+of the task, and answers further tries without a job once no escalation is left; the driver tells it the two
+settings per run (RETRY_FACTOR_ENV, RETRY_MAX_ENV). What remains for the submit loop: a run that still failed on
+such a kill (failures.classify: kind `resource`, resource `time` or `memory`) is re-attempted without backoff
+with the next multiplier when the run did not use them all (miniwdl's retries ran out first, or an older plugin),
+and blocked with the reason when it did. The multiplier is not a workflow input: the driver passes it to the
+ugc_wgw_resources plugin through miniwdl's environment override MINIWDL__UGC_WGW__ESCALATIONS, and the plugin
+applies it after the policy rows, so the task's call-cache key is unchanged and every other task of the run
+replays from the cache. Memory stops at the site cap ([task_runtime] memory_max); a kill at the cap blocks the
+subject with a message that names the policy row it needs.
 
 What an escalated task needed is remembered: when a task that ran with an escalation finished, the request it
 finished with goes into the project's `.ugc-wgw/learned_resources.json` (task -> time_minutes, memory), and
@@ -31,21 +35,29 @@ from .util import read_json, utc_now, write_json
 from . import wdllog
 
 ESCALATION_ENV = "MINIWDL__UGC_WGW__ESCALATIONS"
+RETRY_FACTOR_ENV = "MINIWDL__UGC_WGW__RESOURCE_RETRY_FACTOR"   # the project's resource_retry_factor and _max, for the
+RETRY_MAX_ENV = "MINIWDL__UGC_WGW__RESOURCE_RETRY_MAX"         # escalation inside the run
 ESCALATION_MESSAGE = "ugc-wgw resource escalation applied"   # the plugin's NOTICE (plugins/ugc_wgw_miniwdl)
 RUNTIME_KEY = {"time": "time_minutes", "memory": "memory_reservation"}   # resource -> miniwdl runtime key
 LEARNED_KEY = {"time_minutes": "time_minutes", "memory_reservation": "memory"}   # runtime key -> learned store key
 
 
-def task_name_for(run_path: Path, node: str | None) -> str | None:
-    """The WDL task name behind a failed call id (`call-ugc_wgw_pav`, `call-glnexus-00`, `call-concat_svx`), from
-    the run's workflow.log.json (`task setup` names the task); None when the log does not have it."""
+def task_stat_for(run_path: Path, node: str | None) -> wdllog.TaskStat | None:
+    """The task behind a failed call id (`call-ugc_wgw_pav`, `call-glnexus-00`, `call-concat_svx`), from the run's
+    workflow.log.json (`task setup` names the task); None when the log does not have it."""
     if not node:
         return None
     tasks, _ = wdllog.parse_workflow_log(run_files(run_path).workflow_log_json)
     for t in tasks:
         if t.call_id == node or t.call_path.endswith(node):
-            return t.name
+            return t
     return None
+
+
+def task_name_for(run_path: Path, node: str | None) -> str | None:
+    """The WDL task name behind a failed call id; None when the log does not have it."""
+    stat = task_stat_for(run_path, node)
+    return stat.name if stat is not None else None
 
 
 def escalations_of(run: RunRecord) -> dict[str, dict[str, float]]:
@@ -64,12 +76,21 @@ def plan(cfg: Config, run: RunRecord, cls: Classification) -> tuple[dict[str, ob
     if cfg.resource_retry_max <= 0:
         return None, "not escalated: resource_retry_max is 0"
     node = cls.evidence.get("node")
-    task = task_name_for(run.run_path, str(node) if node else None)
-    if not task:
+    stat = task_stat_for(run.run_path, str(node) if node else None)
+    if stat is None:
         return None, "not escalated: the failed task is unknown"
+    task = stat.name
+    # what the run was launched with, times what the plugin added inside the run after each kill
     so_far = float(escalations_of(run).get(task, {}).get(f"{cls.resource}_factor", 1.0))
+    try:
+        so_far *= max(1.0, float(stat.in_run.get(cls.resource, 1.0)))
+    except (TypeError, ValueError):
+        pass
     base = max(1.000001, float(cfg.resource_retry_factor))
     n_so_far = int(round(math.log(so_far, base))) if so_far > 1.0 else 0
+    if stat.kill_stop in ("capped", "no_request", "refused"):
+        return None, (f"not escalated: {task} {stat.kill_stop_reason or stat.kill_stop}; a policy row is needed "
+                      "(guide chapter 12)")
     if n_so_far >= cfg.resource_retry_max:
         return None, (f"escalation exhausted: {task} {cls.resource} already ×{so_far:g} ({n_so_far} of "
                       f"{cfg.resource_retry_max}); a policy row or a stage input is needed (guide chapter 12)")
@@ -109,8 +130,8 @@ def save_learned(cfg: Config, tasks: dict[str, dict[str, object]]) -> None:
 
 
 def env_for(cfg: Config, run: RunRecord) -> dict[str, str]:
-    """The plugin's environment for this run: the project's learned values as minimums and the run's escalation
-    factors; {} when there is neither."""
+    """The plugin's environment for this run: the project's two escalation settings, and when there are any, the
+    learned values as minimums and the run's escalation factors."""
     spec: dict[str, dict[str, object]] = {}
     for task, learned in load_learned(cfg).items():
         for key, value in learned.items():
@@ -120,13 +141,17 @@ def env_for(cfg: Config, run: RunRecord) -> dict[str, str]:
         for key, value in factors.items():
             if key in ("time_factor", "memory_factor") and float(value) > 1.0:
                 spec.setdefault(task, {})[key] = float(value)
-    return {ESCALATION_ENV: json.dumps(spec, sort_keys=True)} if spec else {}
+    env = {RETRY_FACTOR_ENV: f"{float(cfg.resource_retry_factor):g}", RETRY_MAX_ENV: str(int(cfg.resource_retry_max))}
+    if spec:
+        env[ESCALATION_ENV] = json.dumps(spec, sort_keys=True)
+    return env
 
 
 def learn(cfg: Config, events: Events, run: RunRecord) -> list[str]:
-    """Record what the run's escalated tasks finished with. Every task that the plugin escalated and that
-    completed (whatever the run's own outcome) teaches the project its request; returns the lessons."""
-    if not cfg.learn_resources or not escalations_of(run):
+    """Record what the run's escalated tasks finished with. Every task that the plugin escalated, at launch or
+    inside the run, and that completed (whatever the run's own outcome) teaches the project its request; returns
+    the lessons."""
+    if not cfg.learn_resources:
         return []
     tasks, _ = wdllog.parse_workflow_log(run_files(run.run_path).workflow_log_json)
     learned = load_learned(cfg)
@@ -169,5 +194,5 @@ def policy_rows(cfg: Config, policy: object) -> list[str]:
     return rows
 
 
-__all__ = ["ESCALATION_ENV", "ESCALATION_MESSAGE", "plan", "describe", "carry", "env_for", "learn", "load_learned",
-           "policy_rows", "task_name_for"]
+__all__ = ["ESCALATION_ENV", "ESCALATION_MESSAGE", "RETRY_FACTOR_ENV", "RETRY_MAX_ENV", "plan", "describe", "carry",
+           "env_for", "learn", "load_learned", "policy_rows", "task_name_for", "task_stat_for"]

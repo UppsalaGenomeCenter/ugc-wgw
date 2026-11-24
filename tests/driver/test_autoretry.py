@@ -158,7 +158,8 @@ class EscalationRetryTest(unittest.TestCase):
         ev = self.events()
         submitted = [e for e in ev if e["event"] == "run.submitted" and e["detail"].get("stage") == "singleton"]
         self.assertEqual(len(submitted), 2)
-        self.assertNotIn("env", submitted[0]["detail"])
+        # the first attempt carries the two settings of the escalation inside a run and no factor yet
+        self.assertEqual(submitted[0]["detail"]["env"], {"MINIWDL__UGC_WGW__RESOURCE_RETRY_FACTOR": "2", "MINIWDL__UGC_WGW__RESOURCE_RETRY_MAX": "2"})
         self.assertEqual(json.loads(submitted[1]["detail"]["env"]["MINIWDL__UGC_WGW__ESCALATIONS"]), {"fake_task": {"memory_factor": 2.0}})
         retries = [e for e in ev if e["event"] == "run.auto_retry"]
         self.assertEqual(len(retries), 1)

@@ -25,7 +25,8 @@ import math
 import logging
 import os
 import re
-from typing import Any, Dict, Iterator, List, Optional
+import sys
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from . import crossdev, policy  # noqa: F401  (importing crossdev installs the hardlink-else-symlink fallback)
 
@@ -162,12 +163,60 @@ def _limits(cfg: Any, logger: logging.Logger, container: Any) -> Optional[Dict[s
         return None
 
 
+ESCALATED_KEY = {"time": "time_minutes", "memory": "memory_reservation"}   # resource -> runtime key
+
+
+def memory_cap(cfg: Any, limits: Optional[Dict[str, int]]) -> Optional[int]:
+    """The most memory an escalation may ask for: the smaller of the backend's limit and the site cap ([task_runtime]
+    memory_max, TASK_MEMORY_MAX; the SLURM backend itself reports no limit). None without either."""
+    caps: List[int] = []
+    if limits and 0 < int(limits.get("mem_bytes", 0) or 0) < sys.maxsize:
+        caps.append(int(limits["mem_bytes"]))
+    raw = cfg_get(cfg, "task_runtime", "memory_max", "").strip()
+    if raw:
+        try:
+            site = int(raw)
+        except ValueError:
+            try:
+                site = policy.parse_memory(raw)
+            except Exception:  # a value miniwdl itself would refuse
+                site = 0
+        if site > 0:
+            caps.append(site)
+    return min(caps) if caps else None
+
+
+def raise_request(values: Dict[str, Any], resource: str, cap: Optional[int], factor: Optional[float] = None,
+                  minimum: Optional[float] = None) -> Tuple[Optional[Tuple[int, int]], bool]:
+    """Multiply the task's wall time or memory by `factor` and lift it to at least `minimum`, in place. Memory
+    stops at `cap`; a request that a policy row put above the cap is the row's business and is not capped.
+    Returns ((old, new) or None when nothing changed, whether the cap kept a larger value from being set)."""
+    key = ESCALATED_KEY[resource]
+    old = values.get(key)
+    if not isinstance(old, int) or isinstance(old, bool) or old <= 0:
+        return None, False
+    new = old
+    if isinstance(factor, (int, float)) and factor > 1:
+        new = int(math.ceil(old * float(factor)))
+    if isinstance(minimum, (int, float)) and int(minimum) > new:
+        new = int(minimum)
+    capped = False
+    if resource == "memory" and cap and old <= cap < new:
+        new, capped = int(cap), True
+    if new == old:
+        return None, capped
+    if resource == "memory" and isinstance(values.get("memory_limit"), int):
+        values["memory_limit"] = int(values["memory_limit"] * new / old)
+    values[key] = new
+    return (old, new), False
+
+
 def apply_escalations(cfg: Any, logger: logging.Logger, task_name: str, container: Any) -> Dict[str, Any]:
     """The driver's escalations for this task (bin/ugc_wgw/escalate.py), after the policy rows: `{task:
     {time_factor, memory_factor, time_minutes_min, memory_min}}` as JSON in [ugc_wgw] escalations (the environment
     override MINIWDL__UGC_WGW__ESCALATIONS). A factor multiplies the task's current wall time or memory, a minimum
-    lifts it to at least that value (a learned request); memory never exceeds the backend's limit, and a request
-    already at that limit is logged as capped. Returns the changes."""
+    lifts it to at least that value (a learned request); memory stops at memory_cap(), and a request already
+    there is logged as capped. Returns the changes."""
     raw = cfg_get(cfg, CFG_SECTION, ESCALATIONS_KEY, "").strip()
     if not raw:
         return {}
@@ -179,31 +228,17 @@ def apply_escalations(cfg: Any, logger: logging.Logger, task_name: str, containe
     spec = doc.get(task_name) if isinstance(doc, dict) else None
     if not isinstance(spec, dict) or not spec:
         return {}
-    limits = _limits(cfg, logger, container)
+    cap = memory_cap(cfg, _limits(cfg, logger, container))
     values = container.runtime_values
     changes: Dict[str, Any] = {}
     capped: List[str] = []
-    for resource, key in (("time", "time_minutes"), ("memory", "memory_reservation")):
-        old = values.get(key)
-        if not isinstance(old, int) or old <= 0:
-            continue
-        new = old
-        factor = spec.get(f"{resource}_factor")
-        if isinstance(factor, (int, float)) and factor > 1:
-            new = int(math.ceil(old * float(factor)))
-        minimum = spec.get(f"{resource}_min")
-        if isinstance(minimum, (int, float)) and int(minimum) > new:
-            new = int(minimum)
-        if resource == "memory" and limits and limits.get("mem_bytes", 0) > 0 and new > int(limits["mem_bytes"]):
-            new = int(limits["mem_bytes"])
-            if new <= old:
-                capped.append(policy.format_memory(old))
-        if new == old:
-            continue
-        if resource == "memory" and isinstance(values.get("memory_limit"), int):
-            values["memory_limit"] = int(values["memory_limit"] * new / old)
-        values[key] = new
-        changes[key] = (old, new)
+    for resource, key in ESCALATED_KEY.items():
+        change, at_cap = raise_request(values, resource, cap if resource == "memory" else None,
+                                       factor=spec.get(f"{resource}_factor"), minimum=spec.get(f"{resource}_min"))
+        if change is not None:
+            changes[key] = change
+        elif at_cap:
+            capped.append(policy.format_memory(int(values[key])))
     if capped:
         logger.warning(_structured("ugc-wgw resource escalation capped at the node's memory", task=task_name,
                                    memory=capped[0], hint="a policy row with a larger partition (docs/guide/12-resources.md)"))
@@ -216,9 +251,11 @@ def apply_escalations(cfg: Any, logger: logging.Logger, task_name: str, containe
 def task(cfg: Any, logger: logging.Logger, run_id_stack: List[str], run_dir: str, task: Any,
          **recv: Any) -> Iterator[Dict[str, Any]]:
     """The miniwdl task plugin coroutine (see the module docstring for the three stages)."""
+    from . import inrun                     # here, not at the top: inrun imports this module
     recv = yield recv                      # stage 1: inputs, untouched
     container = recv.get("container")
     if container is not None:
         apply_policy(cfg, logger, str(task.name), container)
+        inrun.prepare(cfg, container, str(task.name))   # what a try killed for time or memory is retried with
     recv = yield recv                      # stage 2: command and container
     yield recv                             # stage 3: outputs, untouched

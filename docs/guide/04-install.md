@@ -338,6 +338,7 @@ and the next run picks it up.
 | `[task_runtime] command_shell` | `/bin/bash` | Upstream commands use bash arrays. |
 | `[task_runtime] cpu_max`, `memory_max` | site values, default `0` | Caps on any task's request; miniwdl rounds larger requests down and logs it (chapter 12). Memory is rendered in bytes. |
 | `[task_runtime] defaults` | one JSON line: `docker ubuntu:20.04`, `maxRetries 1`, `time_minutes`, `slurm_partition`, `slurm_account`, `slurm_partition_gpu`, `slurm_account_gpu` (site values) | Wall time, partition and account for every task that sets none; the `_gpu` pair applies to tasks that ask for GPUs. The `docker` entry is miniwdl's own default and must stay: miniwdl reads it before every pull. Keep the dict on one line. |
+| `[ugc_wgw] resource_retry_factor`, `resource_retry_max` | `2`, `2` | What a task killed for wall time or memory is retried with inside a run (chapter 06, "Resource escalation"); the driver overrides both per run with the project's values, so they matter only for runs started by hand. |
 | `[ugc_wgw] resources` | site value | The per-task resource policy applied by the `ugc_wgw_resources` plugin (chapter 12). |
 
 How a SIF is named: `docker://` plus the image reference with every `/` and

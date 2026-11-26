@@ -99,4 +99,4 @@ on the cohort page with what moves it.
 | Warning | Where | Raised when | What to do |
 |---|---|---|---|
 | `mixed_tools` | Cohort page, Overview | The members were made with more than one aligner or small-variant caller (chapter 05, "Choosing pblab's tools"). | Keep a cohort on one set unless you are comparing: joint calls and frequencies can show the difference as a batch effect. |
-| members below `pg_member_call_rate_min` (0.90) | Cohort page, pangenome section | A member has little assembled sequence in the graph. | A signal for the next cohort freeze, not a sample flag. |
+| members with a low call rate for the cohort | Cohort page, pangenome section | The member's call rate in the graph VCF lies below the cohort's median by more than three scaled MADs: both of its haplotypes cover fewer of the graph's sites than its peers' do, usually a fragmented assembly. The rate has no fixed scale (it falls as a cohort grows), so the rule is relative; `pg_member_call_rate_min` adds an absolute floor (default 0: none). | A signal for the next cohort freeze, not a sample flag. |

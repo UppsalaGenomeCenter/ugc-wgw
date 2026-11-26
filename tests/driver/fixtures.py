@@ -782,6 +782,8 @@ def fixture_bytes(name: str, sid: str, stage: str, inferred_sex: str = "", index
         text = ("Contig\tGRCh38\t" + "\t".join(gens) + "\t_MINIGRAPH_\tmin\tmax\tavg\n"
                 + "_AMBIGUOUS_\t0\t" + "\t".join(["2000000"] * len(gens)) + "\t0\t0\t2000000\t1000000\n"
                 + "chr20\t64444167\t" + "\t".join(["65000000"] * len(gens)) + "\t64444167\t64444167\t65000000\t64800000\n")
+    elif name == "chrom_construct_genomes":
+        text = "".join(f"{m.replace('-', '_').replace('.', '_')}.{h}\n" for m in (members or []) for h in (1, 2))
     elif name == "name_map":
         ms = members or []
         text = "sample_id\tsafe_name\ttrio\n" + "".join(f"{m}\t{m.replace('-', '_').replace('.', '_')}\tfalse\n" for m in ms)

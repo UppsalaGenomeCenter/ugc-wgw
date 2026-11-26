@@ -24,3 +24,4 @@ chrom_degree_stats/*/*.pangenome.*.chr*.degree.tsv
 chrom_growth/*/*.pangenome.*.chr*.growth.tsv
 member_stats_shards/*/*.pangenome.*.wave.chr*.stats.txt
 member_stats/*.pangenome.*.members.tsv
+chrom_construct_genomes/*/*.pangenome.*.chr*.construct_genomes.txt

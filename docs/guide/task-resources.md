@@ -48,7 +48,9 @@ Reading the tables:
 | `ugc_wgw_minimap2_align_asm` | 16 | 32G | assembly_call | cpu from workflow input default; cpu input: align_threads; memory from workflow input default; memory input: align_mem_gb; command uses threads |
 | `samtools_fasta` | 16 | 16G | assembly | cpu from input default; memory from input default; command uses threads |
 | `ugc_wgw_bcftools_split` | 16 | - | cohort_call | cpu from workflow input default; cpu input: split_threads; memory: "~{mem_gb} GiB" where mem_gb = split_mem = select_first([split_mem_gb, 8 + ceil(n_samples * 0.005 * split_threads)]); memory scales with N; command uses threads |
-| `ugc_wgw_cactus_chrom` | 16 | - | cohort_pangenome | cpu from workflow input default; cpu input: chrom_cpu; memory: "~{mem_gb} GiB" where mem_gb = chrom_mem = if chrom == "chrOther" then chrom_mem_gb_floor else ugc_wgw_pangenome_names.chrom_mem_gb[chrom]; command uses threads; command uses mem |
+| `ugc_wgw_cactus_chrom_align` | 16 | - | cohort_pangenome | cpu from workflow input default; cpu input: chrom_cpu; memory: "~{mem_gb} GiB" where mem_gb = chrom_mem = if chrom == "chrOther" then chrom_mem_gb_floor else ugc_wgw_pangenome_names.chrom_mem_gb[chrom]; command uses threads; command uses mem |
+| `ugc_wgw_cactus_chrom_join` | 16 | - | cohort_pangenome | cpu from workflow input default; cpu input: chrom_cpu; memory: "~{mem_gb} GiB" where mem_gb = chrom_mem = if chrom == "chrOther" then chrom_mem_gb_floor else ugc_wgw_pangenome_names.chrom_mem_gb[chrom]; command uses threads; command uses mem |
+| `ugc_wgw_cactus_chrom_map` | 16 | - | cohort_pangenome | cpu from workflow input default; cpu input: chrom_cpu; memory: "~{mem} GiB" where cpu = chrom_cpu = 16; map_cores = chrom_map_cores = 4; mem = select_first([mem_gb, 10 * (cpu / map_cores) + 16]); command uses threads; command uses mem |
 
 ## ugc_wgw_singleton
 
@@ -320,7 +322,7 @@ Reading the tables:
 
 ## ugc_wgw_cohort_pangenome
 
-15 tasks, in first-call order.
+18 tasks, in first-call order.
 
 | task | cpu | memory | notes | source |
 |---|---|---|---|---|
@@ -331,8 +333,11 @@ Reading the tables:
 | `ugc_wgw_cactus_refgraph` | 8 | 16G | cpu from input default; memory from input default; command uses threads; command uses mem | `workflows/ugc_wgw/pangenome/cactus_map.wdl:7` |
 | `ugc_wgw_cactus_map` | 8 | - | cpu from workflow input default; cpu input: split_map_cores; memory: "~{mem} GiB" where hap_fastas = [hap1_fastas[i], hap2_fastas[i]]; mem = select_first([mem_gb, ceil(size(hap_fastas, "GB") * 15 + 60)]); mem_gb = map_mem_gb; command uses threads; command uses mem | `workflows/ugc_wgw/pangenome/cactus_map.wdl:81` |
 | `ugc_wgw_cactus_split` | 16 | 64G | cpu from workflow input default; cpu input: split_cpu; memory from workflow input default; memory input: split_mem_gb; command uses threads; command uses mem | `workflows/ugc_wgw/pangenome/cactus_split.wdl:7` |
-| `ugc_wgw_cactus_chrom` | 16 | - | cpu from workflow input default; cpu input: chrom_cpu; memory: "~{mem_gb} GiB" where mem_gb = chrom_mem = if chrom == "chrOther" then chrom_mem_gb_floor else ugc_wgw_pangenome_names.chrom_mem_gb[chrom]; command uses threads; command uses mem | `workflows/ugc_wgw/pangenome/cactus_chrom.wdl:7` |
-| `ugc_wgw_pangenome_growth` | 4 | - | cpu from input default; memory: "~{mem} GiB" where gfa = ugc_wgw_cactus_chrom.gfa; mem = select_first([mem_gb, ceil(size(gfa, "GB") * 10 + 8)]); command uses threads | `workflows/ugc_wgw/pangenome/growth.wdl:7` |
+| `ugc_wgw_cactus_chrom_construct` | 4 | 32G | cpu from workflow input default; cpu input: construct_cpu; memory from workflow input default; memory input: construct_mem_gb; command uses threads; command uses mem | `workflows/ugc_wgw/pangenome/cactus_chrom.wdl:13` |
+| `ugc_wgw_cactus_chrom_map` | 16 | - | cpu from workflow input default; cpu input: chrom_cpu; memory: "~{mem} GiB" where cpu = chrom_cpu = 16; map_cores = chrom_map_cores = 4; mem = select_first([mem_gb, 10 * (cpu / map_cores) + 16]); command uses threads; command uses mem | `workflows/ugc_wgw/pangenome/cactus_chrom.wdl:161` |
+| `ugc_wgw_cactus_chrom_align` | 16 | - | cpu from workflow input default; cpu input: chrom_cpu; memory: "~{mem_gb} GiB" where mem_gb = chrom_mem = if chrom == "chrOther" then chrom_mem_gb_floor else ugc_wgw_pangenome_names.chrom_mem_gb[chrom]; command uses threads; command uses mem | `workflows/ugc_wgw/pangenome/cactus_chrom.wdl:278` |
+| `ugc_wgw_cactus_chrom_join` | 16 | - | cpu from workflow input default; cpu input: chrom_cpu; memory: "~{mem_gb} GiB" where mem_gb = chrom_mem = if chrom == "chrOther" then chrom_mem_gb_floor else ugc_wgw_pangenome_names.chrom_mem_gb[chrom]; command uses threads; command uses mem | `workflows/ugc_wgw/pangenome/cactus_chrom.wdl:389` |
+| `ugc_wgw_pangenome_growth` | 4 | - | cpu from input default; memory: "~{mem} GiB" where gfa = ugc_wgw_cactus_chrom_join.gfa; mem = select_first([mem_gb, ceil(size(gfa, "GB") * 10 + 8)]); command uses threads | `workflows/ugc_wgw/pangenome/growth.wdl:7` |
 | `ugc_wgw_pangenome_vcf_post` | 4 | 8G | cpu from input default; memory from input default; command uses threads | `workflows/ugc_wgw/pangenome/vcf_post.wdl:7` |
 | `ugc_wgw_pangenome_member_stats` | 1 | 4G | - | `workflows/ugc_wgw/pangenome/member_stats.wdl:7` |
 | `ugc_wgw_pangenome_member_stats_gather` | 1 | 2G | - | `workflows/ugc_wgw/pangenome/member_stats.wdl:70` |

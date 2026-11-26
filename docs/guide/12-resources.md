@@ -115,7 +115,8 @@ the WDL wrote:
 - Lowering `memory` below what a tool budgets for itself (`glnexus
   --mem-gbytes`, and the other tasks the inventory marks `command uses mem`:
   `deepvariant_make_examples`, `pbsamoa_merge`, `trgt_genotype`,
-  `ugc_wgw_cactus_split`, `ugc_wgw_cactus_chrom`) can get the task killed.
+  `ugc_wgw_cactus_split`, the four `ugc_wgw_cactus_chrom_*` tasks) can get
+  the task killed.
   Raise those through `stage_inputs` instead.
 - Raising `cpu` or `memory` gives the tool room it may not use: a row with
   `cpu` 96 for `ugc_wgw_hifiasm_assemble` allocates 96 cores, and hifiasm

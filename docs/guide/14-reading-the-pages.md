@@ -151,10 +151,16 @@ cohort's own order; everything the members carry with its core; a table
 of what one more member adds at a few sizes), the graph's structure
 (haplotype sequence and reference gaps per chromosome, the node degree
 histogram, records by nesting level, vcfwave type and allele length) and
-the members' genotypes in the graph VCF (call
-rate, singletons, het and hom-alt counts; members below
-`pg_member_call_rate_min`, 0.90, are listed as a signal for the next
-cohort freeze, not as a sample flag).
+the members' genotypes in the graph VCF (call rate, singletons, het and
+hom-alt counts). A member's call rate is the share of sites where both of
+its haplotypes have sequence in the graph; the frequency summary's call
+rate counts a member with one haplotype there as called, so it is the
+higher of the two. The member rate follows the contiguity of the assembly
+and falls as a cohort grows (the same twenty members: 0.949 in a chr20
+graph of 20, 0.914 in one of 100), so it is read against the cohort's own
+median: members below it by more than three scaled MADs are listed, as a
+signal for the next cohort freeze, not as a sample flag.
+`pg_member_call_rate_min` adds an absolute floor where a site wants one.
 
 ## The sample page
 

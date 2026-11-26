@@ -15,7 +15,8 @@ cohort VCFs with allele frequencies. The graph is built one chromosome at a
 time (Cactus's `--mgSplit` route): every member's two haplotypes are mapped
 to a reference-only graph in a task of their own, one step bins the contigs
 by chromosome, then every requested chromosome is constructed, mapped,
-aligned and joined in its own task. The tools are cactus v3.3.0 (minigraph
+aligned and joined, one task for each of the four steps. The tools are
+cactus v3.3.0 (minigraph
 0.21, vg 1.76.1, vcfwave, panacus 0.5.2) from the
 `comparative-genomics-toolkit/cactus` image, bcftools 1.23 from
 `pb_wdl_base` and truvari 5.5.0.
@@ -31,9 +32,13 @@ flowchart TD
     map["cactus-graphmap --mgSplit:<br/>its two haplotypes against that graph"]
   end
   map --> split["alignments gathered; cactus-graphmap-split:<br/>one tar per chromosome (genome-wide)"]
-  split --> chrom
+  split --> cons
+  names --> cons
   subgraph per["per requested chromosome"]
-    chrom["cactus-minigraph, cactus-graphmap, cactus-align --pangenome,<br/>cactus-graphmap-join --vcf --vcfwave --gbz --gfa"]
+    cons["cactus-minigraph construct: the SV graph,<br/>from every member or the first construct_members"]
+    cons --> cmap["cactus-graphmap: every haplotype mapped to it"]
+    cmap --> align["cactus-align --pangenome"]
+    align --> chrom["cactus-graphmap-join --vcf --vcfwave --gbz --gfa"]
     chrom --> grow["panacus: coverage histograms,<br/>growth in the cohort's order"]
   end
   grow --> gr[/"chrom_growth"/]:::result
@@ -64,10 +69,15 @@ against that graph; `ugc_wgw_cactus_split` writes the seqfile (`GRCh38`,
 then every haplotype in cohort order), concatenates the members'
 alignments, runs `cactus-graphmap-split` over the whole genome, and tars
 each chromosome's directory with its seqfile; per requested chromosome
-`ugc_wgw_cactus_chrom` untars, rewrites the paths and runs the four
-construction steps, ending in `cactus-graphmap-join` with `--vcf --vcfwave
---gbz --gfa`, and `ugc_wgw_pangenome_growth` runs panacus on the
-chromosome's GFA; two
+four tasks follow one another, each untarring what it needs and rewriting
+the paths to itself: `ugc_wgw_cactus_chrom_construct` runs
+`cactus-minigraph` (the SV graph, from every haplotype of the chromosome
+or from those of the first `construct_members` members),
+`ugc_wgw_cactus_chrom_map` runs `cactus-graphmap` (every haplotype mapped
+to that graph, several at a time), `ugc_wgw_cactus_chrom_align` runs
+`cactus-align --pangenome` and `ugc_wgw_cactus_chrom_join` runs
+`cactus-graphmap-join` with `--vcf --vcfwave --gbz --gfa`; then
+`ugc_wgw_pangenome_growth` runs panacus on the chromosome's GFA; two
 `ugc_wgw_pangenome_vcf_post` calls bring every chromosome VCF to the
 cohort's sample columns (a member without sequence in a chromosome's
 graph, an XX member on chrY, gets missing genotypes there), concatenate
@@ -81,7 +91,7 @@ concatenated and `ugc_wgw_pangenome_freq_summary` writes the summary (since
 `ugc_wgw_pangenome_member_stats` runs `bcftools stats --samples -` per
 chromosome on the same VCF and the gather task sums each member's
 genotypes, singletons, missing calls and call rate (`member_stats`); the
-chromosome task keeps the join's path statistics and reference gaps and adds
+join task keeps the join's path statistics and reference gaps and adds
 the bases per genome and the node degree histogram; with a read-based SV
 merge, a biallelic copy of the vcfwave VCF (`bcftools norm -m -any`; truvari
 refuses multiallelic records) goes through `ugc_wgw_truvari_bench`; the
@@ -97,7 +107,7 @@ built only with `build_other_contigs = true`.
 
 | Driver fills | You may override |
 |---|---|
-| `cohort_id`, `sample_ids`, `hap1_fastas`, `hap2_fastas` and `trios` (from every member's `assembly`), `sample_sexes` and `sample_sex_sources` (`XX`, `XY` or empty from every member's `assembly_call` karyotype; the sheet's sex is not used), `sv_vcf` and its index (the `cohort_merge` SV VCF of `pangenome_sv_cohort`, else of this cohort, any version and either read mode, when one exists) | `chromosomes` (the map's chr1–22, X, Y), `build_other_contigs` (false), `split_map_cores` (8: cores of each member's mapping task), `map_mem_gb` (60 GB plus 15 times the member's gzipped FASTAs), `split_cpu` (16), `split_mem_gb` (64), `split_disk_gb` (from the inputs), `chrom_cpu` (16), `chrom_map_cores` (4), `chrom_mem_gb_floor` (64), `chrom_mem_gb_per_100mb` (32; the larger rule wins), `freq_threads` (2), `freq_mem_gb` (4) |
+| `cohort_id`, `sample_ids`, `hap1_fastas`, `hap2_fastas` and `trios` (from every member's `assembly`), `sample_sexes` and `sample_sex_sources` (`XX`, `XY` or empty from every member's `assembly_call` karyotype; the sheet's sex is not used), `sv_vcf` and its index (the `cohort_merge` SV VCF of `pangenome_sv_cohort`, else of this cohort, any version and either read mode, when one exists) | `chromosomes` (the map's chr1–22, X, Y), `build_other_contigs` (false), `split_map_cores` (8: cores of each member's mapping task), `map_mem_gb` (60 GB plus 15 times the member's gzipped FASTAs), `split_cpu` (16), `split_mem_gb` (64), `split_disk_gb` (from the inputs), `construct_members` (unset: every member builds the SV graph), `construct_cpu` (4), `construct_mem_gb` (32), `chrom_cpu` (16: the map, align and join tasks), `chrom_map_cores` (4), `chrom_mem_gb_floor` (64), `chrom_mem_gb_per_100mb` (32), `chrom_mem_gb_per_gb` (4; the largest of the three rules wins), `freq_threads` (2), `freq_mem_gb` (4) |
 
 `chromosomes = ["chr20"]` under `stage_inputs.cohort_pangenome` is how the
 ladder runs (and the smoke): every haplotype is still mapped genome-wide
@@ -151,16 +161,68 @@ done
 ```
 
 P100 maps 80 members, P200 another hundred, and so on; every step runs the
-split and the chr20 task again, which is what is being measured. After
+split and the chr20 tasks again, which is what is being measured. After
 each step `ugc-wgw usage --cohort P$k --by task` has the time and memory of
-`ugc_wgw_cactus_split` and `ugc_wgw_cactus_chrom` against the number of
-haplotypes, and the cohort page's growth curves say what the members
-added. The same cohorts built on every chromosome are then graphs of
+`ugc_wgw_cactus_split` and the four `ugc_wgw_cactus_chrom_*` tasks against
+the number of haplotypes, and the cohort page's growth curves say what
+the members added. The same cohorts built on every chromosome are then graphs of
 those sizes; nothing is mapped again for them.
 
 The split's result is the same as when one task mapped everything (checked
 on the dev machine: contig assignments, per-chromosome FASTAs and
 alignments). The two routes are not a choice: there is one.
+
+## The SV graph from the first members
+
+Of a chromosome's four steps one cannot be divided. minigraph builds the
+SV graph, the skeleton of large variation that everything else is aligned
+onto, by adding one haplotype after another, each mapped to the graph the
+earlier ones left: about three minutes per haplotype of chr20, on one or
+two cores whatever the task is given. With 200 haplotypes that is ten
+hours of the chromosome's nineteen; with 1,700 it is most of a week.
+
+`construct_members` limits that step to the cohort's first members:
+
+```json
+"stage_inputs": {"cohort_pangenome": {"chromosomes": ["chr20"], "construct_members": 100}}
+```
+
+The haplotypes of the first hundred members then build the SV graph, and
+every member of the cohort is mapped to it, aligned and joined as before:
+the graph, its VCFs and its growth curves hold everyone. "First" is the
+cohort's own order, which is the ranking's when the cohort was frozen from
+`ugc-wgw cohort rank --emit` (chapter 06): the members that carry the most
+structural variation not yet covered come first, which is the order a
+skeleton wants. Unset, every member builds it, as before 0.26.0. On a
+chromosome where none of the first members has sequence (chrY and a
+construct of XX members) every haplotype of that chromosome builds it.
+
+What it costs, as far as it has been measured (the dev machine's four
+chr20 assemblies, two of them in the construct, against the same graph
+built with all four):
+
+- **A member left out keeps its variants.** Its sequence is still aligned
+  base by base between the anchors the SV graph gives: 99.1 % of its
+  alleles of 50 bp or more are found again away from the two stretches
+  below (the members inside the construct: 99.2 and 99.6 %), 97.5 % of
+  those that no member of the construct carries, 28 of 29 of those of 1 kb
+  or more, and 99.92 % of its small variants.
+- **Satellite-rich stretches come out differently for everyone.** At the
+  centromere's flank and the chromosome's end, 86 to 90 % of the alleles
+  are found again, for members in and out of the construct alike, and
+  some haplotypes have less of their sequence in the graph there (350 kb
+  of 61 Mb). A smaller SV graph gives the aligner fewer anchors where
+  alignment is hard anyway.
+- **Not measured:** insertions above 10 kb that only a member outside the
+  construct carries. Cactus clips sequence that stays unaligned over more
+  than 10 kb, so that class is the one to look at first on real data.
+
+That is one family and one chromosome, so the cohort page states what was
+done ("SV graph from the first N of M members"), the VCF header carries
+`##ugc_wgw_cohort_pangenome_construct`, and `chrom_construct_genomes`
+lists the haplotypes of every chromosome's construct. To judge it on your
+own data, build one rung twice: with and without `construct_members`, the
+second run reusing the mappings and the split.
 
 ## Growth curves
 
@@ -184,11 +246,28 @@ index; a whole-genome haplotype took 23 minutes and 65 to 80 GB on the
 cluster), the reference-only graph 4 minutes, the split 17 minutes, one
 chromosome task about 50 minutes with `cactus-align` peaking at 11 GB; the
 growth task, the VCF post-processing, the frequencies and truvari are
-minutes. The memory of
-a chromosome task is the larger of `chrom_mem_gb_floor` and
-`chrom_mem_gb_per_100mb` times the chromosome's length in 100 Mb; the
-default rule gives 64 GB for every human chromosome but chr1 and chr2 (80
-and 78 GB). Chapter 15 gets the scaling table as the ladder runs.
+minutes.
+
+Each of a chromosome's four tasks has its own request, and the call cache
+is a checkpoint between them: a task that fails or runs out of time is
+run again alone, with the earlier ones replayed.
+
+| task | cores | memory | what its time follows |
+|---|---|---|---|
+| `ugc_wgw_cactus_chrom_construct` | `construct_cpu` (4) | `construct_mem_gb` (32) | haplotypes in the construct, one after another |
+| `ugc_wgw_cactus_chrom_map` | `chrom_cpu` (16) | 16 GB plus 10 per mapping at once | haplotypes, `chrom_cpu / chrom_map_cores` at a time |
+| `ugc_wgw_cactus_chrom_align` | `chrom_cpu` | the rule below | haplotypes, faster than in proportion |
+| `ugc_wgw_cactus_chrom_join` | `chrom_cpu` | the rule below | the graph's most complex region (vcfwave) |
+
+The memory of the align and join tasks is the largest of three rules:
+`chrom_mem_gb_floor` (64), `chrom_mem_gb_per_100mb` (32) times the
+chromosome's length in 100 Mb, and 32 GB plus `chrom_mem_gb_per_gb` (4)
+per Gb of haplotype sequence in the chromosome's graph (the haplotypes
+and the reference, times its length). The third knows the cohort: chr20
+gets 64 GB up to 40 members, 84 at 100 and 136 at 200; the align step
+peaked at 33 and 55 GiB at 20 and 100 members (chapter 15). None of the
+four has a wall-time default: give them rows in `resources.tsv` (chapter
+12; one row `ugc_wgw_cactus_chrom_*` covers all four).
 
 Outputs: the graph's cohort VCF and its vcfwave form, the GBZ and GFA per
 chromosome with their statistics (graph size, path fragments, reference

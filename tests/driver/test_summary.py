@@ -537,6 +537,35 @@ class DigestHelpersTest(unittest.TestCase):
         self.assertEqual(dp, [["<10", 10], ["10-20", 20], ["20-30", 0], ["30-40", 0], ["40-60", 5], ["60-100", 0], [">=100", 8]])
 
 
+class PangenomeCallRateTest(unittest.TestCase):
+    """The cohort page lists a member whose call rate in the graph VCF is low for its own cohort (summary_cohort.low_call_rate)."""
+
+    # the hundred members of a chr20 graph on the cluster (2026-11-26), sorted: median 0.9245, 46 of them below 0.90
+    P100 = [
+        0.8176, 0.8177, 0.8420, 0.8540, 0.8546, 0.8554, 0.8557, 0.8564, 0.8592, 0.8609, 0.8611, 0.8618, 0.8618, 0.8621, 0.8632, 0.8665, 0.8678,
+        0.8688, 0.8699, 0.8701, 0.8719, 0.8719, 0.8731, 0.8751, 0.8758, 0.8759, 0.8786, 0.8802, 0.8806, 0.8807, 0.8821, 0.8827, 0.8855, 0.8862,
+        0.8870, 0.8894, 0.8896, 0.8900, 0.8929, 0.8939, 0.8940, 0.8962, 0.8966, 0.8969, 0.8972, 0.8974, 0.9024, 0.9043, 0.9207, 0.9238, 0.9252,
+        0.9264, 0.9273, 0.9278, 0.9286, 0.9298, 0.9298, 0.9301, 0.9306, 0.9328, 0.9355, 0.9367, 0.9371, 0.9395, 0.9423, 0.9426, 0.9432, 0.9464,
+        0.9477, 0.9482, 0.9484, 0.9493, 0.9513, 0.9513, 0.9515, 0.9516, 0.9552, 0.9554, 0.9584, 0.9595, 0.9606, 0.9625, 0.9665, 0.9666, 0.9668,
+        0.9671, 0.9681, 0.9681, 0.9684, 0.9692, 0.9693, 0.9694, 0.9695, 0.9721, 0.9722, 0.9746, 0.9759, 0.9788, 0.9789, 0.9795]
+
+    def test_a_large_cohort_is_not_listed_by_half(self):
+        values = {f"m{i:03d}": v for i, v in enumerate(self.P100)}
+        self.assertEqual(sum(1 for v in values.values() if v < 0.90), 46)              # what the fixed limit listed
+        got = summary_cohort.low_call_rate(values)
+        self.assertEqual(got["low_outliers"], [])
+        self.assertTrue(0.70 < got["low_bound"] < min(self.P100), got["low_bound"])     # every real member is above the bound
+        values["planted"] = 0.60                                                       # an assembly with a third of the graph missing
+        self.assertEqual(summary_cohort.low_call_rate(values)["low_outliers"], ["planted"])
+        values["high"] = 0.9999                                                        # a high outlier is not a listing
+        self.assertEqual(summary_cohort.low_call_rate(values)["low_outliers"], ["planted"])
+
+    def test_small_and_uniform_cohorts(self):
+        self.assertEqual(summary_cohort.low_call_rate({"a": 0.9, "b": 0.5}), {"low_outliers": [], "low_bound": None})     # fewer than four members
+        self.assertEqual(summary_cohort.low_call_rate({k: 0.95 for k in "abcde"}), {"low_outliers": [], "low_bound": None})  # MAD 0
+        self.assertEqual(summary_cohort.low_call_rate({}), {"low_outliers": [], "low_bound": None})
+
+
 class QcTest(unittest.TestCase):
     def test_thresholds_sources_and_errors(self):
         tmp = Path(tempfile.mkdtemp())
@@ -1359,8 +1388,13 @@ class SummaryEndToEnd(unittest.TestCase):
         self.assertEqual([r["karyotype"] for r in cd["members"]], ["unknown", "unknown"])
         # Tier 2: the members' genotypes, the per-chromosome haplotype sequence, degrees, gaps and the summary's level rows
         self.assertEqual([m["sample_id"] for m in cp["members"]], ["S1", "S2"])
-        self.assertEqual(cp["member_distributions"]["call_rate"]["threshold"], 0.9)
+        # every member built the SV graph: the record says so and the page has no notice
+        self.assertEqual(cp["construct"], {"members": 2, "of": 2, "haplotypes": {"chr1": 4, "chr20": 4, "chrX": 4}})
+        self.assertNotIn("SV graph from the first", (self.tmp / "asm" / "C1.summary.html").read_text())
+        # no absolute floor by default: the listing is the cohort's own low outliers (none among two members)
+        self.assertIsNone(cp["member_distributions"]["call_rate"]["threshold"])
         self.assertEqual(cp["member_distributions"]["call_rate"]["beyond_threshold"], [])
+        self.assertEqual((cp["member_distributions"]["call_rate"]["low_outliers"], cp["member_distributions"]["call_rate"]["low_bound"]), ([], None))
         self.assertEqual(c20["genome_haplotypes"], 4)
         self.assertEqual(c20["genome_bp_min"], 61_000_000 - 2 * 50_000)   # member 0, haplotype 2 of the fixture
         self.assertEqual(c20["refgaps"], {"n": 2, "bp": 60000 + 28557053 - 26386225})
@@ -1388,18 +1422,42 @@ class SummaryEndToEnd(unittest.TestCase):
         cd2 = json.loads((self.tmp / "asm" / "C1.summary.json").read_text())
         self.assertEqual(cd2["distributions"]["asm_flagger_non_hap"]["beyond_threshold"], ["S1", "S2"])
         self.assertIn("above threshold", self.check_html(self.tmp / "asm" / "C1.summary.html"))
-        # the member call-rate threshold is a cohort-page signal: raised above the fixtures' rates it lists both members
+        # the member call-rate floor is a cohort-page signal a site may set: raised above the fixtures' rates it lists both members
         code, out, err = run_cli(["--project", self.proj, "summary", "--mode", "assembly", "--cohort", "C1", "--out-dir", str(self.tmp / "asm"),
                                   "--threshold", "pg_member_call_rate_min=0.99"])
         self.assertEqual(code, 0, err)
         cd3 = json.loads((self.tmp / "asm" / "C1.summary.json").read_text())
         self.assertEqual(cd3["callsets"]["cohort_pangenome"]["member_distributions"]["call_rate"]["beyond_threshold"], ["S1", "S2"])
-        self.assertIn("Members below the call-rate threshold", self.check_html(self.tmp / "asm" / "C1.summary.html"))
+        self.assertEqual(cd3["callsets"]["cohort_pangenome"]["member_distributions"]["call_rate"]["threshold"], 0.99)
+        page3 = self.check_html(self.tmp / "asm" / "C1.summary.html")
+        self.assertIn("Members below the call-rate threshold", page3)
+        self.assertIn("call rate below 0.99", page3)
         # without the stage the assembly-mode page says so; the standalone page has no pangenome section at all
         self.assertEqual(run_cli(["--project", self.proj, "summary", "--mode", "assembly", "--cohort", "C2", "--out-dir", str(self.tmp / "asm2")])[0], 1)  # unknown cohort
         code, out, err = run_cli(["--project", self.proj, "summary", "--cohort", "C1"])
         self.assertEqual(code, 0, err)
         self.assertNotIn('id="sec-pangenome"', (self.out_dir / "C1.summary.html").read_text())
+
+    def test_cohort_page_construct_members(self):
+        """A graph whose SV graph the cohort's first members built says so on the page and in the JSON."""
+        db = DB(self.cfg.db_path)
+        try:
+            for sid in ("S1", "S2"):
+                seed_success(self.cfg, db, "assembly", "sample", sid, {"sample_id": sid, "hifi_reads": ["/dev/null"]}, mode="assembly")
+                seed_success(self.cfg, db, "assembly_call", "sample", sid, {"sample_id": sid, "hap_fastas": ["/a", "/b"], "haplotype_labels": ["hap1", "hap2"],
+                                                                            "trio": False, "flagger_bed": "/f.bed"}, mode="assembly")
+            seed_success(self.cfg, db, "cohort_pangenome", "cohort", "C1", {"cohort_id": "C1", "sample_ids": ["S1", "S2"], "hap1_fastas": ["/a", "/a"],
+                                                                            "hap2_fastas": ["/b", "/b"], "trios": [False, False], "sample_sexes": ["", "XY"],
+                                                                            "chromosomes": ["chr20"], "construct_members": 1}, mode="assembly")
+        finally:
+            db.close()
+        code, out, err = run_cli(["--project", self.proj, "summary", "--mode", "assembly", "--cohort", "C1", "--out-dir", str(self.tmp / "asm")])
+        self.assertEqual(code, 0, err)
+        cp = json.loads((self.tmp / "asm" / "C1.summary.json").read_text())["callsets"]["cohort_pangenome"]
+        self.assertEqual(cp["construct"], {"members": 1, "of": 2, "haplotypes": {"chr20": 2}})
+        text = self.check_html(self.tmp / "asm" / "C1.summary.html")
+        self.assertIn("SV graph from the first 1 of 2 members", text)
+        self.assertIn("construct_members", text)
 
     def test_cohort_page_joint(self):
         db = DB(self.cfg.db_path)

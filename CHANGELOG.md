@@ -5,6 +5,73 @@ offline bundle. An entry opens with the upstream tag it is built on and a
 short summary, with anything an existing project has to do; the rest is
 under Details.
 
+## 0.26.0
+
+Built on PacBio HiFi-human-WGS-WDL **v4.1.0** (`89c813a1`) and its
+reference data container `GRCh38_GIABv3`, as 0.25.1; images, reference
+entries and the miniwdl plugin unchanged.
+
+**`cohort_pangenome` builds a chromosome's graph in four tasks, and the
+SV graph can come from the cohort's first members.** One task ran
+Cactus's four commands for a chromosome. On a cohort of 100 members (200
+haplotypes of chr20) that was one job of 19 hours without a checkpoint,
+more than half of it minigraph's construct, which adds one haplotype
+after another and cannot be divided.
+
+- The four commands are four tasks now, `ugc_wgw_cactus_chrom_construct`,
+  `_map`, `_align` and `_join`, each with its own request. A task that
+  fails or is killed is run again alone; the ones before it replay from
+  the call cache. No Cactus command changed, and the default graph is
+  the graph of before.
+- New input `construct_members`: the first so many members, in the
+  cohort's order, build minigraph's SV graph; every member is still
+  mapped to it, aligned and joined. Unset, every member builds it. On
+  four chr20 assemblies a member left out of the construct kept 99 % of
+  its alleles of 50 bp or more outside satellite-rich stretches, which
+  resolve differently for every member; that is one family and one
+  chromosome, so compare on your own data before relying on it (the
+  stage's page says how).
+- The memory request of the align and join tasks grows with the cohort.
+- The cohort page lists the members whose call rate in the graph VCF is
+  low for their own cohort, not those below 0.90: the rate falls as a
+  cohort grows, and a fixed limit listed half of a cohort of 100.
+
+**Upgrading.** A row `ugc_wgw_cactus_chrom` in the site's `resources.tsv`
+matches no task any more: replace it by `ugc_wgw_cactus_chrom_*`, or the
+four tasks run with the catch-all's limit. An existing graph is not
+rebuilt. A cohort submitted again replays its members' mappings and its
+split from the call cache and builds the chromosome's tasks anew.
+
+<details>
+<summary>Details</summary>
+
+- Requests: the construct 4 cores and 32 GB (`construct_cpu`,
+  `construct_mem_gb`); the map task `chrom_cpu` cores, 16 GB plus 10 per
+  mapping at once; align and join `chrom_cpu` cores and the largest of
+  `chrom_mem_gb_floor`, `chrom_mem_gb_per_100mb` times the chromosome's
+  length and 32 GB plus `chrom_mem_gb_per_gb` (4) per Gb of haplotype
+  sequence in the chromosome's graph. Measured for chr20: the align step
+  peaks at 33 GiB with 40 haplotypes and 55 GiB with 200.
+- `construct_members` counts the cohort's first members; a cohort frozen
+  from `ugc-wgw cohort rank --emit` has the ranking's order. It is
+  refused outside 1 to the cohort's size before a job is submitted.
+  Where none of those members has sequence on a chromosome, every
+  haplotype of that chromosome builds its SV graph.
+- What a run did is recorded: outputs `chrom_construct_genomes` and
+  `construct_members_built`, the VCF header line
+  `##ugc_wgw_cohort_pangenome_construct`, and a paragraph on the cohort
+  page when the construct is not everyone.
+- The members' call-rate listing: below the cohort's median by more than
+  three scaled MADs (`low_outliers`, `low_bound` in the summary JSON).
+  `pg_member_call_rate_min` stays as an absolute floor and defaults to 0;
+  `--threshold pg_member_call_rate_min=0.9` gives the old listing. The
+  page says what the rate is: the share of sites where both haplotypes
+  of the member have sequence.
+- Guide chapter 15 has a ladder of nested cohorts on chr20 (20 and 100
+  members): times per step, memory, graph size and growth.
+
+</details>
+
 ## 0.25.1
 
 Built on PacBio HiFi-human-WGS-WDL **v4.1.0** (`89c813a1`) and its

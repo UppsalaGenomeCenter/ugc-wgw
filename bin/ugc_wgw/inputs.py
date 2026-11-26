@@ -807,6 +807,12 @@ KARYOTYPE_TO_GROUP = {"XX": "XX", "XY": "XY"}   # assembly_call's inferred_karyo
 def build_cohort_pangenome(ctx: BuildContext) -> dict[str, object]:
     doc = common_inputs(ctx)
     members = ctx.members()
+    # construct_members counts the cohort's first members (its order is the ranking's when it was frozen from one):
+    # refused here, before a job is submitted, as the workflow's first task would refuse it
+    n_construct = ctx.ov("cohort_pangenome", "construct_members", None)
+    if n_construct is not None and (isinstance(n_construct, bool) or not isinstance(n_construct, int) or not 1 <= n_construct <= len(members)):
+        raise UgcError(f"cohort_pangenome: stage_inputs construct_members is {n_construct!r}; it is the number of the cohort's first members "
+                       f"whose haplotypes build the SV graph, a whole number from 1 to {len(members)} for cohort {ctx.subject_id}")
     doc["cohort_id"] = ctx.subject_id
     doc["sample_ids"] = members
     hap1, hap2, trios, sexes, sources = [], [], [], [], []

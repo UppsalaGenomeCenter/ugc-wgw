@@ -227,6 +227,29 @@ Two things on the site, once:
   `sawfish_discover	16	16G	3:00:00	-	-` lets three run on a 48-core
   node.
 
+## The chromosome graph's four tasks (0.26.0)
+
+`cohort_pangenome` builds a chromosome in four tasks where it had one:
+`ugc_wgw_cactus_chrom_construct`, `_map`, `_align` and `_join`. A graph
+built before is not rebuilt, and its page reads as before. A cohort
+submitted again at 0.26.0 replays its members' mappings and its split
+from the call cache and runs the chromosome's tasks anew.
+
+One thing on the site: a row `ugc_wgw_cactus_chrom` in
+`<prefix>/resources.tsv` matches no task any more, and the four tasks
+would run with the catch-all's limit. Replace it:
+
+```
+ugc_wgw_cactus_chrom_*	-	-	3-00:00:00	-	-
+```
+
+or give the tasks rows of their own (the construct and the align step are
+the long ones). `chrom_mem_gb_floor` in a project's `stage_inputs` keeps
+its meaning; the request now also grows with the cohort
+(`chrom_mem_gb_per_gb`), so a floor that was raised for a large cohort
+can go. `construct_members` is unset unless you set it: every member
+builds the SV graph, as before.
+
 ## When to re-initialise instead
 
 - The new bundle changes `config.json`'s schema (the driver refuses to load

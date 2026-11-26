@@ -451,6 +451,12 @@ assembly failed QC is replaced by the next in rank, so the lists stay
 nested as long as the pass list only grows. `--emit 0` writes the whole
 ranking, relatives included.
 
+A cohort frozen from such a list keeps its order, and `cohort_pangenome`
+can use it: with `construct_members` only the cohort's first members build
+the graph's skeleton of large variation, the slow serial step of a
+chromosome's graph, and everyone is mapped to it (the stage's page, "The
+SV graph from the first members").
+
 ## Checking identity before a freeze
 
 `cohort_qc` (chapter 08) runs by itself after the per-sample stage of both

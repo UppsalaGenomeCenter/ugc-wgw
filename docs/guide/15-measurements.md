@@ -106,6 +106,11 @@ that comparison is why the stage genotypes from the alignment it has.
 
 ## The pangenome's sizes
 
+The figures of this section up to the ladder were measured before 0.26.0,
+when one task, `ugc_wgw_cactus_chrom`, ran a chromosome's four Cactus
+steps; they are four tasks now (`ugc_wgw_cactus_chrom_construct`, `_map`,
+`_align`, `_join`), and "the chromosome task" below is their sum.
+
 `cohort_pangenome` has two tasks whose rows the chr20 scaling pilot sets
 (design brief, WP4): `ugc_wgw_cactus_split` maps every haplotype of the
 cohort genome-wide in one job (`split_cpu`, `split_mem_gb`, `split_disk_gb`
@@ -178,11 +183,97 @@ and both members' mappings from the call cache in two seconds and ran
 only the split and the chromosome task: what a ladder of nested cohorts
 relies on.
 
+The same four members at 0.26.0, the chromosome in four tasks (the dev
+machine was running tests beside it, so the times are upper bounds):
+
+| task | every member in the construct | `construct_members` 2 |
+|---|---|---|
+| `ugc_wgw_cactus_chrom_construct` | 15 min | 7 min |
+| `ugc_wgw_cactus_chrom_map` | 10 min | 7 min |
+| `ugc_wgw_cactus_chrom_align` | 5 min | 4 min |
+| `ugc_wgw_cactus_chrom_join` | 25 min | 18 min |
+| nodes | 564,724 | 555,589 |
+
+The first column is the graph of before (564,401 and 564,731 nodes in two
+one-task runs of the same input; of a member's alleles of 50 bp or more,
+99.6 to 100 % are found again, which is what those two runs differ by).
+A run interrupted during the align task and retried took everything
+before it from the call cache.
+
 The growth table of that chr20 graph, as the cohort page reads it: one
 member carries 0.71 Mb that is not on the reference's path, two 0.86 Mb,
 three 0.94 Mb, all four 1.01 Mb; 61.4 Mb is in all four. (The four are a
 trio and a copy of the child, so the curve flattens faster than a
 cohort's will.)
+
+### The ladder on chr20
+
+Nested cohorts of one study's assemblies in ranking order (chapter 06),
+chr20 only, on the production cluster at 0.23.4. Every member is mapped
+once (`ugc_wgw_cactus_map`: 1 h 20 min on 8 cores, peak 60 GB) and never
+again: the rung of 100 mapped 80 members and took the first 20 from the
+call cache. What follows the mappings:
+
+| | 20 members | 100 members |
+|---|---|---|
+| haplotypes | 40 | 200 |
+| `ugc_wgw_cactus_split` | 51 min | 2 h 34 min |
+| `ugc_wgw_cactus_chrom`, 16 cores | 2 h 37 min | 18 h 47 min |
+| of it: minigraph adds the haplotypes, one after another | 1 h 18 min | 10 h 18 min |
+| of it: every haplotype mapped to that graph, four at once | 28 min | 4 h 45 min |
+| of it: `cactus-align` | 12 min | 1 h 47 min |
+| of it: the join (indexes, VCF, vcfwave) | 37 min | 1 h 57 min |
+| peak memory (`cactus_consolidated`, as Toil measured it) | 33 GiB | 55 GiB |
+| CPU efficiency of the job | 6 % | 21 % |
+| graph: nodes | 1,115,493 | 1,807,312 |
+| graph: length; of it not on the reference's path | 67.3 Mb; 2.9 Mb | 69.6 Mb; 5.1 Mb |
+| vcfwave records; of 50 bp or more | 303,450; 1,488 | 489,046; 2,849 |
+| records one member carries alone | 27 % | 37 % |
+| records inside another record (level 1) | 2 % | 18 % |
+| members' call rate, median (lowest) | 0.949 (0.918) | 0.925 (0.818) |
+| what the last member adds | 40 kb | 16 kb |
+
+How to read it:
+
+- **Memory is not the limit.** The peak is one program,
+  `cactus_consolidated`, and it grew by 22 GiB for 9.6 Gb more haplotype
+  sequence: about 28 GiB plus 2.3 GiB per Gb of sequence in the
+  chromosome's graph (haplotypes times the chromosome's length). Cactus's
+  own estimate for the 200 haplotypes was 761 GiB; it is cut to the
+  task's `--maxMemory` and the step ran in 55. The request rule knows
+  only the chromosome's length, and the default 64 GB would have been
+  86 % used at 100 members: raise `chrom_mem_gb_floor` from about that
+  size (128 for 200 members of chr20 by the rule above, with room).
+- **Wall time is.** The chromosome's graph is four steps (one job before
+  0.26.0, a task each since), and the first cannot be divided: minigraph adds one haplotype to the graph
+  after another, about three minutes each on chr20 (115 s at 40
+  haplotypes, 182 s at 200), with one or two cores busy. By each step's
+  growth between the two rungs, 200 members would take a day and a half
+  to two days, 400 three and a half to five days, and 861 one to two
+  weeks, for chr20 alone; two points make a rough rule. Give the
+  chromosome's tasks a row with days, not hours
+  (`ugc_wgw_cactus_chrom_*`), or limit the first step to the cohort's
+  first members with `construct_members` (the stage's page).
+- **`chrom_cpu` buys the second step only.** The mappings to the
+  chromosome's graph run `chrom_cpu / chrom_map_cores` at a time (16 / 4
+  by default); 48 cores run twelve at once. The first step does not use
+  them, so the job's CPU efficiency falls further.
+- **One haplotype can hold a step.** Among the 200, one took 85 minutes in
+  the first step (the median: two minutes) and 103 in the second, where
+  the job then waited for it alone. Nothing in its assembly statistics
+  sets it apart.
+- **The graph keeps growing.** The sequence the reference lacks: 0.9 Mb
+  with one member, 2.0 with five, 2.5 with ten, 3.1 with twenty, 4.1 with
+  fifty, 5.1 Mb with a hundred, about N to the power 0.31 from twenty
+  members on; 59.1 Mb is in all hundred. The hundredth member still adds
+  16 kb of chr20.
+- **A member's call rate falls with the cohort.** The same twenty members
+  have 0.949 in the graph of 20 and 0.914 in the graph of 100: the sites
+  further members add are rare ones in regions fewer haplotypes cross.
+  Within a cohort the rate follows contiguity (correlation −0.5 with the
+  member's contig count on chr20). The cohort page therefore lists the
+  low outliers of the cohort, not the members below a fixed number
+  (chapter 13).
 
 The per-sample tasks on five 20x genomes (2026-10-26, the `cpu` profile):
 
@@ -231,7 +322,8 @@ must fit the largest node) is about time, not memory. Two mechanics
 matter there. `TASK_MEMORY_MAX` rounds a workflow's own request down to
 the standard node, so a `chrom_mem_gb_per_100mb` that asks above it is
 silently capped; a policy row is not capped, so memory above 375 GiB goes
-through a row `ugc_wgw_cactus_chrom` that also names the partition. And a
+through a row `ugc_wgw_cactus_chrom_align` that also names the partition.
+And a
 row matches the task's name, not the chromosome, so it moves every
 chromosome's job to that partition, whole nodes each; a smaller cohort
 graph stays on standard nodes with the formula.

@@ -352,6 +352,8 @@ class SubmitTest(unittest.TestCase):
         self.assertNotIn("ugc_wgw_cohort_pangenome.sv_vcf", pg_in)                  # no cohort_merge of C1: truvari skipped
         pg_out = json.loads((pg.run_path / "outputs.json").read_text())
         self.assertEqual(pg_out["ugc_wgw_cohort_pangenome.chromosomes_built"], ["chr1", "chr20", "chrX"])
+        self.assertEqual(pg_out["ugc_wgw_cohort_pangenome.construct_members_built"], 3)   # every member builds the SV graph
+        self.assertEqual(len(pg_out["ugc_wgw_cohort_pangenome.chrom_construct_genomes"]), 3)
         self.assertTrue(pg_out["ugc_wgw_cohort_pangenome.pangenome_wave_vcf"].endswith("C1.pangenome.GRCh38_GIABv3.wave.vcf.gz"))
         pm = json.loads((pg.run_path / "run_manifest.json").read_text())
         self.assertEqual(pm["ugc_wgw_manifest"]["cohort_members"], ["S1", "S2", "S3"])

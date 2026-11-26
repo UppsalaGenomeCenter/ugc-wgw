@@ -47,7 +47,7 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "asm_het_loss_max": 0.2,              # het-loss rate (read hets the assembly calls hom or not at all) above which it fails
     "asm_switch_error_max": 0.05,         # yak trioeval switch-error rate above which a trio-binned haplotype fails
     "asm_genotype_concordance_min": 0.90, # genotype concordance with the sample's read-based SNVs below which the assembly fails (a swap scores 0.5-0.7)
-    "pg_member_call_rate_min": 0.90,      # a member's call rate in the pangenome VCF below which the cohort page lists it (no sample flag: the cohort is frozen)
+    "pg_member_call_rate_min": 0.0,       # an absolute floor for a member's call rate in the pangenome VCF (0: none; the cohort page lists the low outliers of the cohort itself)
     "mito_unexplained_max": 0.02,         # mitorsaw's unexplained fingerprint fraction above which the sample warns (mitorsaw's own passing criterion)
     # identity (cohort_qc, somalier relatedness: ~1 duplicate, ~0.5 parent-child or siblings, ~0.25 second degree)
     "duplicate_relatedness_min": 0.9,     # a pair at or above this is the same individual: both fail `duplicate`

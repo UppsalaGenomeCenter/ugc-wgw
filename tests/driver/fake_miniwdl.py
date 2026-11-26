@@ -289,6 +289,7 @@ def make_outputs(stage: str, inputs: dict[str, object], run_dir: pathlib.Path,
         files["chrom_genome_bp"] = [f"{pre}.{c}.genome-bp.tsv" for c in chroms]
         files["chrom_degree_stats"] = [f"{pre}.{c}.degree.tsv" for c in chroms]
         files["chrom_growth"] = [f"{pre}.{c}.growth.tsv" for c in chroms]
+        files["chrom_construct_genomes"] = [f"{pre}.{c}.construct_genomes.txt" for c in chroms]
         files["member_stats_shards"] = [f"{pre}.wave.{c}.stats.txt" for c in chroms]
         files["member_stats"] = f"{pre}.members.tsv"
         files["name_map"] = f"{sid}.pangenome.name_map.tsv"
@@ -303,6 +304,7 @@ def make_outputs(stage: str, inputs: dict[str, object], run_dir: pathlib.Path,
             files["truvari_summary"] = f"{pre}.truvari.json"
             files["truvari_details"] = f"{pre}.truvari.tar.gz"
         strings["chromosomes_built"] = chroms
+        strings["construct_members_built"] = int(v.get("construct_members") or len(v.get("sample_ids") or []))  # type: ignore[arg-type, call-overload]
     elif stage == "cohort_freq":
         if v.get("small_variant_vcf"):
             f("small_variant_freq_vcf", f"{sid}.freq.{REF}.small_variants.vcf.gz")
@@ -394,7 +396,8 @@ def make_outputs(stage: str, inputs: dict[str, object], run_dir: pathlib.Path,
     has_mt = bool(v.get("mt_small_variant_vcf")) or bool(v.get("merge_mitochondria"))
 
     def write_fixture(p: pathlib.Path, name: str, index: int, placeholder: str) -> None:
-        content = fixture_bytes(name, sid, stage, inferred_for_fixture, index=index, members=members_of, pedigree=pedigree, sex=sex_info,
+        fixture_members = members_of[:int(v["construct_members"])] if name == "chrom_construct_genomes" and v.get("construct_members") else members_of  # type: ignore[call-overload]
+        content = fixture_bytes(name, sid, stage, inferred_for_fixture, index=index, members=fixture_members, pedigree=pedigree, sex=sex_info,
                                 legacy=legacy_members, mt=has_mt, haplogroup=str(strings.get("mt_haplogroup") or "H5a7"),
                                 imprinting=str(v.get("imprinting") or ""), labels=[str(x) for x in (v.get("sample_labels") or [])],
                                 readers=[str(x) for x in (v.get("read_sample_ids") or [])], graph_cohort=str(v.get("graph_cohort_id") or ""))

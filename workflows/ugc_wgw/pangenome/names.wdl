@@ -1,5 +1,5 @@
 version 1.0
-# ugc-pacbio-wgw — cohort pangenome bookkeeping: Cactus-safe genome names, the sample rename and unphase lists, per-chromosome BEDs and memory
+# ugc-pacbio-wgw — cohort pangenome bookkeeping: Cactus-safe genome names, the sample rename and unphase lists, the construct's genomes, per-chromosome BEDs and memory
 # origin: none
 # see docs/DESIGN.md §5, §13; docs/ENTRYPOINTS.md §8.2
 import "../../../vendor/hifi-human-wgs-wdl/workflows/wdl-common/wdl/structs.wdl"
@@ -24,7 +24,10 @@ task ugc_wgw_pangenome_names {
         description: "One BED per requested chromosome (whole chromosome), in the chromosomes' order"
       },
       chrom_mem_gb: {
-        description: "JSON object chromosome -> memory (GB) for its Cactus task"
+        description: "JSON object chromosome -> memory (GB) for its align and join tasks: the largest of the floor, the per-100-Mb rule and 32 GB plus chrom_mem_gb_per_gb per Gb of haplotype sequence in the chromosome's graph (every haplotype and the reference, times the chromosome's length)"
+      },
+      construct_genomes: {
+        description: "The genome names of the first construct_members members (<safe>.1, <safe>.2), cohort order; empty when every member builds the SV graph"
       }
     }
   }
@@ -51,6 +54,12 @@ task ugc_wgw_pangenome_names {
     chrom_mem_gb_per_100mb: {
       description: "Memory (GB) per 100 Mb of chromosome length"
     }
+    chrom_mem_gb_per_gb: {
+      description: "Memory (GB) per Gb of haplotype sequence in a chromosome's graph, on top of 32 GB (measured: cactus_consolidated peaks at about 28 GiB plus 2.3 GiB per Gb; 0 leaves the other two rules)"
+    }
+    construct_members: {
+      description: "The first so many members (cohort order) build minigraph's SV graph; unset: every member. Refused below 1 and above the cohort's size"
+    }
     runtime_attributes: {
       description: "Runtime attribute structure"
     }
@@ -64,6 +73,8 @@ task ugc_wgw_pangenome_names {
     Array[String] chromosomes
     Int chrom_mem_gb_floor = 64
     Int chrom_mem_gb_per_100mb = 32
+    Int chrom_mem_gb_per_gb = 4
+    Int? construct_members
     RuntimeAttributes runtime_attributes
   }
 
@@ -71,7 +82,7 @@ task ugc_wgw_pangenome_names {
     set -euo pipefail
     mkdir -p beds
     python3 - "~{write_lines(sample_ids)}" "~{write_lines(trios)}" "~{ref_index}" "~{write_lines(chromosomes)}" \
-      ~{chrom_mem_gb_floor} ~{chrom_mem_gb_per_100mb} "~{cohort_id}" <<'PY'
+      ~{chrom_mem_gb_floor} ~{chrom_mem_gb_per_100mb} "~{cohort_id}" ~{chrom_mem_gb_per_gb} ~{select_first([construct_members, -1])} <<'PY'
 import json, re, sys
 ids = [l.strip() for l in open(sys.argv[1]) if l.strip()]
 trios = [l.strip() == "true" for l in open(sys.argv[2]) if l.strip()]
@@ -80,7 +91,9 @@ for line in open(sys.argv[3]):
     f = line.split("\t")
     lengths[f[0]] = int(f[1])
 chroms = [l.strip() for l in open(sys.argv[4]) if l.strip()]
-floor, per100 = int(sys.argv[5]), int(sys.argv[6])
+floor, per100, per_gb, construct = int(sys.argv[5]), int(sys.argv[6]), int(sys.argv[8]), int(sys.argv[9])
+if construct != -1 and not 1 <= construct <= len(ids):
+    sys.exit(f"construct_members is {construct}: it counts the cohort's first members and must lie between 1 and {len(ids)}")
 missing = [c for c in chroms if c not in lengths]
 if missing:
     sys.exit(f"chromosomes absent from the reference index: {' '.join(missing)}")
@@ -106,14 +119,22 @@ with open("unphase_samples.txt", "w") as fh:
     for sid, trio in zip(ids, trios):
         if not trio:
             fh.write(sid + "\n")
+# the genomes whose haplotypes build the SV graph: the cohort's first members; an empty list is everyone
+with open("construct_genomes.txt", "w") as fh:
+    if construct != -1 and construct < len(ids):
+        for name in safe[:construct]:
+            fh.write(f"{name}.1\n{name}.2\n")
 mem = {}
 for i, c in enumerate(chroms):
     with open(f"beds/{i:03d}.{c}.bed", "w") as fh:
         fh.write(f"{c}\t0\t{lengths[c]}\n")
-    mem[c] = max(floor, -(-lengths[c] * per100 // 100_000_000))
+    # the align step's peak follows the sequence in the chromosome's graph: every haplotype and the reference
+    sequence = (2 * len(ids) + 1) * lengths[c]
+    mem[c] = max(floor, -(-lengths[c] * per100 // 100_000_000), 32 + -(-sequence * per_gb // 1_000_000_000))
 with open("chrom_mem_gb.json", "w") as fh:
     json.dump(mem, fh, indent=1, sort_keys=True)
-print(f"{sys.argv[7]}: {len(ids)} members, {sum(trios)} trio-binned, {len(chroms)} chromosomes; memory {mem}", file=sys.stderr)
+print(f"{sys.argv[7]}: {len(ids)} members, {sum(trios)} trio-binned, {len(chroms)} chromosomes; memory {mem}; "
+      f"SV graph from {'every member' if construct in (-1, len(ids)) else f'the first {construct} members'}", file=sys.stderr)
 PY
   >>>
 
@@ -124,6 +145,7 @@ PY
     Array[String] unphase_samples = read_lines("unphase_samples.txt")
     Array[File] chrom_beds = glob("beds/*.bed")
     Map[String, Int] chrom_mem_gb = read_json("chrom_mem_gb.json")
+    Array[String] construct_genomes = read_lines("construct_genomes.txt")
   }
 
   runtime {

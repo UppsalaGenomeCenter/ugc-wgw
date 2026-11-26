@@ -17,7 +17,7 @@ import "ugc_wgw/provenance.wdl" as Provenance
 
 workflow ugc_wgw_cohort_pangenome {
   meta {
-    description: "ugc-pacbio-wgw stage cohort_pangenome: the members' haplotype assemblies (the assembly stage's contract) as a Minigraph-Cactus graph on the decoy-free GRCh38. One genome-wide split step maps every haplotype to a reference-only graph and bins contigs by chromosome (Cactus's --mgSplit, with its ambiguity rule); one task per requested chromosome constructs, maps, aligns and joins (GBZ, GFA, VCF, vcfwave VCF); the VCFs are gathered, renamed to the sample IDs and unphased for members that are not trio-binned; allele frequencies come from the cohort_freq tasks on the vcfwave VCF with missing genotypes kept missing (no assembled sequence there) and the XX/XY strata from the members' inferred karyotypes; optionally truvari bench against the cohort's read-based SV merge. The graph's paths of non-trio members are not haplotypes (hifiasm's local phasing): no LD, imputation or PanGenie-style use without statistical phasing."
+    description: "ugc-pacbio-wgw stage cohort_pangenome: the members' haplotype assemblies (the assembly stage's contract) as a Minigraph-Cactus graph on the decoy-free GRCh38. One genome-wide split step maps every haplotype to a reference-only graph and bins contigs by chromosome (Cactus's --mgSplit, with its ambiguity rule); four tasks per requested chromosome construct the SV graph (from every member, or from the first construct_members), map every haplotype to it, align and join (GBZ, GFA, VCF, vcfwave VCF); the VCFs are gathered, renamed to the sample IDs and unphased for members that are not trio-binned; allele frequencies come from the cohort_freq tasks on the vcfwave VCF with missing genotypes kept missing (no assembled sequence there) and the XX/XY strata from the members' inferred karyotypes; optionally truvari bench against the cohort's read-based SV merge. The graph's paths of non-trio members are not haplotypes (hifiasm's local phasing): no LD, imputation or PanGenie-style use without statistical phasing."
     outputs: {
       pangenome_vcf: {
         description: "<cohort_id>.pangenome.<ref_name>.vcf.gz: the cohort's graph VCF (vg deconstruct) over the requested chromosomes, sample IDs restored, non-trio members unphased"
@@ -59,7 +59,13 @@ workflow ugc_wgw_cohort_pangenome {
         description: "Per chromosome <cohort_id>.pangenome.<ref>.<chromosome>.growth.tsv (panacus): how much of the graph, in base pairs and nodes, exactly c members carry, for everything they carry and for the sequence the reference lacks, and the cumulative amount in the cohort's order; the summary turns the histograms into growth curves"
       },
       chrom_logs: {
-        description: "The Cactus logs per chromosome, tarred"
+        description: "The Cactus logs per chromosome (construct, map, align, join), tarred"
+      },
+      construct_members_built: {
+        description: "How many of the cohort's first members built minigraph's SV graph: construct_members, or the cohort's size"
+      },
+      chrom_construct_genomes: {
+        description: "Per chromosome <cohort_id>.pangenome.<ref>.<chromosome>.construct_genomes.txt: the genomes (haplotypes) whose sequence built minigraph's SV graph, one per line; every genome of the chromosome unless construct_members is set"
       },
       name_map: {
         description: "sample_id, Cactus-safe name, trio per member"
@@ -161,17 +167,29 @@ workflow ugc_wgw_cohort_pangenome {
     split_disk_gb: {
       description: "Disk (GB) of the split step; default from the input sizes"
     }
+    construct_members: {
+      description: "The first so many members, in the cohort's order, build minigraph's SV graph of every chromosome; all members are mapped to it, aligned and joined. Unset: every member builds it. The construct adds one haplotype after another (about three minutes each on chr20) and is the part of a chromosome's graph that cannot be divided; a member left out keeps its variants through the alignment (99 % of its alleles of 50 bp or more on the dev machine's four genomes), while satellite-rich stretches resolve differently for every member"
+    }
+    construct_cpu: {
+      description: "Cores of each chromosome's construct task (minigraph's construction keeps one or two busy)"
+    }
+    construct_mem_gb: {
+      description: "Memory (GB) of each chromosome's construct task"
+    }
     chrom_cpu: {
-      description: "Cores of each chromosome task"
+      description: "Cores of each chromosome's map, align and join tasks"
     }
     chrom_map_cores: {
       description: "Cores per minigraph mapping in a chromosome's graph (default 4: chrom_cpu / 4 haplotypes map at once)"
     }
     chrom_mem_gb_floor: {
-      description: "Memory (GB) of a chromosome task at least"
+      description: "Memory (GB) of a chromosome's align and join tasks at least"
     }
     chrom_mem_gb_per_100mb: {
-      description: "Memory (GB) per 100 Mb of chromosome; the larger of the two rules applies"
+      description: "Memory (GB) per 100 Mb of chromosome; the largest of the three rules applies"
+    }
+    chrom_mem_gb_per_gb: {
+      description: "Memory (GB) per Gb of haplotype sequence in the chromosome's graph (haplotypes and the reference times the chromosome's length), on top of 32 GB: the rule that knows the cohort's size (chr20: 64 GB to 40 members, 84 at 100, 136 at 200)"
     }
     freq_threads: {
       description: "Threads of each frequency shard"
@@ -226,10 +244,14 @@ workflow ugc_wgw_cohort_pangenome {
     Int? map_mem_gb
     Int split_mem_gb = 64
     Int? split_disk_gb
+    Int? construct_members
+    Int construct_cpu = 4
+    Int construct_mem_gb = 32
     Int chrom_cpu = 16
     Int chrom_map_cores = 4
     Int chrom_mem_gb_floor = 64
     Int chrom_mem_gb_per_100mb = 32
+    Int chrom_mem_gb_per_gb = 4
     Int freq_threads = 2
     Int freq_mem_gb = 4
     File ref_map_file
@@ -272,6 +294,8 @@ workflow ugc_wgw_cohort_pangenome {
     chromosomes = requested,
     chrom_mem_gb_floor = chrom_mem_gb_floor,
     chrom_mem_gb_per_100mb = chrom_mem_gb_per_100mb,
+    chrom_mem_gb_per_gb = chrom_mem_gb_per_gb,
+    construct_members = construct_members,
     runtime_attributes = default_runtime_attributes
   }
 
@@ -316,15 +340,51 @@ workflow ugc_wgw_cohort_pangenome {
 
   scatter (chrom in to_build) {
     Int chrom_mem = if chrom == "chrOther" then chrom_mem_gb_floor else ugc_wgw_pangenome_names.chrom_mem_gb[chrom]
-    call Chrom.ugc_wgw_cactus_chrom { input:
+    # steps 4 to 7, one task each: its own request, and the call cache as the checkpoint between them
+    call Chrom.ugc_wgw_cactus_chrom_construct { input:
       cohort_id = cohort_id,
       ref_name = ref_name,
       chromosome = chrom,
       chrom_tars = ugc_wgw_cactus_split.chrom_tars,
       chromfile = ugc_wgw_cactus_split.chromfile,
       split_root = ugc_wgw_cactus_split.split_root,
+      construct_genomes = ugc_wgw_pangenome_names.construct_genomes,
+      cpu = construct_cpu,
+      mem_gb = construct_mem_gb,
+      runtime_attributes = default_runtime_attributes
+    }
+    call Chrom.ugc_wgw_cactus_chrom_map { input:
+      cohort_id = cohort_id,
+      ref_name = ref_name,
+      chromosome = chrom,
+      chrom_tars = ugc_wgw_cactus_split.chrom_tars,
+      split_root = ugc_wgw_cactus_split.split_root,
+      sv_gfa = ugc_wgw_cactus_chrom_construct.sv_gfa,
+      chromfile_mg = ugc_wgw_cactus_chrom_construct.chromfile_mg,
       cpu = chrom_cpu,
       map_cores = chrom_map_cores,
+      runtime_attributes = default_runtime_attributes
+    }
+    call Chrom.ugc_wgw_cactus_chrom_align { input:
+      cohort_id = cohort_id,
+      ref_name = ref_name,
+      chromosome = chrom,
+      chrom_tars = ugc_wgw_cactus_split.chrom_tars,
+      split_root = ugc_wgw_cactus_split.split_root,
+      map_tar = ugc_wgw_cactus_chrom_map.map_tar,
+      cpu = chrom_cpu,
+      mem_gb = chrom_mem,
+      runtime_attributes = default_runtime_attributes
+    }
+    call Chrom.ugc_wgw_cactus_chrom_join { input:
+      cohort_id = cohort_id,
+      ref_name = ref_name,
+      chromosome = chrom,
+      vg = ugc_wgw_cactus_chrom_align.vg,
+      hal = ugc_wgw_cactus_chrom_align.hal,
+      sv_gfa = ugc_wgw_cactus_chrom_construct.sv_gfa,
+      step_logs = [ugc_wgw_cactus_chrom_construct.log, ugc_wgw_cactus_chrom_map.log, ugc_wgw_cactus_chrom_align.log],
+      cpu = chrom_cpu,
       mem_gb = chrom_mem,
       runtime_attributes = default_runtime_attributes
     }
@@ -332,15 +392,17 @@ workflow ugc_wgw_cohort_pangenome {
       cohort_id = cohort_id,
       ref_name = ref_name,
       chromosome = chrom,
-      gfa = ugc_wgw_cactus_chrom.gfa,
+      gfa = ugc_wgw_cactus_chrom_join.gfa,
       name_map = ugc_wgw_pangenome_names.name_map,
       runtime_attributes = default_runtime_attributes
     }
   }
 
+  Int construct_n = select_first([construct_members, length(sample_ids)])
   Array[String] header_common = [
     "##ugc_wgw_cohort_pangenome_version=~{ugc_wgw_version}",
     "##ugc_wgw_cohort_pangenome_cohort=~{cohort_id}",
+    "##ugc_wgw_cohort_pangenome_construct=minigraph's SV graph built from the first ~{construct_n} of ~{length(sample_ids)} members in cohort order; every member is mapped to it, aligned and joined",
     "##ugc_wgw_cohort_pangenome_graph=Minigraph-Cactus v3.3.0, per-chromosome construction (--mgSplit) on the decoy-free GRCh38",
     "##ugc_wgw_cohort_pangenome_ambiguity=contigs enter a chromosome's graph only when at least 75/50/25 % of their length (below 100 kb, below 1 Mb, from 1 Mb) aligns to one reference contig with a best/second ratio of 2 or more at MAPQ 5 or more (cactus-graphmap-split); other contigs are in no graph",
     "##ugc_wgw_cohort_pangenome_phase=genotypes of trio-binned members are phased (paternal|maternal); the others are unphased: hifiasm's hap1/hap2 are local phase blocks, so the graph's paths of those members are not haplotypes (no LD, imputation or PanGenie-style use without statistical phasing)"
@@ -348,8 +410,8 @@ workflow ugc_wgw_cohort_pangenome {
 
   call Post.ugc_wgw_pangenome_vcf_post as post_raw { input:
     chromosomes = to_build,
-    vcfs = ugc_wgw_cactus_chrom.vcf,
-    vcf_indices = ugc_wgw_cactus_chrom.vcf_index,
+    vcfs = ugc_wgw_cactus_chrom_join.vcf,
+    vcf_indices = ugc_wgw_cactus_chrom_join.vcf_index,
     rename_samples = ugc_wgw_pangenome_names.rename_samples,
     unphase_samples = ugc_wgw_pangenome_names.unphase_samples,
     header_lines = header_common,
@@ -359,8 +421,8 @@ workflow ugc_wgw_cohort_pangenome {
 
   call Post.ugc_wgw_pangenome_vcf_post as post_wave { input:
     chromosomes = to_build,
-    vcfs = ugc_wgw_cactus_chrom.wave_vcf,
-    vcf_indices = ugc_wgw_cactus_chrom.wave_vcf_index,
+    vcfs = ugc_wgw_cactus_chrom_join.wave_vcf,
+    vcf_indices = ugc_wgw_cactus_chrom_join.wave_vcf_index,
     rename_samples = ugc_wgw_pangenome_names.rename_samples,
     unphase_samples = ugc_wgw_pangenome_names.unphase_samples,
     header_lines = flatten([header_common, ["##ugc_wgw_cohort_pangenome_vcfwave=alleles realigned to the reference and complex records decomposed by vcfwave"]]),
@@ -455,15 +517,17 @@ workflow ugc_wgw_cohort_pangenome {
     File pangenome_wave_vcf = post_wave.vcf
     File pangenome_wave_vcf_index = post_wave.vcf_index
     Array[String] chromosomes_built = to_build
-    Array[File] chrom_gbzs = ugc_wgw_cactus_chrom.gbz
-    Array[File] chrom_gfas = ugc_wgw_cactus_chrom.gfa
-    Array[File] chrom_graph_stats = ugc_wgw_cactus_chrom.graph_stats
-    Array[File] chrom_path_stats = ugc_wgw_cactus_chrom.path_stats
-    Array[File] chrom_refgaps = ugc_wgw_cactus_chrom.refgaps
-    Array[File] chrom_genome_bp = ugc_wgw_cactus_chrom.genome_bp
-    Array[File] chrom_degree_stats = ugc_wgw_cactus_chrom.degree_stats
+    Array[File] chrom_gbzs = ugc_wgw_cactus_chrom_join.gbz
+    Array[File] chrom_gfas = ugc_wgw_cactus_chrom_join.gfa
+    Array[File] chrom_graph_stats = ugc_wgw_cactus_chrom_join.graph_stats
+    Array[File] chrom_path_stats = ugc_wgw_cactus_chrom_join.path_stats
+    Array[File] chrom_refgaps = ugc_wgw_cactus_chrom_join.refgaps
+    Array[File] chrom_genome_bp = ugc_wgw_cactus_chrom_join.genome_bp
+    Array[File] chrom_degree_stats = ugc_wgw_cactus_chrom_join.degree_stats
     Array[File] chrom_growth = ugc_wgw_pangenome_growth.growth
-    Array[File] chrom_logs = ugc_wgw_cactus_chrom.logs
+    Array[File] chrom_logs = ugc_wgw_cactus_chrom_join.logs
+    Array[File] chrom_construct_genomes = ugc_wgw_cactus_chrom_construct.construct_list
+    Int construct_members_built = construct_n
     Array[File] member_stats_shards = member_stats_shard.stats
     File member_stats = ugc_wgw_pangenome_member_stats_gather.members
     File name_map = ugc_wgw_pangenome_names.name_map

@@ -519,6 +519,15 @@ class InputsTest(unittest.TestCase):
         d = self.check_doc("cohort_pangenome", inputs.generate(self.ctx("cohort", "C1", "assembly"), "cohort_pangenome")[0])
         self.assertEqual(d["trios"], [False, True, False])
         self.assertEqual(d["chromosomes"], ["chr20"])
+        self.assertNotIn("construct_members", d)                                  # unset: every member builds the SV graph
+        # construct_members counts the cohort's first members: it travels when it fits, and is refused before a job is submitted
+        self.cfg.stage_inputs = {"cohort_pangenome": {"construct_members": 2}}
+        d = self.check_doc("cohort_pangenome", inputs.generate(self.ctx("cohort", "C1", "assembly"), "cohort_pangenome")[0])
+        self.assertEqual(d["construct_members"], 2)
+        for bad in (0, 4, -1, "2", 1.5, True):
+            self.cfg.stage_inputs = {"cohort_pangenome": {"construct_members": bad}}
+            with self.assertRaisesRegex(UgcError, "construct_members is .* from 1 to 3 for cohort C1"):
+                inputs.generate(self.ctx("cohort", "C1", "assembly"), "cohort_pangenome")
         self.cfg.stage_inputs = {}
 
     def test_any_version(self):

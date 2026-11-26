@@ -920,7 +920,7 @@ flowchart TD
 
 ## ugc_wgw_cohort_pangenome
 
-Source `workflows/ugc_wgw_cohort_pangenome.wdl`, depth 1, Mermaid source 1328 characters.
+Source `workflows/ugc_wgw_cohort_pangenome.wdl`, depth 1, Mermaid source 1580 characters.
 
 Inlined workflows: none.
 
@@ -935,48 +935,60 @@ flowchart TD
   end
   n4["ugc_wgw_cactus_split"]:::o
   subgraph s2["scatter chrom in to_build"]
-    n5["ugc_wgw_cactus_chrom"]:::o
-    n6["ugc_wgw_pangenome_growth"]:::o
+    n5["ugc_wgw_cactus_chrom_construct"]:::o
+    n6["ugc_wgw_cactus_chrom_map"]:::o
+    n7["ugc_wgw_cactus_chrom_align"]:::o
+    n8["ugc_wgw_cactus_chrom_join"]:::o
+    n9["ugc_wgw_pangenome_growth"]:::o
   end
-  n7["post_raw"]:::o
-  n8["post_wave"]:::o
+  n10["post_raw"]:::o
+  n11["post_wave"]:::o
   subgraph s3["scatter i in range(length(requested))"]
-    n9["freq_shard"]:::o
+    n12["freq_shard"]:::o
   end
   subgraph s4["scatter i in range(length(requested))"]
-    n10["member_stats_shard"]:::o
+    n13["member_stats_shard"]:::o
   end
-  n11["ugc_wgw_pangenome_member_stats_gather"]:::o
-  n12["concat_freq"]:::o
-  n13["ugc_wgw_pangenome_freq_summary"]:::o
+  n14["ugc_wgw_pangenome_member_stats_gather"]:::o
+  n15["concat_freq"]:::o
+  n16["ugc_wgw_pangenome_freq_summary"]:::o
   subgraph s5["if defined(sv_vcf)"]
-    n14["ugc_wgw_vcf_split_multiallelic"]:::o
-    n15["ugc_wgw_truvari_bench"]:::o
+    n17["ugc_wgw_vcf_split_multiallelic"]:::o
+    n18["ugc_wgw_truvari_bench"]:::o
   end
-  n16["ugc_wgw_manifest_write"]:::o
+  n19["ugc_wgw_manifest_write"]:::o
   n1 --> n3
   n1 --> n4
   n1 --> n5
-  n1 --> n6
   n1 --> n7
   n1 --> n8
   n1 --> n9
   n1 --> n10
+  n1 --> n11
+  n1 --> n12
+  n1 --> n13
   n2 --> n3
   n2 --> n4
   n3 --> n4
   n4 --> n5
+  n4 --> n6
+  n4 --> n7
   n5 --> n6
-  n5 --> n7
   n5 --> n8
+  n6 --> n7
+  n6 --> n8
+  n7 --> n8
   n8 --> n9
   n8 --> n10
-  n8 --> n14
-  n9 --> n12
-  n9 --> n13
-  n10 --> n11
-  n12 --> n13
-  n14 --> n15
+  n8 --> n11
+  n11 --> n12
+  n11 --> n13
+  n11 --> n17
+  n12 --> n15
+  n12 --> n16
+  n13 --> n14
+  n15 --> n16
+  n17 --> n18
   classDef default fill:none,stroke:#8a8f95
   classDef o fill:#2c6aa0,stroke:#2c6aa0,color:#fff
   classDef b fill:#1f7a70,fill-opacity:0.10,stroke:#1f7a70,stroke-opacity:0.45

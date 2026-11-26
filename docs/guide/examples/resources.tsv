@@ -39,7 +39,10 @@ ugc_wgw_flagger_align	-	-	6:00:00	-	-
 ugc_wgw_dipcall	-	-	4:00:00	-	-
 ugc_wgw_pav	-	-	6:00:00	-	-
 ugc_wgw_cactus_split	-	-	1-00:00:00	-	-
-ugc_wgw_cactus_chrom	-	-	1-00:00:00	-	-
+# A chromosome's graph is four tasks since 0.26.0 (construct, map, align, join); one glob row gives them all a
+# limit. The construct adds one haplotype after another, about three minutes each on chr20: 200 haplotypes took
+# ten hours, so size this row by the haplotypes in the construct (construct_members, chapter "cohort_pangenome").
+ugc_wgw_cactus_chrom_*	-	-	3-00:00:00	-	-
 # GPU: Parabricks with 4 GPUs is one job per GPU node. Its host memory grows with the depth: the
 # declared 192 GB held 126 GB at 19-25x and failed at higher depth (a pinned CUDA allocation that
 # does not fit exits 255, no OOM state), so ask for 256G. Smaller shapes for sharing the 6-GPU node take an

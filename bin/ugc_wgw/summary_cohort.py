@@ -122,6 +122,17 @@ def _outliers(values: dict[str, float]) -> tuple[float | None, float | None, lis
     return med, mad, sorted(k for k, v in values.items() if abs(v - med) > lim)
 
 
+def low_call_rate(values: dict[str, float]) -> dict[str, object]:
+    """The members whose call rate in the graph VCF is low for their own cohort: below the median by more than three
+    scaled MADs (`low_outliers`, with the bound as `low_bound`). The rate has no absolute scale: it falls as a cohort
+    grows (the same twenty members of the 864: 0.949 in a chr20 graph of 20, 0.914 in one of 100), so a fixed limit
+    lists nobody in a small cohort and half of a large one (DESIGN §18, 2026-11-26)."""
+    med, mad, outliers = _outliers(values)
+    if med is None or not mad:
+        return {"low_outliers": [], "low_bound": None}
+    return {"low_outliers": sorted(k for k in outliers if values[k] < med), "low_bound": round(med - 3 * 1.4826 * mad, 4)}
+
+
 # The atlas's cell types by lineage, for reading a composition at a glance (nanomix's 39 bisulfite cell types; a type the
 # map does not know is `other`). The fractions themselves are never regrouped: the flag and the tables use the cell types.
 CELL_GROUPS: dict[str, tuple[str, ...]] = {
@@ -573,6 +584,19 @@ def _pangenome_entry(outs: Outputs, thr: dict[str, float] | None = None) -> dict
     p = outs.opt("name_map")
     if isinstance(p, str) and Path(p).exists():
         entry["name_map"] = sp.parse_name_map(sp.read_lines(Path(p)))
+    # 0.26.0: how many of the cohort's first members built minigraph's SV graph (construct_members), and the haplotypes
+    # in each chromosome's construct; a run before 0.26.0 has neither output and every member built it
+    built = outs.opt("construct_members_built")
+    lists = outs.opt("chrom_construct_genomes")
+    if built is not None or isinstance(lists, list):
+        haplotypes: dict[str, int] = {}
+        chroms_named: list[str] = entry["chromosomes"]  # type: ignore[assignment]
+        for i, q in enumerate(lists if isinstance(lists, list) else []):
+            if isinstance(q, str) and Path(q).exists():
+                haplotypes[chroms_named[i] if i < len(chroms_named) else Path(q).name] = sum(1 for line in sp.read_lines(Path(q)) if line.strip())
+        n_built = sp._num(str(built)) if built is not None else None
+        entry["construct"] = {"members": int(n_built) if isinstance(n_built, (int, float)) else None,
+                              "of": len(entry.get("name_map") or {}) or None, "haplotypes": haplotypes}  # type: ignore[arg-type]
     for name in ("pangenome_vcf", "pangenome_wave_vcf", "freq_vcf"):
         p = outs.opt(name)
         if isinstance(p, str) and Path(p).exists():
@@ -582,7 +606,7 @@ def _pangenome_entry(outs: Outputs, thr: dict[str, float] | None = None) -> dict
     if isinstance(p, str) and Path(p).exists():
         members = sp.parse_member_stats(sp.read_lines(Path(p)))
         entry["members"] = members
-        limit = (thr or {}).get("pg_member_call_rate_min")
+        limit = (thr or {}).get("pg_member_call_rate_min") or None   # 0, the default: no absolute floor
         dists: dict[str, object] = {}
         for key, label, digits in (("call_rate", "call rate in the graph VCF", 4), ("n_singletons", "singleton alleles", 0), ("n_hets", "het genotypes", 0),
                                    ("n_nonref_hom", "hom-alt genotypes", 0), ("n_missing", "missing genotypes", 0)):
@@ -593,6 +617,8 @@ def _pangenome_entry(outs: Outputs, thr: dict[str, float] | None = None) -> dict
             beyond = sorted(k for k, v in values.items() if key == "call_rate" and limit is not None and v < limit)
             dists[key] = {"label": label, "digits": digits, "values": values, "median": med, "mad": mad, "outliers": outliers,
                           "threshold": limit if key == "call_rate" else None, "direction": "min", "beyond_threshold": beyond}
+            if key == "call_rate":
+                dists[key].update(low_call_rate(values))
         entry["member_distributions"] = dists
     chroms_built: list[str] = entry.get("chromosomes") or []  # type: ignore[assignment]
     for name, parser, key in (("chrom_genome_bp", lambda q: sp.parse_genome_bp(sp.read_lines(q)), "genome_bp"),
@@ -1817,6 +1843,13 @@ def render_cohort(d: dict[str, object], tools: list[dict[str, object]], *, proje
                              ("ambiguous sequence", f"{sv.fmt(sv.finite(split.get('ambiguous_bp')) / assigned_total * 100, 2)}%" if assigned_total else "–"),
                              ("graph VCF", _bytes((cp.get("pangenome_vcf") or {}).get("bytes"))), ("vcfwave VCF", _bytes((cp.get("pangenome_wave_vcf") or {}).get("bytes"))),  # type: ignore[union-attr]
                              ("frequency VCF", _bytes((cp.get("freq_vcf") or {}).get("bytes")))])  # type: ignore[union-attr]
+            construct: dict[str, object] = cp.get("construct") or {}  # type: ignore[assignment]
+            c_in, c_of = construct.get("members"), construct.get("of")
+            if isinstance(c_in, int) and isinstance(c_of, int) and c_in < c_of:
+                pbody += (f"<p><b>SV graph from the first {sv.fmt(c_in)} of {sv.fmt(c_of)} members.</b> minigraph built the graph's large variation from the "
+                          f"haplotypes of the cohort's first {sv.fmt(c_in)} members (<code>construct_members</code>); every member was then mapped to it, "
+                          "aligned and joined. A member outside the construct keeps its own variants through the alignment; satellite-rich stretches "
+                          "(a centromere's flank, a chromosome's end) resolve differently than with every member in the construct, for all members alike.</p>")
             if per_chrom:
                 has_sizes = any(g.get("ref_length") for g in per_chrom.values())
                 rows_pc = []
@@ -1901,20 +1934,34 @@ def render_cohort(d: dict[str, object], tools: list[dict[str, object]], *, proje
             if members:
                 groups = [{"label": g["label"], "points": sorted(g["values"].items()), "outliers": g.get("outliers", []), "threshold": g.get("threshold"),  # type: ignore[union-attr, index]
                            "digits": g.get("digits", 0), "unit": ""} for g in mdist.values()]
-                low = (mdist.get("call_rate") or {}).get("beyond_threshold") or []
+                crd: dict[str, object] = mdist.get("call_rate") or {}
+                low: list[str] = crd.get("beyond_threshold") or []  # type: ignore[assignment]
+                # a summary JSON written before the relative listing has no low_outliers: its outliers on the low side are the same members
+                crv: dict[str, float] = crd.get("values") or {}  # type: ignore[assignment]
+                cmed = crd.get("median")
+                rel: list[str] = crd.get("low_outliers", [k for k in crd.get("outliers") or []  # type: ignore[assignment, union-attr]
+                                                          if isinstance(cmed, (int, float)) and crv.get(k, cmed) < cmed])
+                floor = crd.get("threshold")
                 pbody += ("<h3>Members' genotypes in the graph VCF</h3>"
-                          + _cards([("members", sv.fmt(len(members))), ("median call rate", sv.fmt((mdist.get("call_rate") or {}).get("median"), 4)),
-                                    (f"call rate below {sv.fmt(thr.get('pg_member_call_rate_min'), 2)}", sv.fmt(len(low))),
-                                    ("median singletons", sv.fmt((mdist.get("n_singletons") or {}).get("median")))])
+                          + _cards([("members", sv.fmt(len(members))), ("median call rate", sv.fmt(cmed, 4)),
+                                    ("low for this cohort", sv.fmt(len(rel)))]
+                                   + ([(f"call rate below {sv.fmt(floor, 2)}", sv.fmt(len(low)))] if floor else [])
+                                   + [("median singletons", sv.fmt((mdist.get("n_singletons") or {}).get("median")))])
                           + sv.strip(groups, width=700)
+                          + (("<p>Members with a low call rate for this cohort"
+                              + (f" (below {sv.fmt(crd.get('low_bound'), 4)})" if crd.get("low_bound") is not None else "")
+                              + ": " + ", ".join(str(link(x)) for x in rel) + ".</p>") if rel else "")  # type: ignore[arg-type]
                           + (("<p>Members below the call-rate threshold: " + ", ".join(str(link(x)) for x in low) + ".</p>") if low else "")  # type: ignore[arg-type]
                           + "<details><summary>per member</summary>"
                           + _table(["sample", "call rate", "het", "hom-alt", "hom-ref", "singletons", "missing", "sites"],
                                    [[link(m.get("sample_id")), sv.fmt(m.get("call_rate"), 4), sv.fmt(m.get("n_hets")), sv.fmt(m.get("n_nonref_hom")), sv.fmt(m.get("n_ref_hom")),
                                      sv.fmt(m.get("n_singletons")), sv.fmt(m.get("n_missing")), sv.fmt(m.get("n_sites"))] for m in members]) + "</details>"
-                          + "<p class='small muted'>bcftools stats over the vcfwave VCF: a missing genotype is a site where the member has no assembled sequence, so the call "
-                            "rate is the member's assembly coverage of the graph; singletons are alleles only this member carries. The threshold is a signal for the next "
-                            "cohort freeze, not a sample flag.</p>")
+                          + "<p class='small muted'>bcftools stats over the vcfwave VCF: a genotype is missing when either haplotype of the member has no assembled "
+                            "sequence at the site, so the call rate is the share of sites both haplotypes cover (the frequency summary's call rate counts a member "
+                            "with one haplotype there as called, and is higher). It follows the contiguity of the assembly, and it falls as a cohort grows, because "
+                            "the sites more members add lie in regions fewer haplotypes cross: it is read against the cohort's own median. A member is listed when "
+                            "it lies below the median by more than three scaled MADs (from four members up), or below pg_member_call_rate_min when a site sets "
+                            "one: a signal for the next cohort freeze, not a sample flag. Singletons are alleles only this member carries.</p>")
             pm: list[dict[str, str]] = cp.get("samples", [])  # type: ignore[assignment]
             if pm:
                 cs: dict[str, object] = cp.get("contig_sizes") or {}  # type: ignore[assignment]
